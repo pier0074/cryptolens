@@ -55,6 +55,14 @@ def format_time(seconds):
         return f"{seconds/3600:.1f}h"
 
 
+def progress_bar(current, total, width=30, prefix=''):
+    """Generate a progress bar string"""
+    pct = current / total if total > 0 else 0
+    filled = int(width * pct)
+    bar = '█' * filled + '░' * (width - filled)
+    return f"{prefix}[{bar}] {pct*100:5.1f}%"
+
+
 def fetch_symbol_with_logging(app, symbol_name, days):
     """
     Fetch historical data for a single symbol with detailed logging
@@ -162,31 +170,26 @@ def fetch_symbol_with_logging(app, symbol_name, days):
                 db.session.commit()
                 total_new += new_in_batch
 
-                # Progress logging (every 10% or every 50 batches)
-                pct = int((batch_num / total_batches) * 100)
-                if pct >= last_log_pct + 10 or batch_num % 50 == 0:
-                    last_log_pct = pct
-                    elapsed = time.time() - batch_start
-                    rate = batch_num / elapsed if elapsed > 0 else 0
-                    eta = (total_batches - batch_num) / rate if rate > 0 else 0
+                # Progress bar update (every batch for smooth animation)
+                elapsed = time.time() - batch_start
+                rate = batch_num / elapsed if elapsed > 0 else 0
+                eta = (total_batches - batch_num) / rate if rate > 0 else 0
+                current_date = datetime.fromtimestamp(current_since / 1000, tz=timezone.utc).strftime('%Y-%m-%d')
 
-                    current_date = datetime.fromtimestamp(current_since / 1000, tz=timezone.utc).strftime('%Y-%m-%d')
+                # In-place progress bar
+                bar = progress_bar(batch_num, total_batches)
+                status = f"\r   {bar} | {current_date} | {total_new:,} candles | ETA: {format_time(eta)}    "
+                print(status, end='', flush=True)
 
-                    print(f"   [{pct:3d}%] Batch {batch_num}/{total_batches} | "
-                          f"Date: {current_date} | "
-                          f"New: {total_new:,} | "
-                          f"ETA: {format_time(eta)}")
-                    sys.stdout.flush()
-
-                    # Save progress checkpoint every 50 batches
-                    if batch_num % 50 == 0:
-                        progress = load_progress()
-                        progress['in_progress'][symbol_name] = {
-                            'last_timestamp': current_since,
-                            'candles_fetched': total_new,
-                            'batch': batch_num
-                        }
-                        save_progress(progress)
+                # Save progress checkpoint every 50 batches
+                if batch_num % 50 == 0:
+                    progress = load_progress()
+                    progress['in_progress'][symbol_name] = {
+                        'last_timestamp': current_since,
+                        'candles_fetched': total_new,
+                        'batch': batch_num
+                    }
+                    save_progress(progress)
 
                 # Move to next batch - use last timestamp to avoid gaps
                 if ohlcv:
@@ -204,6 +207,7 @@ def fetch_symbol_with_logging(app, symbol_name, days):
                 continue
 
         # Aggregate to higher timeframes
+        print()  # New line after progress bar
         print(f"   Aggregating to higher timeframes...")
         sys.stdout.flush()
         agg_results = aggregate_all_timeframes(symbol_name)
