@@ -177,7 +177,7 @@ def generate_confluence_signal(symbol: str) -> Optional[Signal]:
     Returns:
         Signal if confluence threshold met, else None
     """
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     # Settings for relaxed trading
     min_confluence = int(Setting.get('min_confluence', '3'))  # Require 3+ timeframes
@@ -199,7 +199,7 @@ def generate_confluence_signal(symbol: str) -> Optional[Signal]:
         return None  # Skip if no higher timeframe confirmation
 
     # Check for recent signal on same symbol/direction (cooldown)
-    cooldown_time = datetime.utcnow() - timedelta(hours=cooldown_hours)
+    cooldown_time = datetime.now(timezone.utc) - timedelta(hours=cooldown_hours)
     recent_signal = Signal.query.filter(
         Signal.symbol_id == sym.id,
         Signal.direction == ('long' if confluence['dominant'] == 'bullish' else 'short'),

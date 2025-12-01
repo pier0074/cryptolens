@@ -245,7 +245,7 @@ class LiquiditySweepDetector(PatternDetector):
             if result['status'] != pattern.status:
                 pattern.status = result['status']
                 if result['status'] == 'filled':
-                    pattern.filled_at = int(pd.Timestamp.utcnow().timestamp() * 1000)
+                    pattern.filled_at = int(pd.Timestamp.now(tz="UTC").timestamp() * 1000)
                 updated += 1
 
             pattern.fill_percentage = result.get('fill_percentage', 0)

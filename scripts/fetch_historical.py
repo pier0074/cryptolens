@@ -29,7 +29,7 @@ def load_progress():
                 return json.load(f)
     except Exception:
         pass
-    return {'completed': [], 'started_at': None}
+    return {'completed': [], 'in_progress': {}, 'started_at': None}
 
 
 def save_progress(progress):
@@ -58,30 +58,42 @@ def format_time(seconds):
 def fetch_symbol_with_logging(app, symbol_name, days):
     """
     Fetch historical data for a single symbol with detailed logging
+    Uses Binance (1000 candles/batch) with batch DB checking for speed
     """
     import ccxt
     from datetime import timedelta
 
     with app.app_context():
-        exchange = ccxt.kucoin({'enableRateLimit': True})
+        # Use Binance for faster fetching (1000 candles vs 500)
+        exchange = ccxt.binance({
+            'enableRateLimit': True,
+            'options': {'defaultType': 'spot'}
+        })
 
         # Get or create symbol
         sym = Symbol.query.filter_by(symbol=symbol_name).first()
         if not sym:
-            sym = Symbol(symbol=symbol_name, exchange='kucoin')
+            sym = Symbol(symbol=symbol_name, exchange='binance')
             db.session.add(sym)
             db.session.commit()
 
         # Calculate time range
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         start_time = now - timedelta(days=days)
         since = int(start_time.timestamp() * 1000)
         now_ts = int(now.timestamp() * 1000)
 
-        # Timeframe settings
+        # Check for resume point from previous run
+        progress = load_progress()
+        if symbol_name in progress.get('in_progress', {}):
+            resume_info = progress['in_progress'][symbol_name]
+            since = resume_info['last_timestamp']
+            print(f"   ⏩ Resuming from checkpoint (batch {resume_info['batch']}, {resume_info['candles_fetched']:,} candles already saved)")
+
+        # Timeframe settings - Binance allows 1000 candles per request
         timeframe = '1m'
         candle_duration = 60 * 1000  # 1 minute in ms
-        batch_size = 500
+        batch_size = 1000  # Binance limit
 
         # Calculate totals
         total_candles_needed = (now_ts - since) // candle_duration
@@ -108,50 +120,56 @@ def fetch_symbol_with_logging(app, symbol_name, days):
                 ohlcv = exchange.fetch_ohlcv(symbol_name, timeframe, since=current_since, limit=batch_size)
 
                 if not ohlcv:
-                    # No more data
                     break
 
-                # Save candles
+                # Batch check existing timestamps (much faster than individual queries)
+                timestamps = [c[0] for c in ohlcv]
+                existing_timestamps = set(
+                    c.timestamp for c in Candle.query.filter(
+                        Candle.symbol_id == sym.id,
+                        Candle.timeframe == timeframe,
+                        Candle.timestamp.in_(timestamps)
+                    ).all()
+                )
+
+                # Save only new candles
                 new_in_batch = 0
                 for candle in ohlcv:
                     timestamp, open_price, high, low, close, volume = candle
 
-                    # Check if exists
-                    existing = Candle.query.filter_by(
+                    if timestamp in existing_timestamps:
+                        total_existing += 1
+                        continue
+
+                    # Validate OHLC data
+                    if any(v is None or v <= 0 for v in [open_price, high, low, close]):
+                        continue
+
+                    new_candle = Candle(
                         symbol_id=sym.id,
                         timeframe=timeframe,
-                        timestamp=timestamp
-                    ).first()
-
-                    if not existing:
-                        new_candle = Candle(
-                            symbol_id=sym.id,
-                            timeframe=timeframe,
-                            timestamp=timestamp,
-                            open=open_price,
-                            high=high,
-                            low=low,
-                            close=close,
-                            volume=volume
-                        )
-                        db.session.add(new_candle)
-                        new_in_batch += 1
-                    else:
-                        total_existing += 1
+                        timestamp=timestamp,
+                        open=open_price,
+                        high=high,
+                        low=low,
+                        close=close,
+                        volume=volume or 0
+                    )
+                    db.session.add(new_candle)
+                    new_in_batch += 1
 
                 # Commit this batch
                 db.session.commit()
                 total_new += new_in_batch
 
-                # Progress logging (every 10% or every 100 batches)
+                # Progress logging (every 10% or every 50 batches)
                 pct = int((batch_num / total_batches) * 100)
-                if pct >= last_log_pct + 10 or batch_num % 100 == 0:
+                if pct >= last_log_pct + 10 or batch_num % 50 == 0:
                     last_log_pct = pct
                     elapsed = time.time() - batch_start
                     rate = batch_num / elapsed if elapsed > 0 else 0
                     eta = (total_batches - batch_num) / rate if rate > 0 else 0
 
-                    # Show date being fetched
                     current_date = datetime.fromtimestamp(current_since / 1000, tz=timezone.utc).strftime('%Y-%m-%d')
 
                     print(f"   [{pct:3d}%] Batch {batch_num}/{total_batches} | "
@@ -160,11 +178,24 @@ def fetch_symbol_with_logging(app, symbol_name, days):
                           f"ETA: {format_time(eta)}")
                     sys.stdout.flush()
 
-                # Move to next batch
-                current_since += batch_size * candle_duration
+                    # Save progress checkpoint every 50 batches
+                    if batch_num % 50 == 0:
+                        progress = load_progress()
+                        progress['in_progress'][symbol_name] = {
+                            'last_timestamp': current_since,
+                            'candles_fetched': total_new,
+                            'batch': batch_num
+                        }
+                        save_progress(progress)
 
-                # Rate limiting
-                time.sleep(exchange.rateLimit / 1000)
+                # Move to next batch - use last timestamp to avoid gaps
+                if ohlcv:
+                    current_since = ohlcv[-1][0] + candle_duration
+                else:
+                    current_since += batch_size * candle_duration
+
+                # Binance rate limit is generous, minimal delay needed
+                time.sleep(0.1)
 
             except Exception as e:
                 print(f"   ⚠️  Batch {batch_num} error: {e}")
@@ -177,6 +208,12 @@ def fetch_symbol_with_logging(app, symbol_name, days):
         sys.stdout.flush()
         agg_results = aggregate_all_timeframes(symbol_name)
         agg_count = sum(agg_results.values())
+
+        # Clean up in_progress entry now that symbol is complete
+        progress = load_progress()
+        if symbol_name in progress.get('in_progress', {}):
+            del progress['in_progress'][symbol_name]
+            save_progress(progress)
 
         elapsed = time.time() - batch_start
         print(f"   ✅ Done! {total_new:,} new + {total_existing:,} existing | "
@@ -213,7 +250,7 @@ def main():
         if not symbols:
             print("No symbols found. Initializing default symbols...")
             for symbol_name in Config.SYMBOLS:
-                symbol = Symbol(symbol=symbol_name, exchange='kucoin')
+                symbol = Symbol(symbol=symbol_name, exchange='binance')
                 db.session.add(symbol)
             db.session.commit()
             symbols = Symbol.query.filter_by(is_active=True).all()

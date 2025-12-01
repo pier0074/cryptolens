@@ -3,7 +3,7 @@ from app.models import Symbol, Pattern, Signal, Candle, Backtest
 from app.config import Config
 from app.services.patterns import PATTERN_TYPES
 from sqlalchemy import func
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
@@ -83,7 +83,7 @@ def analytics():
     bearish_count = Pattern.query.filter_by(direction='bearish', status='active').count()
 
     # Recent pattern activity (last 24h)
-    day_ago = datetime.utcnow() - timedelta(days=1)
+    day_ago = datetime.now(timezone.utc) - timedelta(days=1)
     recent_patterns = Pattern.query.filter(Pattern.created_at >= day_ago).count()
 
     # Backtest stats

@@ -43,8 +43,12 @@ def create_app(config_name=None):
     app.register_blueprint(settings_bp, url_prefix='/settings')
     app.register_blueprint(api_bp, url_prefix='/api')
 
-    # Create database tables
+    # Create database tables and enable WAL mode for better concurrency
     with app.app_context():
         db.create_all()
+        # Enable WAL mode - allows concurrent reads/writes
+        if 'sqlite' in app.config['SQLALCHEMY_DATABASE_URI']:
+            db.session.execute(db.text('PRAGMA journal_mode=WAL'))
+            db.session.commit()
 
     return app

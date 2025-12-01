@@ -3,7 +3,7 @@ Notification Service
 Sends push notifications via NTFY.sh
 """
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 from app.models import Signal, Symbol, Pattern, Notification, Setting
 import json
 from app.config import Config
@@ -135,7 +135,7 @@ def notify_signal(signal: Signal) -> bool:
     # Update signal status
     if success:
         signal.status = 'notified'
-        signal.notified_at = datetime.utcnow()
+        signal.notified_at = datetime.now(timezone.utc)
 
     db.session.commit()
 

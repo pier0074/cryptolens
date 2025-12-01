@@ -1,18 +1,27 @@
 """
 Data Fetcher Service
-Fetches OHLC candles from Kucoin via CCXT
+Fetches OHLC candles via CCXT (Binance by default - 1000 candles/request)
 """
 import ccxt
 import time
-from datetime import datetime, timedelta
+import logging
+from datetime import datetime, timedelta, timezone
 from app import db
 from app.models import Symbol, Candle
 from app.config import Config
 
+logger = logging.getLogger(__name__)
+
+# Binance allows 1000 candles per request (vs Kucoin's 500)
+BATCH_SIZE = 1000
+
 
 def get_exchange():
     """Get configured exchange instance"""
-    return ccxt.kucoin({
+    exchange_id = getattr(Config, 'EXCHANGE', 'binance')
+
+    exchange_class = getattr(ccxt, exchange_id, ccxt.binance)
+    return exchange_class({
         'enableRateLimit': True,
         'options': {
             'defaultType': 'spot'
@@ -20,14 +29,14 @@ def get_exchange():
     })
 
 
-def fetch_candles(symbol: str, timeframe: str, limit: int = 500, since: int = None) -> tuple:
+def fetch_candles(symbol: str, timeframe: str, limit: int = BATCH_SIZE, since: int = None) -> tuple:
     """
-    Fetch candles for a symbol/timeframe from Kucoin
+    Fetch candles for a symbol/timeframe
 
     Args:
         symbol: Trading pair (e.g., 'BTC/USDT')
         timeframe: Candle timeframe (e.g., '1m', '5m', '1h')
-        limit: Number of candles to fetch (max 500 for Kucoin)
+        limit: Number of candles to fetch (max 1000 for Binance)
         since: Unix timestamp in ms to fetch from
 
     Returns:
@@ -38,7 +47,7 @@ def fetch_candles(symbol: str, timeframe: str, limit: int = 500, since: int = No
     # Get or create symbol
     sym = Symbol.query.filter_by(symbol=symbol).first()
     if not sym:
-        sym = Symbol(symbol=symbol, exchange='kucoin')
+        sym = Symbol(symbol=symbol, exchange=Config.EXCHANGE)
         db.session.add(sym)
         db.session.commit()
 
@@ -46,37 +55,58 @@ def fetch_candles(symbol: str, timeframe: str, limit: int = 500, since: int = No
         # Fetch OHLCV data
         ohlcv = exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
 
+        if not ohlcv:
+            return (0, 0)
+
+        # Get existing timestamps in one query (batch check)
+        timestamps = [c[0] for c in ohlcv]
+        existing_timestamps = set(
+            c.timestamp for c in Candle.query.filter(
+                Candle.symbol_id == sym.id,
+                Candle.timeframe == timeframe,
+                Candle.timestamp.in_(timestamps)
+            ).all()
+        )
+
         count = 0
         for candle in ohlcv:
             timestamp, open_price, high, low, close, volume = candle
 
-            # Check if candle already exists
-            existing = Candle.query.filter_by(
+            # Skip if exists (using batch-queried set)
+            if timestamp in existing_timestamps:
+                continue
+
+            # Validate OHLC data
+            if high < low or open_price <= 0 or close <= 0:
+                continue
+
+            new_candle = Candle(
                 symbol_id=sym.id,
                 timeframe=timeframe,
-                timestamp=timestamp
-            ).first()
+                timestamp=timestamp,
+                open=open_price,
+                high=high,
+                low=low,
+                close=close,
+                volume=volume
+            )
+            db.session.add(new_candle)
+            count += 1
 
-            if not existing:
-                new_candle = Candle(
-                    symbol_id=sym.id,
-                    timeframe=timeframe,
-                    timestamp=timestamp,
-                    open=open_price,
-                    high=high,
-                    low=low,
-                    close=close,
-                    volume=volume
-                )
-                db.session.add(new_candle)
-                count += 1
-
-        # Commit after each batch for safety
+        # Commit after each batch
         db.session.commit()
         return (count, len(ohlcv))
 
+    except ccxt.NetworkError as e:
+        logger.error(f"Network error fetching {symbol} {timeframe}: {e}")
+        db.session.rollback()
+        return (0, 0)
+    except ccxt.ExchangeError as e:
+        logger.error(f"Exchange error fetching {symbol} {timeframe}: {e}")
+        db.session.rollback()
+        return (0, 0)
     except Exception as e:
-        print(f"Error fetching {symbol} {timeframe}: {e}")
+        logger.error(f"Error fetching {symbol} {timeframe}: {e}")
         db.session.rollback()
         return (0, 0)
 
@@ -98,10 +128,11 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
     import sys
     exchange = get_exchange()
 
-    # Calculate start timestamp
-    start_time = datetime.utcnow() - timedelta(days=days)
+    # Calculate start timestamp (timezone-aware)
+    now_dt = datetime.now(timezone.utc)
+    start_time = now_dt - timedelta(days=days)
     since = int(start_time.timestamp() * 1000)
-    now = int(datetime.utcnow().timestamp() * 1000)
+    now = int(now_dt.timestamp() * 1000)
 
     # Timeframe to milliseconds mapping
     tf_ms = {
@@ -115,9 +146,9 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
 
     candle_duration = tf_ms.get(timeframe, 60 * 1000)
 
-    # Calculate total batches needed
+    # Calculate total batches needed (using BATCH_SIZE)
     total_candles_needed = (now - since) // candle_duration
-    total_batches = max(1, (total_candles_needed // 500) + 1)
+    total_batches = max(1, (total_candles_needed // BATCH_SIZE) + 1)
 
     if verbose:
         print(f"    📊 {symbol} - Fetching ~{total_candles_needed:,} candles in {total_batches} batches...")
@@ -134,7 +165,7 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
         batch_num += 1
 
         try:
-            new_count, api_count = fetch_candles(symbol, timeframe, limit=500, since=current_since)
+            new_count, api_count = fetch_candles(symbol, timeframe, limit=BATCH_SIZE, since=current_since)
             total_new += new_count
             total_api += api_count
 
@@ -153,25 +184,24 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
             if progress_callback:
                 progress_callback(batch_num, total_batches, total_new)
 
-            # Verbose progress (every 5% or 20 batches for more frequent updates)
+            # Verbose progress (every 10% or 50 batches)
             if verbose:
                 pct = int((batch_num / total_batches) * 100)
-                if pct >= last_progress + 5 or batch_num % 20 == 0:
+                if pct >= last_progress + 10 or batch_num % 50 == 0:
                     last_progress = pct
                     status = f"new: {total_new:,}" if new_count > 0 else "exists"
-                    print(f"    📈 {symbol}: {batch_num}/{total_batches} ({pct}%) [{status}] (saved to DB)")
+                    print(f"    📈 {symbol}: {batch_num}/{total_batches} ({pct}%) [{status}]")
                     sys.stdout.flush()
 
             # Move to next batch
-            current_since += 500 * candle_duration
+            current_since += BATCH_SIZE * candle_duration
 
-            # Rate limiting
-            time.sleep(exchange.rateLimit / 1000)
+            # Rate limiting (Binance is faster)
+            time.sleep(max(exchange.rateLimit / 1000, 0.1))
 
         except Exception as e:
-            print(f"    ⚠️  {symbol} batch {batch_num}: {e}")
-            sys.stdout.flush()
-            time.sleep(2)  # Wait a bit before retrying
+            logger.warning(f"{symbol} batch {batch_num}: {e}")
+            time.sleep(1)
             continue
 
     if verbose:
@@ -194,7 +224,7 @@ def fetch_all_symbols(timeframe: str = '1m', limit: int = 200) -> dict:
     for symbol in symbols:
         new_count, _ = fetch_candles(symbol.symbol, timeframe, limit=limit)
         results[symbol.symbol] = new_count
-        time.sleep(0.1)  # Small delay between symbols
+        time.sleep(0.05)  # Small delay between symbols
 
     return results
 
@@ -217,7 +247,7 @@ def get_latest_candles(symbol: str, timeframe: str, limit: int = 200) -> list:
 
     # If no candles or stale, fetch fresh
     if not candles:
-        fetch_candles(symbol, timeframe, limit=limit)  # Returns tuple, we ignore it
+        fetch_candles(symbol, timeframe, limit=limit)
         candles = Candle.query.filter_by(
             symbol_id=sym.id,
             timeframe=timeframe

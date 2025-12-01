@@ -8,6 +8,10 @@ class Config:
     SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
     SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///data/cryptolens.db')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    # SQLite timeout to prevent "database is locked" errors
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'connect_args': {'timeout': 30}  # Wait up to 30 seconds for locks
+    }
 
     # NTFY.sh Notifications
     NTFY_TOPIC = os.getenv('NTFY_TOPIC', 'cryptolens-signals')
@@ -30,8 +34,8 @@ class Config:
     # Timeframes
     TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
 
-    # Exchange
-    EXCHANGE = 'kucoin'
+    # Exchange (binance has better rate limits and 1000 candles/request)
+    EXCHANGE = 'binance'
 
 
 class DevelopmentConfig(Config):
