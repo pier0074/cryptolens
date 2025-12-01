@@ -4,7 +4,8 @@ Sends push notifications via NTFY.sh
 """
 import requests
 from datetime import datetime
-from app.models import Signal, Symbol, Notification, Setting
+from app.models import Signal, Symbol, Pattern, Notification, Setting
+import json
 from app.config import Config
 from app import db
 
@@ -65,6 +66,28 @@ def notify_signal(signal: Signal) -> bool:
     symbol = Symbol.query.get(signal.symbol_id)
     symbol_name = symbol.symbol if symbol else 'Unknown'
 
+    # Get pattern type
+    pattern = Pattern.query.get(signal.pattern_id) if signal.pattern_id else None
+    pattern_type = 'Unknown'
+    pattern_tf = ''
+    if pattern:
+        pattern_types = {
+            'imbalance': 'FVG (Fair Value Gap)',
+            'order_block': 'Order Block',
+            'liquidity_sweep': 'Liquidity Sweep'
+        }
+        pattern_type = pattern_types.get(pattern.pattern_type, pattern.pattern_type)
+        pattern_tf = pattern.timeframe
+
+    # Get aligned timeframes
+    aligned_tfs = []
+    if signal.timeframes_aligned:
+        try:
+            aligned_tfs = json.loads(signal.timeframes_aligned)
+        except:
+            pass
+    tfs_str = ', '.join(aligned_tfs) if aligned_tfs else pattern_tf
+
     # Build notification
     direction_emoji = "🟢" if signal.direction == 'long' else "🔴"
     direction_text = "LONG" if signal.direction == 'long' else "SHORT"
@@ -82,7 +105,9 @@ def notify_signal(signal: Signal) -> bool:
     message = (
         f"📊 Symbol: {symbol_name}\n"
         f"📈 Direction: {direction_text}\n"
-        f"💰 Entry: ${entry:,.4f}\n"
+        f"🔍 Pattern: {pattern_type}\n"
+        f"⏱️ Timeframes: {tfs_str}\n"
+        f"💰 Limit Entry: ${entry:,.4f}\n"
         f"🛑 Stop Loss: ${sl:,.4f} ({sl_pct:.2f}%)\n"
         f"🎯 TP1: ${tp1:,.4f} ({tp1_pct:.2f}%)\n"
         f"⚖️ R:R {signal.risk_reward:.1f}\n"

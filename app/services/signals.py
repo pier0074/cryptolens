@@ -177,7 +177,12 @@ def generate_confluence_signal(symbol: str) -> Optional[Signal]:
     Returns:
         Signal if confluence threshold met, else None
     """
-    min_confluence = int(Setting.get('min_confluence', '2'))
+    from datetime import datetime, timedelta
+
+    # Settings for relaxed trading
+    min_confluence = int(Setting.get('min_confluence', '3'))  # Require 3+ timeframes
+    cooldown_hours = int(Setting.get('signal_cooldown_hours', '4'))  # 4 hour cooldown per symbol/direction
+    require_htf = Setting.get('require_htf', 'true') == 'true'  # Require higher timeframe (4h or 1d)
 
     confluence = check_confluence(symbol)
 
@@ -187,6 +192,22 @@ def generate_confluence_signal(symbol: str) -> Optional[Signal]:
     sym = Symbol.query.filter_by(symbol=symbol).first()
     if not sym:
         return None
+
+    # Check if higher timeframe is aligned (for relaxed trading)
+    htf_aligned = any(tf in confluence['aligned_timeframes'] for tf in ['4h', '1d'])
+    if require_htf and not htf_aligned:
+        return None  # Skip if no higher timeframe confirmation
+
+    # Check for recent signal on same symbol/direction (cooldown)
+    cooldown_time = datetime.utcnow() - timedelta(hours=cooldown_hours)
+    recent_signal = Signal.query.filter(
+        Signal.symbol_id == sym.id,
+        Signal.direction == ('long' if confluence['dominant'] == 'bullish' else 'short'),
+        Signal.created_at >= cooldown_time
+    ).first()
+
+    if recent_signal:
+        return None  # Already notified recently, skip
 
     # Get the pattern from the highest timeframe in alignment
     tf_priority = ['1d', '4h', '1h', '15m', '5m', '1m']
@@ -215,10 +236,9 @@ def generate_confluence_signal(symbol: str) -> Optional[Signal]:
         db.session.add(signal)
         db.session.commit()
 
-        # Check if we should notify
-        if confluence['score'] >= min_confluence:
-            from app.services.notifier import notify_signal
-            notify_signal(signal)
+        # Notify for high-quality signals
+        from app.services.notifier import notify_signal
+        notify_signal(signal)
 
     return signal
 
