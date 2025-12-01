@@ -4,7 +4,6 @@ Sends push notifications via NTFY.sh
 """
 import requests
 from datetime import datetime
-from urllib.parse import quote
 from app.models import Signal, Symbol, Notification, Setting
 from app.config import Config
 from app import db
@@ -26,17 +25,15 @@ def send_notification(topic: str, title: str, message: str, priority: int = 3,
         True if successful
     """
     try:
-        # URL-encode title to handle emojis and special characters (NTFY supports this)
-        encoded_title = quote(title, safe='')
-
+        # Use JSON API to properly handle UTF-8 titles with emojis
         response = requests.post(
-            f"{Config.NTFY_URL}/{topic}",
-            data=message.encode('utf-8'),
-            headers={
-                "Title": encoded_title,
-                "Priority": str(priority),
-                "Tags": tags,
-                "Encoding": "UTF-8"
+            f"{Config.NTFY_URL}",
+            json={
+                "topic": topic,
+                "title": title,
+                "message": message,
+                "priority": priority,
+                "tags": tags.split(",")
             },
             timeout=10
         )
@@ -79,15 +76,17 @@ def notify_signal(signal: Signal) -> bool:
     sl = signal.stop_loss
     tp1 = signal.take_profit_1
 
-    sl_pct = abs((sl - entry) / entry * 100)
-    tp1_pct = abs((tp1 - entry) / entry * 100)
+    sl_pct = abs((sl - entry) / entry * 100) if entry > 0 else 0
+    tp1_pct = abs((tp1 - entry) / entry * 100) if entry > 0 else 0
 
     message = (
-        f"Entry: ${entry:,.2f}\n"
-        f"Stop Loss: ${sl:,.2f} ({sl_pct:.2f}%)\n"
-        f"TP1: ${tp1:,.2f} ({tp1_pct:.2f}%)\n"
-        f"R:R {signal.risk_reward:.1f}\n"
-        f"Confluence: {signal.confluence_score}/6 TFs"
+        f"📊 Symbol: {symbol_name}\n"
+        f"📈 Direction: {direction_text}\n"
+        f"💰 Entry: ${entry:,.4f}\n"
+        f"🛑 Stop Loss: ${sl:,.4f} ({sl_pct:.2f}%)\n"
+        f"🎯 TP1: ${tp1:,.4f} ({tp1_pct:.2f}%)\n"
+        f"⚖️ R:R {signal.risk_reward:.1f}\n"
+        f"🔗 Confluence: {signal.confluence_score}/6 TFs"
     )
 
     # Send notification

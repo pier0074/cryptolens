@@ -53,16 +53,28 @@ def generate_signal_from_pattern(pattern: Pattern, current_price: float = None) 
 
     # Get risk parameters from settings
     default_rr = float(Setting.get('default_rr', '3.0'))
+    min_risk_pct = float(Setting.get('min_risk_pct', '0.5'))  # Minimum 0.5% risk
 
     # Calculate ATR for buffer
     atr = calculate_atr(symbol.symbol, pattern.timeframe)
-    buffer = atr * 0.5 if atr > 0 else (pattern.zone_high - pattern.zone_low) * 0.1
+
+    # Use ATR-based buffer or minimum 0.5% of zone midpoint
+    zone_mid = (pattern.zone_high + pattern.zone_low) / 2
+    min_buffer = zone_mid * (min_risk_pct / 100)
+    buffer = max(atr * 0.5, min_buffer) if atr > 0 else min_buffer
 
     if pattern.direction == 'bullish':
         # Long signal
         entry = pattern.zone_high  # Enter at top of imbalance
         stop_loss = pattern.zone_low - buffer  # SL below zone
         risk = entry - stop_loss
+
+        # Ensure minimum risk percentage
+        risk_pct = (risk / entry) * 100 if entry > 0 else 0
+        if risk_pct < min_risk_pct:
+            # Adjust stop loss to meet minimum risk
+            risk = entry * (min_risk_pct / 100)
+            stop_loss = entry - risk
 
         take_profit_1 = entry + risk  # 1:1
         take_profit_2 = entry + (risk * 2)  # 1:2
@@ -75,6 +87,13 @@ def generate_signal_from_pattern(pattern: Pattern, current_price: float = None) 
         entry = pattern.zone_low  # Enter at bottom of imbalance
         stop_loss = pattern.zone_high + buffer  # SL above zone
         risk = stop_loss - entry
+
+        # Ensure minimum risk percentage
+        risk_pct = (risk / entry) * 100 if entry > 0 else 0
+        if risk_pct < min_risk_pct:
+            # Adjust stop loss to meet minimum risk
+            risk = entry * (min_risk_pct / 100)
+            stop_loss = entry + risk
 
         take_profit_1 = entry - risk  # 1:1
         take_profit_2 = entry - (risk * 2)  # 1:2
