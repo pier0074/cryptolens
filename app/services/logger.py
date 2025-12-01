@@ -40,22 +40,41 @@ def log(category: str, message: str, level: str = 'INFO',
 
     # Database log (in try/except to not break if DB unavailable)
     try:
-        from app import db
+        from flask import current_app, has_app_context
+        from app import db, create_app
         from app.models import Log
 
-        log_entry = Log(
-            timestamp=datetime.now(timezone.utc),
-            category=category,
-            level=level,
-            message=message,
-            symbol=symbol,
-            timeframe=timeframe,
-            details=json.dumps(details) if details else None
-        )
-        db.session.add(log_entry)
-        db.session.commit()
+        # Create app context if needed
+        if has_app_context():
+            log_entry = Log(
+                timestamp=datetime.now(timezone.utc),
+                category=category,
+                level=level,
+                message=message,
+                symbol=symbol,
+                timeframe=timeframe,
+                details=json.dumps(details) if details else None
+            )
+            db.session.add(log_entry)
+            db.session.commit()
+        else:
+            # Background task - create own context
+            app = create_app()
+            with app.app_context():
+                log_entry = Log(
+                    timestamp=datetime.now(timezone.utc),
+                    category=category,
+                    level=level,
+                    message=message,
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    details=json.dumps(details) if details else None
+                )
+                db.session.add(log_entry)
+                db.session.commit()
     except Exception as e:
-        console_logger.warning(f"Failed to write log to DB: {e}")
+        # Don't spam console with DB errors
+        pass
 
 
 def log_fetch(message: str, symbol: str = None, timeframe: str = None, **kwargs):
