@@ -1,5 +1,53 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from app import db
+
+
+# Log categories
+LOG_CATEGORIES = {
+    'fetch': 'Data Fetching',
+    'aggregate': 'Aggregation',
+    'scan': 'Pattern Scanning',
+    'signal': 'Signal Generation',
+    'notify': 'Notifications',
+    'system': 'System',
+    'error': 'Errors'
+}
+
+# Log levels
+LOG_LEVELS = ['DEBUG', 'INFO', 'WARNING', 'ERROR']
+
+
+class Log(db.Model):
+    """System Logs"""
+    __tablename__ = 'logs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    timestamp = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    category = db.Column(db.String(20), nullable=False)  # fetch, aggregate, scan, signal, notify, system, error
+    level = db.Column(db.String(10), default='INFO')  # DEBUG, INFO, WARNING, ERROR
+    message = db.Column(db.Text, nullable=False)
+    symbol = db.Column(db.String(20), nullable=True)  # Optional: related symbol
+    timeframe = db.Column(db.String(5), nullable=True)  # Optional: related timeframe
+    details = db.Column(db.Text, nullable=True)  # Optional: JSON with extra details
+
+    __table_args__ = (
+        db.Index('idx_log_lookup', 'timestamp', 'category', 'level'),
+    )
+
+    def __repr__(self):
+        return f'<Log {self.category} {self.level} {self.message[:50]}>'
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'timestamp': self.timestamp.isoformat() if self.timestamp else None,
+            'category': self.category,
+            'level': self.level,
+            'message': self.message,
+            'symbol': self.symbol,
+            'timeframe': self.timeframe,
+            'details': self.details
+        }
 
 
 class Symbol(db.Model):

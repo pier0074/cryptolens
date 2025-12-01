@@ -8,6 +8,7 @@ from app.models import Signal, Symbol, Pattern, Notification, Setting
 import json
 from app.config import Config
 from app import db
+from app.services.logger import log_notify, log_error
 
 
 def send_notification(topic: str, title: str, message: str, priority: int = 3,
@@ -40,7 +41,7 @@ def send_notification(topic: str, title: str, message: str, priority: int = 3,
         )
         return response.status_code == 200
     except Exception as e:
-        print(f"Notification error: {e}")
+        log_error(f"NTFY notification failed: {e}")
         return False
 
 
@@ -136,6 +137,13 @@ def notify_signal(signal: Signal) -> bool:
     if success:
         signal.status = 'notified'
         signal.notified_at = datetime.now(timezone.utc)
+        log_notify(
+            f"Sent {direction_text} signal notification: Entry ${entry:,.4f}, SL ${sl:,.4f}",
+            symbol=symbol_name,
+            details={'direction': direction_text, 'entry': entry, 'stop_loss': sl, 'confluence': signal.confluence_score}
+        )
+    else:
+        log_notify(f"Failed to send notification", symbol=symbol_name, level='ERROR')
 
     db.session.commit()
 

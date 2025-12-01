@@ -2,14 +2,10 @@
 Scheduler Service
 Automatically fetches candles and scans for patterns at regular intervals
 """
-import logging
 from datetime import datetime
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger('scheduler')
+from app.services.logger import log_fetch, log_aggregate, log_scan, log_signal, log_system, log_error
 
 # Global scheduler instance
 scheduler = None
@@ -17,7 +13,6 @@ scheduler = None
 
 def fetch_latest_candles():
     """Fetch latest candles for all symbols (1m timeframe)"""
-    from flask import current_app
     from app import create_app, db
     from app.models import Symbol
     from app.services.data_fetcher import fetch_candles
@@ -27,6 +22,7 @@ def fetch_latest_candles():
     with app.app_context():
         symbols = Symbol.query.filter_by(is_active=True).all()
         total_fetched = 0
+        symbols_updated = []
 
         for symbol in symbols:
             try:
@@ -36,12 +32,21 @@ def fetch_latest_candles():
 
                 # Quick aggregation for recent candles
                 if new_count > 0:
-                    aggregate_all_timeframes(symbol.symbol)
+                    symbols_updated.append(symbol.symbol)
+                    agg_result = aggregate_all_timeframes(symbol.symbol)
+                    log_aggregate(
+                        f"Aggregated {sum(agg_result.values())} candles",
+                        symbol=symbol.symbol,
+                        details=agg_result
+                    )
 
             except Exception as e:
-                logger.error(f"Error fetching {symbol.symbol}: {e}")
+                log_error(f"Error fetching: {e}", symbol=symbol.symbol)
 
-        logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Fetched {total_fetched} new candles")
+        log_fetch(
+            f"Fetched {total_fetched} new candles from {len(symbols_updated)} symbols",
+            details={'symbols': symbols_updated, 'total': total_fetched}
+        )
         return total_fetched
 
 
@@ -58,18 +63,23 @@ def scan_patterns():
         try:
             # Scan for patterns
             result = scan_all_patterns()
-            logger.info(f"[{datetime.now().strftime('%H:%M:%S')}] Found {result['patterns_found']} patterns")
+            log_scan(
+                f"Found {result['patterns_found']} patterns across {result['symbols_scanned']} symbols",
+                details=result
+            )
 
             # Generate signals for high confluence
             signal_result = scan_and_generate_signals()
             if signal_result['signals_generated'] > 0:
-                logger.info(f"Generated {signal_result['signals_generated']} signals, "
-                           f"sent {signal_result['notifications_sent']} notifications")
+                log_signal(
+                    f"Generated {signal_result['signals_generated']} signals, sent {signal_result['notifications_sent']} notifications",
+                    details=signal_result
+                )
 
             return result
 
         except Exception as e:
-            logger.error(f"Error scanning patterns: {e}")
+            log_error(f"Error scanning patterns: {e}")
             return {'error': str(e)}
 
 
@@ -101,18 +111,17 @@ def update_pattern_status():
                                 updated_count += updated
 
             except Exception as e:
-                logger.error(f"Error updating patterns for {symbol.symbol}: {e}")
+                log_error(f"Error updating patterns: {e}", symbol=symbol.symbol)
 
         if updated_count > 0:
-            logger.info(f"Updated {updated_count} pattern statuses")
+            log_scan(f"Updated {updated_count} pattern statuses (filled/invalidated)")
 
         return updated_count
 
 
 def run_scheduled_tasks():
     """Run all scheduled tasks in sequence"""
-    logger.info(f"\n{'='*40}")
-    logger.info(f"Running scheduled scan at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    log_system(f"Starting scheduled scan cycle")
 
     # 1. Fetch latest candles
     fetch_latest_candles()
@@ -123,7 +132,7 @@ def run_scheduled_tasks():
     # 3. Update existing pattern status
     update_pattern_status()
 
-    logger.info(f"{'='*40}\n")
+    log_system(f"Completed scheduled scan cycle")
 
 
 def start_scheduler(app=None):
@@ -131,7 +140,7 @@ def start_scheduler(app=None):
     global scheduler
 
     if scheduler is not None:
-        logger.warning("Scheduler already running")
+        log_system("Scheduler already running", level='WARNING')
         return scheduler
 
     scheduler = BackgroundScheduler()
@@ -154,7 +163,7 @@ def start_scheduler(app=None):
     )
 
     scheduler.start()
-    logger.info("Scheduler started - scanning every 1 minute")
+    log_system("Scheduler started - scanning every 1 minute")
 
     return scheduler
 
@@ -166,7 +175,7 @@ def stop_scheduler():
     if scheduler:
         scheduler.shutdown()
         scheduler = None
-        logger.info("Scheduler stopped")
+        log_system("Scheduler stopped")
 
 
 def get_scheduler_status():
