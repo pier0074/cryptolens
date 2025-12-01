@@ -4,6 +4,7 @@ CryptoLens - Smart Money Pattern Detection System
 Entry point for the Flask application
 """
 import os
+import socket
 from app import create_app, db
 from app.models import Symbol
 from app.config import Config
@@ -23,13 +24,38 @@ def init_symbols():
         print(f"Initialized {len(Config.SYMBOLS)} symbols")
 
 
+def is_port_available(port):
+    """Check if a port is available"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(('0.0.0.0', port))
+            return True
+        except OSError:
+            return False
+
+
+def find_available_port(start_port=5000, max_attempts=10):
+    """Find an available port starting from start_port"""
+    for i in range(max_attempts):
+        port = start_port + i
+        if is_port_available(port):
+            return port
+    return start_port + max_attempts
+
+
 if __name__ == '__main__':
     # Initialize symbols on first run
     init_symbols()
 
-    # Run the app
-    port = int(os.getenv('PORT', 5000))
+    # Find available port
+    preferred_port = int(os.getenv('PORT', 5000))
     debug = os.getenv('FLASK_ENV', 'development') == 'development'
+
+    if is_port_available(preferred_port):
+        port = preferred_port
+    else:
+        port = find_available_port(preferred_port)
+        print(f"Port {preferred_port} in use, using port {port} instead")
 
     print(f"""
     ╔═══════════════════════════════════════════════════╗
