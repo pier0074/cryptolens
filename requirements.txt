@@ -1,21 +1,21 @@
 # Web Framework
-Flask==3.0.0
-Flask-SQLAlchemy==3.1.1
-python-dotenv==1.0.0
+Flask>=3.0.0
+Flask-SQLAlchemy>=3.1.1
+python-dotenv>=1.0.0
 
 # Data & Exchange
-ccxt==4.1.89
-pandas==2.1.4
-numpy==1.26.2
+ccxt>=4.1.0
+pandas>=2.2.0
+numpy>=2.0.0
 
 # Technical Analysis
-pandas-ta==0.3.14b
+# pandas-ta>=0.3.14b  # Temporarily disabled - compatibility issues
 
 # Notifications
-requests==2.31.0
+requests>=2.31.0
 
 # Scheduler
-APScheduler==3.10.4
+APScheduler>=3.10.4
 
 # Development
-pytest==7.4.3
+pytest>=7.4.0
