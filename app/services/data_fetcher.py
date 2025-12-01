@@ -20,7 +20,7 @@ def get_exchange():
     })
 
 
-def fetch_candles(symbol: str, timeframe: str, limit: int = 500, since: int = None) -> int:
+def fetch_candles(symbol: str, timeframe: str, limit: int = 500, since: int = None) -> tuple:
     """
     Fetch candles for a symbol/timeframe from Kucoin
 
@@ -31,7 +31,7 @@ def fetch_candles(symbol: str, timeframe: str, limit: int = 500, since: int = No
         since: Unix timestamp in ms to fetch from
 
     Returns:
-        Number of candles saved
+        Tuple of (new_candles_saved, total_fetched_from_api)
     """
     exchange = get_exchange()
 
@@ -71,13 +71,14 @@ def fetch_candles(symbol: str, timeframe: str, limit: int = 500, since: int = No
                 db.session.add(new_candle)
                 count += 1
 
+        # Commit after each batch for safety
         db.session.commit()
-        return count
+        return (count, len(ohlcv))
 
     except Exception as e:
         print(f"Error fetching {symbol} {timeframe}: {e}")
         db.session.rollback()
-        return 0
+        return (0, 0)
 
 
 def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callback=None, verbose: bool = True) -> int:
@@ -122,28 +123,43 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
         print(f"    📊 {symbol} - Fetching ~{total_candles_needed:,} candles in {total_batches} batches...")
         sys.stdout.flush()
 
-    total_count = 0
+    total_new = 0
+    total_api = 0
     current_since = since
     batch_num = 0
     last_progress = 0
+    empty_batches = 0
 
     while current_since < now:
         batch_num += 1
 
         try:
-            count = fetch_candles(symbol, timeframe, limit=500, since=current_since)
-            total_count += count
+            new_count, api_count = fetch_candles(symbol, timeframe, limit=500, since=current_since)
+            total_new += new_count
+            total_api += api_count
+
+            # Track empty API responses (means we've caught up)
+            if api_count == 0:
+                empty_batches += 1
+                if empty_batches >= 3:
+                    if verbose:
+                        print(f"    ℹ️  {symbol}: No more data from API, stopping early")
+                        sys.stdout.flush()
+                    break
+            else:
+                empty_batches = 0
 
             # Progress callback
             if progress_callback:
-                progress_callback(batch_num, total_batches, total_count)
+                progress_callback(batch_num, total_batches, total_new)
 
-            # Verbose progress (every 10% or 50 batches)
+            # Verbose progress (every 5% or 20 batches for more frequent updates)
             if verbose:
                 pct = int((batch_num / total_batches) * 100)
-                if pct >= last_progress + 10 or batch_num % 50 == 0:
+                if pct >= last_progress + 5 or batch_num % 20 == 0:
                     last_progress = pct
-                    print(f"    📈 {symbol}: batch {batch_num}/{total_batches} ({pct}%) - {total_count:,} candles")
+                    status = f"new: {total_new:,}" if new_count > 0 else "exists"
+                    print(f"    📈 {symbol}: {batch_num}/{total_batches} ({pct}%) [{status}] (saved to DB)")
                     sys.stdout.flush()
 
             # Move to next batch
@@ -152,10 +168,6 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
             # Rate limiting
             time.sleep(exchange.rateLimit / 1000)
 
-            # If no new candles, we've caught up
-            if count == 0:
-                break
-
         except Exception as e:
             print(f"    ⚠️  {symbol} batch {batch_num}: {e}")
             sys.stdout.flush()
@@ -163,10 +175,10 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
             continue
 
     if verbose:
-        print(f"    ✅ {symbol}: Done! {total_count:,} candles fetched")
+        print(f"    ✅ {symbol}: Done! {total_new:,} new candles ({total_api:,} from API)")
         sys.stdout.flush()
 
-    return total_count
+    return total_new
 
 
 def fetch_all_symbols(timeframe: str = '1m', limit: int = 200) -> dict:
@@ -180,8 +192,8 @@ def fetch_all_symbols(timeframe: str = '1m', limit: int = 200) -> dict:
     results = {}
 
     for symbol in symbols:
-        count = fetch_candles(symbol.symbol, timeframe, limit=limit)
-        results[symbol.symbol] = count
+        new_count, _ = fetch_candles(symbol.symbol, timeframe, limit=limit)
+        results[symbol.symbol] = new_count
         time.sleep(0.1)  # Small delay between symbols
 
     return results
@@ -205,7 +217,7 @@ def get_latest_candles(symbol: str, timeframe: str, limit: int = 200) -> list:
 
     # If no candles or stale, fetch fresh
     if not candles:
-        fetch_candles(symbol, timeframe, limit=limit)
+        fetch_candles(symbol, timeframe, limit=limit)  # Returns tuple, we ignore it
         candles = Candle.query.filter_by(
             symbol_id=sym.id,
             timeframe=timeframe
