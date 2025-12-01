@@ -2,13 +2,15 @@
 """
 Historical Data Fetcher Script
 Downloads historical candle data for all symbols
-Supports resume from interruption
+Supports resume from interruption and parallel fetching
 """
 import sys
 import os
 import time
 import json
 from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -21,6 +23,9 @@ from app.config import Config
 
 # Progress file to track completed symbols
 PROGRESS_FILE = os.path.join(os.path.dirname(__file__), '..', 'data', 'fetch_progress.json')
+
+# Thread lock for progress file
+progress_lock = threading.Lock()
 
 
 def load_progress():
@@ -36,9 +41,10 @@ def load_progress():
 
 def save_progress(progress):
     """Save progress to file"""
-    os.makedirs(os.path.dirname(PROGRESS_FILE), exist_ok=True)
-    with open(PROGRESS_FILE, 'w') as f:
-        json.dump(progress, f, indent=2)
+    with progress_lock:
+        os.makedirs(os.path.dirname(PROGRESS_FILE), exist_ok=True)
+        with open(PROGRESS_FILE, 'w') as f:
+            json.dump(progress, f, indent=2)
 
 
 def clear_progress():
@@ -47,18 +53,48 @@ def clear_progress():
         os.remove(PROGRESS_FILE)
 
 
-def get_existing_candle_count(app, symbol_name):
-    """Get count of existing candles for a symbol"""
+def fetch_symbol_data(symbol_name, days, worker_id):
+    """Fetch data for a single symbol (runs in thread)"""
+    app = create_app()
+
     with app.app_context():
-        sym = Symbol.query.filter_by(symbol=symbol_name).first()
-        if sym:
-            return Candle.query.filter_by(symbol_id=sym.id, timeframe='1m').count()
-    return 0
+        try:
+            # Fetch 1m candles
+            count = fetch_historical(symbol_name, '1m', days=days)
+
+            # Aggregate to higher timeframes
+            agg_results = aggregate_all_timeframes(symbol_name)
+            agg_count = sum(agg_results.values())
+
+            return {
+                'symbol': symbol_name,
+                'success': True,
+                'candles': count,
+                'aggregated': agg_count,
+                'worker': worker_id
+            }
+        except Exception as e:
+            return {
+                'symbol': symbol_name,
+                'success': False,
+                'error': str(e),
+                'worker': worker_id
+            }
 
 
 def main():
     """Fetch historical data for all symbols"""
     app = create_app()
+
+    # Parse arguments
+    days = 365  # Default 1 year
+    workers = 3  # Parallel workers (be careful with rate limits)
+
+    for arg in sys.argv:
+        if arg.startswith('--days='):
+            days = int(arg.split('=')[1])
+        if arg.startswith('--workers='):
+            workers = int(arg.split('=')[1])
 
     # Load progress
     progress = load_progress()
@@ -89,75 +125,87 @@ def main():
         else:
             progress['started_at'] = datetime.now().isoformat()
 
-        print(f"\nFetching historical data for {len(remaining)} symbols...")
-        print("=" * 60)
+        print(f"\n{'='*60}")
+        print(f"  CryptoLens Historical Data Fetcher")
+        print(f"{'='*60}")
+        print(f"  Symbols: {len(remaining)}")
+        print(f"  Days: {days} ({days/365:.1f} years)")
+        print(f"  Workers: {workers} (parallel)")
+        print(f"  Est. candles per symbol: ~{days * 24 * 60:,} (1m)")
+        print(f"{'='*60}\n")
 
-        days = 7  # 7 days is faster, increase to 30 for more history
         start_time = time.time()
+        completed_count = 0
+        total_candles = 0
 
-        for i, symbol in enumerate(remaining, 1):
-            symbol_start = time.time()
-            total_symbols = len(remaining)
+        # Use ThreadPoolExecutor for parallel fetching
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            # Submit all tasks
+            future_to_symbol = {
+                executor.submit(fetch_symbol_data, s.symbol, days, i % workers): s.symbol
+                for i, s in enumerate(remaining)
+            }
 
-            # Check existing data
-            existing = get_existing_candle_count(app, symbol.symbol)
+            # Process results as they complete
+            for future in as_completed(future_to_symbol):
+                symbol_name = future_to_symbol[future]
+                completed_count += 1
 
-            print(f"\n[{i}/{total_symbols}] {symbol.symbol}")
-            if existing > 0:
-                print(f"  Already have {existing} candles, fetching new...")
+                try:
+                    result = future.result()
 
-            # Progress callback for detailed logging
-            def progress_callback(batch, total, count):
-                pct = (batch / total) * 100
-                bar = "█" * int(pct / 5) + "░" * (20 - int(pct / 5))
-                print(f"\r  Fetching: [{bar}] {pct:5.1f}% | Batch {batch}/{total} | {count} candles", end="", flush=True)
+                    if result['success']:
+                        total_candles += result['candles']
+                        print(f"✓ [{completed_count}/{len(remaining)}] {result['symbol']}: "
+                              f"{result['candles']:,} candles, {result['aggregated']} aggregated")
 
-            # Fetch 1m candles
-            try:
-                count = fetch_historical(symbol.symbol, '1m', days=days, progress_callback=progress_callback)
-                print(f"\n  ✓ Fetched {count} new 1m candles")
-            except Exception as e:
-                print(f"\n  ✗ Error fetching: {e}")
-                continue
+                        # Mark as completed
+                        progress['completed'].append(result['symbol'])
+                        save_progress(progress)
+                    else:
+                        print(f"✗ [{completed_count}/{len(remaining)}] {result['symbol']}: {result['error']}")
 
-            # Aggregate to higher timeframes
-            print(f"  Aggregating to higher timeframes...")
-            try:
-                agg_results = aggregate_all_timeframes(symbol.symbol)
-                agg_summary = ", ".join([f"{tf}:{cnt}" for tf, cnt in agg_results.items() if cnt > 0])
-                if agg_summary:
-                    print(f"    ✓ {agg_summary}")
-            except Exception as e:
-                print(f"    ✗ Aggregation error: {e}")
+                except Exception as e:
+                    print(f"✗ [{completed_count}/{len(remaining)}] {symbol_name}: Exception {e}")
 
-            # Mark as completed and save progress
-            progress['completed'].append(symbol.symbol)
-            save_progress(progress)
-
-            # Stats
-            symbol_time = time.time() - symbol_start
-            elapsed = time.time() - start_time
-            avg_time = elapsed / i
-            remaining_time = avg_time * (total_symbols - i)
-
-            print(f"  ⏱  {symbol_time:.1f}s | ETA: {remaining_time/60:.1f} min remaining")
-
-            # Rate limiting between symbols
-            time.sleep(0.5)
+                # Show ETA
+                elapsed = time.time() - start_time
+                if completed_count > 0:
+                    avg_time = elapsed / completed_count
+                    remaining_time = avg_time * (len(remaining) - completed_count)
+                    print(f"  ⏱  ETA: {remaining_time/60:.1f} min | Elapsed: {elapsed/60:.1f} min")
 
         # Done!
         total_time = time.time() - start_time
-        print("\n" + "=" * 60)
+        print(f"\n{'='*60}")
         print(f"✓ Historical data fetch complete!")
         print(f"  Total time: {total_time/60:.1f} minutes")
-        print(f"  Symbols fetched: {len(remaining)}")
+        print(f"  Symbols fetched: {completed_count}")
+        print(f"  Total candles: {total_candles:,}")
+        print(f"{'='*60}")
 
         # Clear progress file on successful completion
         clear_progress()
 
 
 if __name__ == '__main__':
-    # Check for --force flag
+    print("\nCryptoLens Data Fetcher")
+    print("-" * 40)
+
+    # Check for flags
+    if '--help' in sys.argv:
+        print("""
+Usage: python fetch_historical.py [options]
+
+Options:
+  --days=N      Days of history to fetch (default: 365)
+  --workers=N   Parallel workers (default: 3)
+  --force       Clear progress and start fresh
+  --clear       Just clear progress file
+  --help        Show this help
+        """)
+        sys.exit(0)
+
     if '--force' in sys.argv:
         clear_progress()
         print("Progress cleared. Starting fresh...")

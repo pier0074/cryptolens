@@ -5,11 +5,15 @@ Entry point for the Flask application
 """
 import os
 import socket
+import atexit
 from app import create_app, db
 from app.models import Symbol
 from app.config import Config
 
 app = create_app()
+
+# Scheduler instance (will be started in main)
+scheduler = None
 
 
 def init_symbols():
@@ -68,6 +72,20 @@ if __name__ == '__main__':
 
         # Set for reloader child process
         os.environ['CRYPTOLENS_PORT'] = str(port)
+
+    # Start scheduler (only in reloader child process to avoid duplicate jobs)
+    scheduler_enabled = os.getenv('SCHEDULER_ENABLED', 'true').lower() == 'true'
+
+    if is_reloader and scheduler_enabled:
+        from app.services.scheduler import start_scheduler, stop_scheduler
+        scheduler = start_scheduler(app)
+        atexit.register(stop_scheduler)
+        print("  ⏰ Auto-scanner: ENABLED (1-minute interval)")
+    elif not is_reloader:
+        if scheduler_enabled:
+            print("  ⏰ Auto-scanner will start when app is ready...")
+        else:
+            print("  ⏰ Auto-scanner: DISABLED (set SCHEDULER_ENABLED=true to enable)")
 
     if not is_reloader:
         print(f"""

@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+
+{% block title %}Analytics - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold">Performance Analytics</h1>
+        <div class="text-muted text-sm">
+            Real-time statistics
+        </div>
+    </div>
+
+    <!-- Stats Grid -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-3xl font-bold text-blue-400">{{ stats.total_symbols }}</div>
+            <div class="text-sm text-muted">Active Symbols</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-3xl font-bold text-purple-400">{{ "{:,}".format(stats.total_candles) }}</div>
+            <div class="text-sm text-muted">Total Candles</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-3xl font-bold text-green-400">{{ stats.active_patterns }}</div>
+            <div class="text-sm text-muted">Active Patterns</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-3xl font-bold text-yellow-400">{{ stats.total_signals }}</div>
+            <div class="text-sm text-muted">Total Signals</div>
+        </div>
+    </div>
+
+    <!-- Pattern Statistics -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Patterns by Type -->
+        <div class="bg-card rounded-lg p-6">
+            <h2 class="text-lg font-bold mb-4">Patterns by Type</h2>
+            <div class="space-y-4">
+                {% for pattern_type, count in patterns_by_type.items() %}
+                <div>
+                    <div class="flex justify-between mb-1">
+                        <span class="capitalize">{{ pattern_type.replace('_', ' ') }}</span>
+                        <span class="font-bold">{{ count }}</span>
+                    </div>
+                    <div class="w-full bg-gray-700 rounded-full h-3">
+                        {% set max_count = patterns_by_type.values()|max if patterns_by_type.values()|list else 1 %}
+                        {% set pct = (count / max_count * 100) if max_count > 0 else 0 %}
+                        <div class="h-3 rounded-full {% if loop.index == 1 %}bg-blue-500{% elif loop.index == 2 %}bg-purple-500{% else %}bg-green-500{% endif %}"
+                             style="width: {{ pct }}%"></div>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Direction Distribution -->
+        <div class="bg-card rounded-lg p-6">
+            <h2 class="text-lg font-bold mb-4">Active Patterns Direction</h2>
+            <div class="flex items-center justify-center space-x-8">
+                <div class="text-center">
+                    <div class="text-4xl font-bold text-green-400">{{ bullish_count }}</div>
+                    <div class="text-sm text-muted">Bullish</div>
+                    <div class="mt-2 w-20 h-20 rounded-full bg-green-500/20 flex items-center justify-center">
+                        <span class="text-3xl">🟢</span>
+                    </div>
+                </div>
+                <div class="text-4xl text-muted">vs</div>
+                <div class="text-center">
+                    <div class="text-4xl font-bold text-red-400">{{ bearish_count }}</div>
+                    <div class="text-sm text-muted">Bearish</div>
+                    <div class="mt-2 w-20 h-20 rounded-full bg-red-500/20 flex items-center justify-center">
+                        <span class="text-3xl">🔴</span>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-6">
+                {% set total = bullish_count + bearish_count %}
+                {% if total > 0 %}
+                <div class="flex rounded-full overflow-hidden h-4">
+                    <div class="bg-green-500" style="width: {{ (bullish_count / total * 100)|round }}%"></div>
+                    <div class="bg-red-500" style="width: {{ (bearish_count / total * 100)|round }}%"></div>
+                </div>
+                <div class="flex justify-between text-xs text-muted mt-1">
+                    <span>{{ ((bullish_count / total * 100)|round)|int if total > 0 else 0 }}% Bullish</span>
+                    <span>{{ ((bearish_count / total * 100)|round)|int if total > 0 else 0 }}% Bearish</span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- More Stats -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Top Symbols -->
+        <div class="bg-card rounded-lg p-6">
+            <h2 class="text-lg font-bold mb-4">Top Symbols by Active Patterns</h2>
+            {% if top_symbols %}
+            <div class="space-y-2">
+                {% for item in top_symbols %}
+                <div class="flex items-center justify-between p-2 bg-gray-800/50 rounded">
+                    <span class="font-medium">{{ item.symbol }}</span>
+                    <div class="flex items-center space-x-2">
+                        <div class="w-24 bg-gray-700 rounded-full h-2">
+                            {% set max_p = top_symbols[0].patterns if top_symbols else 1 %}
+                            <div class="bg-blue-500 h-2 rounded-full" style="width: {{ (item.patterns / max_p * 100)|round }}%"></div>
+                        </div>
+                        <span class="text-sm font-bold w-8 text-right">{{ item.patterns }}</span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-muted">No patterns detected yet</p>
+            {% endif %}
+        </div>
+
+        <!-- Activity Summary -->
+        <div class="bg-card rounded-lg p-6">
+            <h2 class="text-lg font-bold mb-4">Activity Summary</h2>
+            <div class="space-y-4">
+                <div class="flex justify-between items-center p-3 bg-gray-800/50 rounded">
+                    <span>Patterns (Last 24h)</span>
+                    <span class="text-xl font-bold text-blue-400">{{ recent_patterns }}</span>
+                </div>
+                <div class="flex justify-between items-center p-3 bg-gray-800/50 rounded">
+                    <span>Filled Patterns</span>
+                    <span class="text-xl font-bold text-green-400">{{ stats.filled_patterns }}</span>
+                </div>
+                <div class="flex justify-between items-center p-3 bg-gray-800/50 rounded">
+                    <span>Notifications Sent</span>
+                    <span class="text-xl font-bold text-yellow-400">{{ stats.notified_signals }}</span>
+                </div>
+                <div class="flex justify-between items-center p-3 bg-gray-800/50 rounded">
+                    <span>Avg Backtest Win Rate</span>
+                    <span class="text-xl font-bold {% if avg_win_rate >= 50 %}text-green-400{% else %}text-red-400{% endif %}">
+                        {{ "%.1f"|format(avg_win_rate) }}%
+                    </span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Recent Backtests -->
+    <div class="bg-card rounded-lg p-6">
+        <h2 class="text-lg font-bold mb-4">Recent Backtests</h2>
+        {% if backtests %}
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-gray-700">
+                        <th class="text-left p-2 text-muted">Name</th>
+                        <th class="text-left p-2 text-muted">Pattern</th>
+                        <th class="text-center p-2 text-muted">Trades</th>
+                        <th class="text-center p-2 text-muted">Win Rate</th>
+                        <th class="text-center p-2 text-muted">Profit</th>
+                        <th class="text-center p-2 text-muted">Max DD</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for bt in backtests %}
+                    <tr class="border-b border-gray-800">
+                        <td class="p-2">{{ bt.name }}</td>
+                        <td class="p-2 capitalize">{{ bt.pattern_type.replace('_', ' ') }}</td>
+                        <td class="p-2 text-center">{{ bt.total_trades }}</td>
+                        <td class="p-2 text-center {% if bt.win_rate >= 50 %}text-green-400{% else %}text-red-400{% endif %}">
+                            {{ "%.1f"|format(bt.win_rate) }}%
+                        </td>
+                        <td class="p-2 text-center {% if bt.total_profit_pct >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
+                            {{ "%.2f"|format(bt.total_profit_pct) }}%
+                        </td>
+                        <td class="p-2 text-center text-red-400">{{ "%.2f"|format(bt.max_drawdown) }}%</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <p class="text-muted">No backtests yet. Run a backtest to see results here.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

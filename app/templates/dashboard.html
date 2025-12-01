@@ -3,28 +3,59 @@
 {% block title %}Dashboard - CryptoLens{% endblock %}
 
 {% block content %}
-<div class="space-y-6">
+<div x-data="{ selectedPattern: 'all' }" class="space-y-6">
     <!-- Header -->
-    <div class="flex items-center justify-between">
+    <div class="flex items-center justify-between flex-wrap gap-4">
         <h1 class="text-2xl font-bold">Pattern Matrix</h1>
-        <div class="text-muted text-sm">
-            {{ symbols|length }} symbols × {{ timeframes|length }} timeframes
+        <div class="flex items-center space-x-4">
+            <span class="text-muted text-sm">{{ symbols|length }} symbols × {{ timeframes|length }} timeframes</span>
+            <div id="scheduler-status" class="text-xs px-2 py-1 rounded bg-green-900 text-green-200">
+                ⏰ Auto-scan active
+            </div>
         </div>
     </div>
 
+    <!-- Pattern Type Tabs -->
+    <div class="flex space-x-2 border-b border-gray-700 pb-2">
+        <button @click="selectedPattern = 'all'"
+                :class="selectedPattern === 'all' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'"
+                class="px-4 py-2 rounded-t text-sm font-medium transition-colors">
+            All Patterns
+        </button>
+        <button @click="selectedPattern = 'imbalance'"
+                :class="selectedPattern === 'imbalance' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'"
+                class="px-4 py-2 rounded-t text-sm font-medium transition-colors">
+            Imbalance (FVG)
+        </button>
+        <button @click="selectedPattern = 'order_block'"
+                :class="selectedPattern === 'order_block' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'"
+                class="px-4 py-2 rounded-t text-sm font-medium transition-colors">
+            Order Blocks
+        </button>
+        <button @click="selectedPattern = 'liquidity_sweep'"
+                :class="selectedPattern === 'liquidity_sweep' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'"
+                class="px-4 py-2 rounded-t text-sm font-medium transition-colors">
+            Liquidity Sweeps
+        </button>
+    </div>
+
     <!-- Matrix Legend -->
-    <div class="flex items-center space-x-6 text-sm">
+    <div class="flex items-center space-x-6 text-sm flex-wrap gap-2">
         <div class="flex items-center space-x-2">
             <div class="w-4 h-4 rounded bg-green-500"></div>
-            <span>Bullish Imbalance</span>
+            <span>Bullish</span>
         </div>
         <div class="flex items-center space-x-2">
             <div class="w-4 h-4 rounded bg-red-500"></div>
-            <span>Bearish Imbalance</span>
+            <span>Bearish</span>
         </div>
         <div class="flex items-center space-x-2">
             <div class="w-4 h-4 rounded bg-gray-600"></div>
             <span>No Pattern</span>
+        </div>
+        <div class="flex items-center space-x-2 ml-4">
+            <div class="w-4 h-4 rounded border-2 border-yellow-500"></div>
+            <span>Multiple Patterns</span>
         </div>
     </div>
 
@@ -51,20 +82,30 @@
                     {% set bullish_count = namespace(value=0) %}
                     {% set bearish_count = namespace(value=0) %}
                     {% for tf in timeframes %}
-                    {% set pattern = matrix.get(symbol.symbol, {}).get(tf) %}
+                    {% set cell_data = matrix.get(symbol.symbol, {}).get(tf) %}
                     <td class="text-center p-3">
-                        {% if pattern %}
+                        {% if cell_data %}
+                            {# Show individual pattern types with Alpine filtering #}
+                            {% for ptype, pattern in cell_data.patterns.items() %}
+                            <div x-show="selectedPattern === 'all' || selectedPattern === '{{ ptype }}'"
+                                 x-cloak
+                                 class="pattern-cell inline-block w-8 h-8 rounded cursor-pointer {% if pattern.direction == 'bullish' %}bg-green-500/80{% else %}bg-red-500/80{% endif %} {% if cell_data.count > 1 %}border-2 border-yellow-500{% endif %}"
+                                 title="{{ pattern.direction|capitalize }} {{ ptype.replace('_', ' ')|title }}&#10;Zone: ${{ '%.2f'|format(pattern.zone_low) }} - ${{ '%.2f'|format(pattern.zone_high) }}">
+                            </div>
                             {% if pattern.direction == 'bullish' %}
                                 {% set bullish_count.value = bullish_count.value + 1 %}
-                                <div class="pattern-cell inline-block w-8 h-8 rounded bg-green-500/80 cursor-pointer"
-                                     title="Bullish {{ pattern.pattern_type }}&#10;Zone: ${{ '%.2f'|format(pattern.zone_low) }} - ${{ '%.2f'|format(pattern.zone_high) }}">
-                                </div>
                             {% else %}
                                 {% set bearish_count.value = bearish_count.value + 1 %}
-                                <div class="pattern-cell inline-block w-8 h-8 rounded bg-red-500/80 cursor-pointer"
-                                     title="Bearish {{ pattern.pattern_type }}&#10;Zone: ${{ '%.2f'|format(pattern.zone_low) }} - ${{ '%.2f'|format(pattern.zone_high) }}">
-                                </div>
                             {% endif %}
+                            {% endfor %}
+                            {# Show empty when filtered pattern not present #}
+                            {% for ptype in ['imbalance', 'order_block', 'liquidity_sweep'] %}
+                            {% if ptype not in cell_data.patterns %}
+                            <div x-show="selectedPattern === '{{ ptype }}'"
+                                 x-cloak
+                                 class="inline-block w-8 h-8 rounded bg-gray-700"></div>
+                            {% endif %}
+                            {% endfor %}
                         {% else %}
                             <div class="inline-block w-8 h-8 rounded bg-gray-700"></div>
                         {% endif %}

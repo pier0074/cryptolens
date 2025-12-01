@@ -80,7 +80,7 @@ def fetch_candles(symbol: str, timeframe: str, limit: int = 500, since: int = No
         return 0
 
 
-def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callback=None) -> int:
+def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callback=None, verbose: bool = True) -> int:
     """
     Fetch historical candles for backtesting
 
@@ -89,10 +89,12 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
         timeframe: Candle timeframe
         days: Number of days of history to fetch
         progress_callback: Optional callback(batch_num, total_batches, candles_fetched)
+        verbose: Print progress to stdout
 
     Returns:
         Total candles saved
     """
+    import sys
     exchange = get_exchange()
 
     # Calculate start timestamp
@@ -116,9 +118,14 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
     total_candles_needed = (now - since) // candle_duration
     total_batches = max(1, (total_candles_needed // 500) + 1)
 
+    if verbose:
+        print(f"    📊 {symbol} - Fetching ~{total_candles_needed:,} candles in {total_batches} batches...")
+        sys.stdout.flush()
+
     total_count = 0
     current_since = since
     batch_num = 0
+    last_progress = 0
 
     while current_since < now:
         batch_num += 1
@@ -131,6 +138,14 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
             if progress_callback:
                 progress_callback(batch_num, total_batches, total_count)
 
+            # Verbose progress (every 10% or 50 batches)
+            if verbose:
+                pct = int((batch_num / total_batches) * 100)
+                if pct >= last_progress + 10 or batch_num % 50 == 0:
+                    last_progress = pct
+                    print(f"    📈 {symbol}: batch {batch_num}/{total_batches} ({pct}%) - {total_count:,} candles")
+                    sys.stdout.flush()
+
             # Move to next batch
             current_since += 500 * candle_duration
 
@@ -142,9 +157,14 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
                 break
 
         except Exception as e:
-            print(f"    Error on batch {batch_num}: {e}")
+            print(f"    ⚠️  {symbol} batch {batch_num}: {e}")
+            sys.stdout.flush()
             time.sleep(2)  # Wait a bit before retrying
             continue
+
+    if verbose:
+        print(f"    ✅ {symbol}: Done! {total_count:,} candles fetched")
+        sys.stdout.flush()
 
     return total_count
 
