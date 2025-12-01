@@ -44,20 +44,33 @@ def find_available_port(start_port=5000, max_attempts=10):
 
 
 if __name__ == '__main__':
-    # Initialize symbols on first run
-    init_symbols()
+    # Initialize symbols on first run (only in main process)
+    is_reloader = os.getenv('WERKZEUG_RUN_MAIN') == 'true'
 
-    # Find available port
-    preferred_port = int(os.getenv('PORT', 5000))
+    if not is_reloader:
+        init_symbols()
+
+    # Get port - check if already set by parent process (for reloader)
     debug = os.getenv('FLASK_ENV', 'development') == 'development'
 
-    if is_port_available(preferred_port):
-        port = preferred_port
+    if os.getenv('CRYPTOLENS_PORT'):
+        # Reloader child process - use the port set by parent
+        port = int(os.getenv('CRYPTOLENS_PORT'))
     else:
-        port = find_available_port(preferred_port)
-        print(f"Port {preferred_port} in use, using port {port} instead")
+        # Main process - find available port
+        preferred_port = int(os.getenv('PORT', 5000))
 
-    print(f"""
+        if is_port_available(preferred_port):
+            port = preferred_port
+        else:
+            port = find_available_port(preferred_port)
+            print(f"Port {preferred_port} in use, using port {port} instead")
+
+        # Set for reloader child process
+        os.environ['CRYPTOLENS_PORT'] = str(port)
+
+    if not is_reloader:
+        print(f"""
     ╔═══════════════════════════════════════════════════╗
     ║           CryptoLens - Pattern Detector           ║
     ║        Smart Money Pattern Detection System       ║
@@ -65,6 +78,6 @@ if __name__ == '__main__':
     ║  Dashboard:  http://localhost:{port}                 ║
     ║  API:        http://localhost:{port}/api             ║
     ╚═══════════════════════════════════════════════════╝
-    """)
+        """)
 
     app.run(host='0.0.0.0', port=port, debug=debug)
