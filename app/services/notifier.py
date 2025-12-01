@@ -4,6 +4,7 @@ Sends push notifications via NTFY.sh
 """
 import requests
 from datetime import datetime
+from urllib.parse import quote
 from app.models import Signal, Symbol, Notification, Setting
 from app.config import Config
 from app import db
@@ -25,13 +26,17 @@ def send_notification(topic: str, title: str, message: str, priority: int = 3,
         True if successful
     """
     try:
+        # URL-encode title to handle emojis and special characters (NTFY supports this)
+        encoded_title = quote(title, safe='')
+
         response = requests.post(
             f"{Config.NTFY_URL}/{topic}",
             data=message.encode('utf-8'),
             headers={
-                "Title": title,
+                "Title": encoded_title,
                 "Priority": str(priority),
-                "Tags": tags
+                "Tags": tags,
+                "Encoding": "UTF-8"
             },
             timeout=10
         )

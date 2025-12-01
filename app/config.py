@@ -20,7 +20,7 @@ class Config:
     # Default Symbols
     SYMBOLS = [
         'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT', 'ADA/USDT',
-        'DOGE/USDT', 'SOL/USDT', 'DOT/USDT', 'MATIC/USDT', 'LTC/USDT',
+        'DOGE/USDT', 'SOL/USDT', 'DOT/USDT', 'POL/USDT', 'LTC/USDT',
         'SHIB/USDT', 'TRX/USDT', 'AVAX/USDT', 'LINK/USDT', 'ATOM/USDT',
         'UNI/USDT', 'XMR/USDT', 'ETC/USDT', 'XLM/USDT', 'BCH/USDT',
         'APT/USDT', 'FIL/USDT', 'LDO/USDT', 'ARB/USDT', 'OP/USDT',
