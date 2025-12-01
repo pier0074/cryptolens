@@ -206,12 +206,17 @@ def fetch_symbol_with_logging(app, symbol_name, days):
                 time.sleep(2)
                 continue
 
+        # Show 100% complete
+        bar = progress_bar(total_batches, total_batches)
+        print(f"\r   {bar} | Complete | {total_new:,} candles                    ")
+
         # Aggregate to higher timeframes
-        print()  # New line after progress bar
-        print(f"   Aggregating to higher timeframes...")
+        print(f"   📊 Aggregating 1m candles → 5m, 15m, 1h, 4h, 1d...")
         sys.stdout.flush()
         agg_results = aggregate_all_timeframes(symbol_name)
         agg_count = sum(agg_results.values())
+        print(f"   📊 Created: 5m={agg_results.get('5m', 0):,} | 15m={agg_results.get('15m', 0):,} | "
+              f"1h={agg_results.get('1h', 0):,} | 4h={agg_results.get('4h', 0):,} | 1d={agg_results.get('1d', 0):,}")
 
         # Clean up in_progress entry now that symbol is complete
         progress = load_progress()
