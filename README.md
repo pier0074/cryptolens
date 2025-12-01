@@ -2,7 +2,7 @@
 
 **Smart Money Pattern Detection System for Crypto Trading**
 
-CryptoLens detects imbalance patterns (Fair Value Gaps) across multiple timeframes, sends push notifications for trade setups, and provides a web dashboard for visualization and backtesting.
+CryptoLens detects smart money patterns (Fair Value Gaps, Order Blocks, Liquidity Sweeps) across multiple timeframes, sends push notifications for trade setups, and provides a web dashboard for visualization and backtesting.
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
 ![Flask](https://img.shields.io/badge/Flask-3.0-green.svg)
@@ -10,10 +10,13 @@ CryptoLens detects imbalance patterns (Fair Value Gaps) across multiple timefram
 
 ## Features
 
-- **Pattern Detection**: Automatically detects Fair Value Gaps (Imbalances) across 6 timeframes
-- **Multi-Timeframe Confluence**: Identifies when multiple timeframes align for higher probability setups
+- **3 Pattern Types**: Detects Fair Value Gaps (Imbalances), Order Blocks, and Liquidity Sweeps
+- **Multi-Timeframe Analysis**: Scans 6 timeframes (1m, 5m, 15m, 1h, 4h, 1d)
+- **Auto-Scanner**: Background scheduler scans for patterns every minute
 - **Push Notifications**: Free push notifications via NTFY.sh - no account required
 - **Interactive Dashboard**: Visual matrix showing patterns for 30 crypto pairs
+- **Pattern Tabs**: Filter dashboard by pattern type (All, FVG, Order Blocks, Sweeps)
+- **Performance Analytics**: Track pattern statistics, win rates, and backtest results
 - **Candlestick Charts**: TradingView-style charts with pattern overlays
 - **Backtesting**: Test strategy performance on historical data
 - **REST API**: Full API for future automation
@@ -21,10 +24,10 @@ CryptoLens detects imbalance patterns (Fair Value Gaps) across multiple timefram
 ## Screenshots
 
 ### Dashboard - Pattern Matrix
-View all symbols across all timeframes at a glance. Green = Bullish imbalance, Red = Bearish imbalance.
+View all symbols across all timeframes at a glance. Green = Bullish, Red = Bearish. Yellow border = Multiple patterns.
 
-### Pattern Charts
-Interactive candlestick charts with Fair Value Gap zones highlighted.
+### Analytics Dashboard
+Track pattern distribution, bullish vs bearish ratios, top symbols, and backtest performance.
 
 ## Quick Start
 
@@ -49,7 +52,30 @@ cp .env.example .env
 # Edit .env with your settings (optional)
 ```
 
-### 3. Run
+### 3. Fetch Historical Data
+
+```bash
+# Fetch 1 year of data for all 30 symbols
+python scripts/fetch_historical.py
+
+# Or fetch less data for faster testing
+python scripts/fetch_historical.py --days=30
+```
+
+The fetcher shows detailed progress:
+```
+[1/30] Processing BTC/USDT...
+──────────────────────────────────────────────────
+📊 BTC/USDT
+   Target: ~525,600 candles (1052 batches)
+   Range: 2023-12-01 → 2024-12-01
+   [ 10%] Batch 105/1052 | Date: 2024-01-12 | New: 52,500 | ETA: 8.5m
+   [ 20%] Batch 210/1052 | Date: 2024-02-23 | New: 105,000 | ETA: 7.2m
+   ...
+   ✅ Done! 504,073 new + 21,527 existing | Aggregated: 5,230 | Time: 9.2m
+```
+
+### 4. Run the Application
 
 ```bash
 python run.py
@@ -57,29 +83,13 @@ python run.py
 
 Visit `http://localhost:5000` in your browser.
 
-### 4. Fetch Historical Data
+The auto-scanner will start automatically, scanning for patterns every minute.
 
-```bash
-python scripts/fetch_historical.py
-```
+## Pattern Types
 
-### 5. Scan for Patterns
+### 1. Fair Value Gap (Imbalance)
 
-```bash
-python scripts/scan_patterns.py
-```
-
-## Setup Notifications
-
-1. Install the [NTFY app](https://ntfy.sh/) on your phone (iOS/Android)
-2. Subscribe to your topic (default: `cryptolens-signals`)
-3. Go to Settings in CryptoLens and test the notification
-
-## How It Works
-
-### Fair Value Gap (Imbalance) Detection
-
-A Fair Value Gap occurs when price moves so aggressively that a gap forms between candles:
+A gap between candles indicating aggressive price movement:
 
 ```
 Bullish FVG:           Bearish FVG:
@@ -94,14 +104,32 @@ Bullish FVG:           Bearish FVG:
    │  │                     │  │
 ```
 
-**Trading Logic:**
-- **Bullish FVG**: Place limit buy order at zone high, stop loss below zone low
-- **Bearish FVG**: Place limit sell order at zone low, stop loss above zone high
-- **Target**: 1:2 or 1:3 risk/reward
+### 2. Order Blocks
 
-### Confluence Scoring
+The last opposing candle before a strong move - represents institutional order flow:
 
-CryptoLens scans 6 timeframes (1m, 5m, 15m, 1h, 4h, 1d). When 2+ timeframes show the same bias (bullish or bearish), it generates a signal with higher confidence.
+- **Bullish OB**: Last bearish candle before strong bullish move
+- **Bearish OB**: Last bullish candle before strong bearish move
+
+### 3. Liquidity Sweeps
+
+Price takes out a previous high/low (hunting stop losses) then reverses:
+
+- **Bullish Sweep**: Price sweeps below a swing low, then closes back above
+- **Bearish Sweep**: Price sweeps above a swing high, then closes back below
+
+## Trading Logic
+
+- **Entry**: Place limit order at pattern zone
+- **Stop Loss**: Below/above the zone with ATR buffer
+- **Take Profit**: 1:2 or 1:3 risk/reward ratio
+- **Confluence**: Higher confidence when 2+ timeframes agree
+
+## Setup Notifications
+
+1. Install the [NTFY app](https://ntfy.sh/) on your phone (iOS/Android)
+2. Subscribe to your topic (default: `cryptolens-signals`)
+3. Go to Settings in CryptoLens and test the notification
 
 ## API Endpoints
 
@@ -113,6 +141,7 @@ CryptoLens scans 6 timeframes (1m, 5m, 15m, 1h, 4h, 1d). When 2+ timeframes show
 | `/api/signals` | GET | Get trade signals |
 | `/api/matrix` | GET | Get pattern matrix |
 | `/api/scan` | POST | Trigger pattern scan |
+| `/api/fetch` | POST | Trigger data fetch |
 
 ## Project Structure
 
@@ -123,16 +152,20 @@ cryptolens/
 │   ├── config.py            # Configuration
 │   ├── models.py            # Database models
 │   ├── routes/              # Web routes
-│   │   ├── dashboard.py
-│   │   ├── patterns.py
-│   │   ├── signals.py
-│   │   ├── backtest.py
-│   │   ├── settings.py
-│   │   └── api.py
+│   │   ├── dashboard.py     # Main dashboard + analytics
+│   │   ├── patterns.py      # Pattern visualization
+│   │   ├── signals.py       # Trade signals
+│   │   ├── backtest.py      # Backtesting
+│   │   ├── settings.py      # Settings
+│   │   └── api.py           # REST API
 │   ├── services/            # Business logic
 │   │   ├── data_fetcher.py  # CCXT integration
 │   │   ├── aggregator.py    # Timeframe aggregation
+│   │   ├── scheduler.py     # Auto-scanner
 │   │   ├── patterns/        # Pattern detectors
+│   │   │   ├── imbalance.py    # Fair Value Gaps
+│   │   │   ├── order_block.py  # Order Blocks
+│   │   │   └── liquidity.py    # Liquidity Sweeps
 │   │   ├── signals.py       # Signal generator
 │   │   ├── notifier.py      # NTFY notifications
 │   │   └── backtester.py    # Backtesting engine
@@ -145,14 +178,29 @@ cryptolens/
 └── run.py
 ```
 
+## Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SECRET_KEY` | auto-generated | Flask secret key |
+| `DATABASE_URL` | `sqlite:///data/cryptolens.db` | Database path |
+| `NTFY_TOPIC` | `cryptolens-signals` | NTFY notification topic |
+| `NTFY_PRIORITY` | `4` | Notification priority (1-5) |
+| `SCHEDULER_ENABLED` | `true` | Enable auto-scanner |
+| `PORT` | `5000` | Server port |
+
 ## Roadmap
 
-- [ ] Additional patterns (Order Blocks, Liquidity Sweeps)
-- [ ] Telegram notifications
-- [ ] Auto-scheduled scanning
-- [ ] Performance analytics dashboard
+- [x] Fair Value Gap detection
+- [x] Order Blocks detection
+- [x] Liquidity Sweeps detection
+- [x] Auto-scheduled scanning (1-minute)
+- [x] Performance analytics dashboard
+- [x] Pattern type tabs on dashboard
 - [ ] API trading integration (Kucoin)
 - [ ] Mobile-responsive design improvements
+- [ ] WebSocket real-time updates
+- [ ] Multi-exchange support
 
 ## Disclaimer
 
