@@ -80,7 +80,7 @@ def fetch_candles(symbol: str, timeframe: str, limit: int = 500, since: int = No
         return 0
 
 
-def fetch_historical(symbol: str, timeframe: str, days: int = 30) -> int:
+def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callback=None) -> int:
     """
     Fetch historical candles for backtesting
 
@@ -88,6 +88,7 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30) -> int:
         symbol: Trading pair
         timeframe: Candle timeframe
         days: Number of days of history to fetch
+        progress_callback: Optional callback(batch_num, total_batches, candles_fetched)
 
     Returns:
         Total candles saved
@@ -97,9 +98,7 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30) -> int:
     # Calculate start timestamp
     start_time = datetime.utcnow() - timedelta(days=days)
     since = int(start_time.timestamp() * 1000)
-
-    total_count = 0
-    current_since = since
+    now = int(datetime.utcnow().timestamp() * 1000)
 
     # Timeframe to milliseconds mapping
     tf_ms = {
@@ -113,19 +112,39 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30) -> int:
 
     candle_duration = tf_ms.get(timeframe, 60 * 1000)
 
-    while current_since < int(datetime.utcnow().timestamp() * 1000):
-        count = fetch_candles(symbol, timeframe, limit=500, since=current_since)
-        total_count += count
+    # Calculate total batches needed
+    total_candles_needed = (now - since) // candle_duration
+    total_batches = max(1, (total_candles_needed // 500) + 1)
 
-        # Move to next batch
-        current_since += 500 * candle_duration
+    total_count = 0
+    current_since = since
+    batch_num = 0
 
-        # Rate limiting
-        time.sleep(exchange.rateLimit / 1000)
+    while current_since < now:
+        batch_num += 1
 
-        # If no new candles, we've caught up
-        if count == 0:
-            break
+        try:
+            count = fetch_candles(symbol, timeframe, limit=500, since=current_since)
+            total_count += count
+
+            # Progress callback
+            if progress_callback:
+                progress_callback(batch_num, total_batches, total_count)
+
+            # Move to next batch
+            current_since += 500 * candle_duration
+
+            # Rate limiting
+            time.sleep(exchange.rateLimit / 1000)
+
+            # If no new candles, we've caught up
+            if count == 0:
+                break
+
+        except Exception as e:
+            print(f"    Error on batch {batch_num}: {e}")
+            time.sleep(2)  # Wait a bit before retrying
+            continue
 
     return total_count
 
