@@ -129,7 +129,7 @@ def trigger_fetch():
     from app.services.data_fetcher import fetch_candles
 
     if symbol and timeframe:
-        count = fetch_candles(symbol, timeframe)
-        return jsonify({'success': True, 'candles_fetched': count})
+        new_count, _ = fetch_candles(symbol, timeframe)
+        return jsonify({'success': True, 'candles_fetched': new_count})
 
     return jsonify({'error': 'Symbol and timeframe required'}), 400

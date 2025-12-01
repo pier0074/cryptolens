@@ -22,7 +22,9 @@ ENV/
 
 # Database
 *.db
+*.db-journal
 data/*.db
+data/*.json
 
 # OS
 .DS_Store

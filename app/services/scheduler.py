@@ -31,11 +31,11 @@ def fetch_latest_candles():
         for symbol in symbols:
             try:
                 # Fetch latest 1m candles
-                count = fetch_candles(symbol.symbol, '1m', limit=10)
-                total_fetched += count
+                new_count, _ = fetch_candles(symbol.symbol, '1m', limit=10)
+                total_fetched += new_count
 
                 # Quick aggregation for recent candles
-                if count > 0:
+                if new_count > 0:
                     aggregate_all_timeframes(symbol.symbol)
 
             except Exception as e:
@@ -77,13 +77,13 @@ def update_pattern_status():
     """Update status of existing patterns (check if filled)"""
     from app import create_app, db
     from app.models import Symbol, Pattern
-    from app.services.patterns.imbalance import ImbalanceDetector
+    from app.services.patterns import get_all_detectors
     from app.services.data_fetcher import get_latest_candles
 
     app = create_app()
     with app.app_context():
         symbols = Symbol.query.filter_by(is_active=True).all()
-        detector = ImbalanceDetector()
+        detectors = get_all_detectors()
         updated_count = 0
 
         for symbol in symbols:
@@ -93,10 +93,12 @@ def update_pattern_status():
                 if candles:
                     current_price = candles[-1]['close']
 
-                    # Update patterns for all timeframes
+                    # Update patterns for all timeframes and all pattern types
                     for tf in ['1m', '5m', '15m', '1h', '4h', '1d']:
-                        updated = detector.update_pattern_status(symbol.symbol, tf, current_price)
-                        updated_count += updated
+                        for detector in detectors:
+                            if hasattr(detector, 'update_pattern_status'):
+                                updated = detector.update_pattern_status(symbol.symbol, tf, current_price)
+                                updated_count += updated
 
             except Exception as e:
                 logger.error(f"Error updating patterns for {symbol.symbol}: {e}")

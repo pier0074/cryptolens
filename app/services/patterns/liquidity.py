@@ -216,3 +216,39 @@ class LiquiditySweepDetector(PatternDetector):
                 return {**pattern, 'status': 'filled', 'fill_percentage': 100}
             else:
                 return {**pattern, 'status': 'active', 'fill_percentage': 50}
+
+    def update_pattern_status(self, symbol: str, timeframe: str, current_price: float) -> int:
+        """
+        Update the status of all active liquidity sweep patterns
+
+        Returns:
+            Number of patterns updated
+        """
+        sym = Symbol.query.filter_by(symbol=symbol).first()
+        if not sym:
+            return 0
+
+        patterns = Pattern.query.filter_by(
+            symbol_id=sym.id,
+            timeframe=timeframe,
+            pattern_type='liquidity_sweep',
+            status='active'
+        ).all()
+
+        updated = 0
+        for pattern in patterns:
+            pattern_dict = pattern.to_dict()
+            pattern_dict['direction'] = pattern.direction
+
+            result = self.check_fill(pattern_dict, current_price)
+
+            if result['status'] != pattern.status:
+                pattern.status = result['status']
+                if result['status'] == 'filled':
+                    pattern.filled_at = int(pd.Timestamp.utcnow().timestamp() * 1000)
+                updated += 1
+
+            pattern.fill_percentage = result.get('fill_percentage', 0)
+
+        db.session.commit()
+        return updated
