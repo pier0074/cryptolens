@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+
+{% block title %}Patterns - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header & Filters -->
+    <div class="flex items-center justify-between flex-wrap gap-4">
+        <h1 class="text-2xl font-bold">Detected Patterns</h1>
+
+        <form method="GET" class="flex items-center space-x-4">
+            <select name="symbol" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
+                <option value="">All Symbols</option>
+                {% for s in symbols %}
+                <option value="{{ s.symbol }}" {% if current_symbol == s.symbol %}selected{% endif %}>
+                    {{ s.symbol }}
+                </option>
+                {% endfor %}
+            </select>
+
+            <select name="timeframe" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
+                <option value="">All Timeframes</option>
+                {% for tf in timeframes %}
+                <option value="{{ tf }}" {% if current_timeframe == tf %}selected{% endif %}>{{ tf }}</option>
+                {% endfor %}
+            </select>
+
+            <select name="status" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
+                <option value="active" {% if current_status == 'active' %}selected{% endif %}>Active</option>
+                <option value="filled" {% if current_status == 'filled' %}selected{% endif %}>Filled</option>
+                <option value="" {% if not current_status %}selected{% endif %}>All</option>
+            </select>
+
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm">
+                Filter
+            </button>
+        </form>
+    </div>
+
+    <!-- Chart Container -->
+    {% if current_symbol %}
+    <div class="bg-card rounded-lg p-4">
+        <div class="flex items-center justify-between mb-4">
+            <h2 class="text-lg font-bold">{{ current_symbol }} - {{ current_timeframe or '1h' }}</h2>
+            <div class="flex space-x-2">
+                {% for tf in timeframes %}
+                <a href="?symbol={{ current_symbol }}&timeframe={{ tf }}&status={{ current_status }}"
+                   class="px-3 py-1 rounded text-sm {% if current_timeframe == tf %}bg-blue-600{% else %}bg-gray-700 hover:bg-gray-600{% endif %}">
+                    {{ tf }}
+                </a>
+                {% endfor %}
+            </div>
+        </div>
+        <div id="chart" style="height: 400px;"></div>
+    </div>
+    {% endif %}
+
+    <!-- Patterns List -->
+    <div class="bg-card rounded-lg overflow-hidden">
+        <table class="w-full">
+            <thead>
+                <tr class="border-b border-gray-700 bg-gray-800/50">
+                    <th class="text-left p-3 text-muted font-medium">Symbol</th>
+                    <th class="text-left p-3 text-muted font-medium">TF</th>
+                    <th class="text-left p-3 text-muted font-medium">Direction</th>
+                    <th class="text-left p-3 text-muted font-medium">Zone</th>
+                    <th class="text-left p-3 text-muted font-medium">Status</th>
+                    <th class="text-left p-3 text-muted font-medium">Fill %</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for pattern in patterns %}
+                <tr class="border-b border-gray-800 hover:bg-gray-800/50">
+                    <td class="p-3">
+                        <a href="?symbol={{ pattern.symbol.symbol }}&timeframe={{ pattern.timeframe }}"
+                           class="hover:text-blue-400 font-medium">
+                            {{ pattern.symbol.symbol }}
+                        </a>
+                    </td>
+                    <td class="p-3 text-muted">{{ pattern.timeframe }}</td>
+                    <td class="p-3">
+                        <span class="{% if pattern.direction == 'bullish' %}bullish{% else %}bearish{% endif %} font-medium">
+                            {% if pattern.direction == 'bullish' %}🟢 Bullish{% else %}🔴 Bearish{% endif %}
+                        </span>
+                    </td>
+                    <td class="p-3 font-mono text-sm">
+                        ${{ '%.2f'|format(pattern.zone_low) }} - ${{ '%.2f'|format(pattern.zone_high) }}
+                    </td>
+                    <td class="p-3">
+                        <span class="px-2 py-1 rounded text-xs
+                            {% if pattern.status == 'active' %}bg-blue-900 text-blue-200
+                            {% elif pattern.status == 'filled' %}bg-green-900 text-green-200
+                            {% else %}bg-gray-700{% endif %}">
+                            {{ pattern.status }}
+                        </span>
+                    </td>
+                    <td class="p-3">
+                        {% if pattern.fill_percentage %}
+                            <div class="w-16 bg-gray-700 rounded-full h-2">
+                                <div class="bg-blue-500 h-2 rounded-full" style="width: {{ pattern.fill_percentage }}%"></div>
+                            </div>
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" class="p-8 text-center text-muted">
+                        No patterns found. Run a scan to detect patterns.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+{% if current_symbol %}
+<script>
+document.addEventListener('DOMContentLoaded', async function() {
+    const chartContainer = document.getElementById('chart');
+    const chart = LightweightCharts.createChart(chartContainer, {
+        layout: {
+            background: { color: '#242424' },
+            textColor: '#DDD',
+        },
+        grid: {
+            vertLines: { color: '#333' },
+            horzLines: { color: '#333' },
+        },
+        width: chartContainer.clientWidth,
+        height: 400,
+    });
+
+    const candlestickSeries = chart.addCandlestickSeries({
+        upColor: '#22c55e',
+        downColor: '#ef4444',
+        borderUpColor: '#22c55e',
+        borderDownColor: '#ef4444',
+        wickUpColor: '#22c55e',
+        wickDownColor: '#ef4444',
+    });
+
+    // Fetch chart data
+    const symbol = '{{ current_symbol }}'.replace('/', '-');
+    const timeframe = '{{ current_timeframe or "1h" }}';
+
+    try {
+        const response = await fetch(`/patterns/chart/${symbol}/${timeframe}`);
+        const data = await response.json();
+
+        if (data.candles) {
+            const candles = data.candles.map(c => ({
+                time: c.timestamp / 1000,
+                open: c.open,
+                high: c.high,
+                low: c.low,
+                close: c.close,
+            }));
+            candlestickSeries.setData(candles);
+
+            // Draw pattern zones
+            data.patterns.forEach(pattern => {
+                const color = pattern.direction === 'bullish'
+                    ? 'rgba(34, 197, 94, 0.3)'
+                    : 'rgba(239, 68, 68, 0.3)';
+
+                // Add horizontal lines for zone
+                candlestickSeries.createPriceLine({
+                    price: pattern.zone_high,
+                    color: pattern.direction === 'bullish' ? '#22c55e' : '#ef4444',
+                    lineWidth: 1,
+                    lineStyle: 2,
+                    axisLabelVisible: true,
+                    title: pattern.direction === 'bullish' ? 'FVG High' : 'FVG High',
+                });
+                candlestickSeries.createPriceLine({
+                    price: pattern.zone_low,
+                    color: pattern.direction === 'bullish' ? '#22c55e' : '#ef4444',
+                    lineWidth: 1,
+                    lineStyle: 2,
+                    axisLabelVisible: true,
+                    title: pattern.direction === 'bullish' ? 'FVG Low' : 'FVG Low',
+                });
+            });
+        }
+
+        chart.timeScale().fitContent();
+    } catch (e) {
+        console.error('Failed to load chart data:', e);
+    }
+
+    // Resize handler
+    window.addEventListener('resize', () => {
+        chart.applyOptions({ width: chartContainer.clientWidth });
+    });
+});
+</script>
+{% endif %}
+{% endblock %}

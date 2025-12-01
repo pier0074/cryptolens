@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}CryptoLens{% endblock %}</title>
+
+    <!-- TailwindCSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+
+    <!-- Lightweight Charts (TradingView) -->
+    <script src="https://unpkg.com/lightweight-charts@4.1.0/dist/lightweight-charts.standalone.production.js"></script>
+
+    <style>
+        [x-cloak] { display: none !important; }
+
+        .bg-dark { background-color: #0f0f0f; }
+        .bg-darker { background-color: #1a1a1a; }
+        .bg-card { background-color: #242424; }
+        .text-muted { color: #888; }
+
+        .bullish { color: #22c55e; }
+        .bearish { color: #ef4444; }
+        .neutral { color: #888; }
+
+        .pattern-cell {
+            transition: all 0.2s;
+        }
+        .pattern-cell:hover {
+            transform: scale(1.1);
+        }
+    </style>
+
+    {% block extra_css %}{% endblock %}
+</head>
+<body class="bg-dark text-white min-h-screen">
+    <!-- Navigation -->
+    <nav class="bg-darker border-b border-gray-800 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center space-x-8">
+                    <a href="/" class="text-xl font-bold text-white flex items-center">
+                        <span class="text-2xl mr-2">🔍</span>
+                        CryptoLens
+                    </a>
+                    <div class="hidden md:flex space-x-4">
+                        <a href="/" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if request.endpoint == 'dashboard.index' %}bg-gray-800{% endif %}">
+                            Dashboard
+                        </a>
+                        <a href="/patterns" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'patterns' in request.endpoint %}bg-gray-800{% endif %}">
+                            Patterns
+                        </a>
+                        <a href="/signals" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'signals' in request.endpoint %}bg-gray-800{% endif %}">
+                            Signals
+                        </a>
+                        <a href="/backtest" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'backtest' in request.endpoint %}bg-gray-800{% endif %}">
+                            Backtest
+                        </a>
+                        <a href="/settings" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'settings' in request.endpoint %}bg-gray-800{% endif %}">
+                            Settings
+                        </a>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <button onclick="triggerScan()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-md text-sm font-medium">
+                        Scan Now
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Flash Messages -->
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            <div class="max-w-7xl mx-auto px-4 mt-4">
+                {% for category, message in messages %}
+                    <div class="p-4 rounded-md mb-2 {% if category == 'success' %}bg-green-900 text-green-200{% elif category == 'error' %}bg-red-900 text-red-200{% else %}bg-blue-900 text-blue-200{% endif %}">
+                        {{ message }}
+                    </div>
+                {% endfor %}
+            </div>
+        {% endif %}
+    {% endwith %}
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 py-6">
+        {% block content %}{% endblock %}
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-darker border-t border-gray-800 mt-auto py-4">
+        <div class="max-w-7xl mx-auto px-4 text-center text-muted text-sm">
+            CryptoLens - Smart Money Pattern Detection
+        </div>
+    </footer>
+
+    <script>
+        async function triggerScan() {
+            try {
+                const response = await fetch('/api/scan', { method: 'POST' });
+                const data = await response.json();
+                alert(`Scan complete! Found ${data.patterns_found} patterns.`);
+                location.reload();
+            } catch (e) {
+                alert('Scan failed: ' + e.message);
+            }
+        }
+    </script>
+
+    {% block extra_js %}{% endblock %}
+</body>
+</html>

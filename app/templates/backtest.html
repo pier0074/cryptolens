@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+
+{% block title %}Backtest - CryptoLens{% endblock %}
+
+{% block content %}
+<div x-data="backtestApp()" class="space-y-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold">Backtesting</h1>
+    </div>
+
+    <!-- Backtest Form -->
+    <div class="bg-card rounded-lg p-6">
+        <h2 class="text-lg font-bold mb-4">Run New Backtest</h2>
+
+        <form @submit.prevent="runBacktest" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div>
+                <label class="block text-sm text-muted mb-1">Symbol</label>
+                <select x-model="form.symbol" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2">
+                    {% for s in symbols %}
+                    <option value="{{ s.symbol }}">{{ s.symbol }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm text-muted mb-1">Timeframe</label>
+                <select x-model="form.timeframe" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2">
+                    {% for tf in timeframes %}
+                    <option value="{{ tf }}">{{ tf }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm text-muted mb-1">Start Date</label>
+                <input type="date" x-model="form.start_date"
+                       class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2">
+            </div>
+
+            <div>
+                <label class="block text-sm text-muted mb-1">End Date</label>
+                <input type="date" x-model="form.end_date"
+                       class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2">
+            </div>
+
+            <div class="md:col-span-2 lg:col-span-4">
+                <button type="submit" :disabled="loading"
+                        class="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-600 px-6 py-2 rounded font-medium">
+                    <span x-show="!loading">Run Backtest</span>
+                    <span x-show="loading">Running...</span>
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Results -->
+    <div x-show="results" x-cloak class="bg-card rounded-lg p-6">
+        <h2 class="text-lg font-bold mb-4">Backtest Results</h2>
+
+        <!-- Stats Grid -->
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+            <div class="bg-gray-800 rounded p-4">
+                <div class="text-2xl font-bold" x-text="results?.total_trades || 0"></div>
+                <div class="text-sm text-muted">Total Trades</div>
+            </div>
+            <div class="bg-gray-800 rounded p-4">
+                <div class="text-2xl font-bold" :class="(results?.win_rate || 0) >= 50 ? 'text-green-400' : 'text-red-400'"
+                     x-text="(results?.win_rate || 0).toFixed(1) + '%'"></div>
+                <div class="text-sm text-muted">Win Rate</div>
+            </div>
+            <div class="bg-gray-800 rounded p-4">
+                <div class="text-2xl font-bold" :class="(results?.total_profit_pct || 0) >= 0 ? 'text-green-400' : 'text-red-400'"
+                     x-text="(results?.total_profit_pct || 0).toFixed(2) + '%'"></div>
+                <div class="text-sm text-muted">Total Profit</div>
+            </div>
+            <div class="bg-gray-800 rounded p-4">
+                <div class="text-2xl font-bold text-red-400" x-text="(results?.max_drawdown || 0).toFixed(2) + '%'"></div>
+                <div class="text-sm text-muted">Max Drawdown</div>
+            </div>
+        </div>
+
+        <!-- Trades Table -->
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="border-b border-gray-700">
+                        <th class="text-left p-2 text-muted">Direction</th>
+                        <th class="text-left p-2 text-muted">Entry</th>
+                        <th class="text-left p-2 text-muted">Exit</th>
+                        <th class="text-left p-2 text-muted">Result</th>
+                        <th class="text-left p-2 text-muted">Profit %</th>
+                        <th class="text-left p-2 text-muted">Duration</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <template x-for="trade in (results?.trades || []).slice(0, 20)" :key="trade.entry_time">
+                        <tr class="border-b border-gray-800">
+                            <td class="p-2" :class="trade.direction === 'long' ? 'text-green-400' : 'text-red-400'"
+                                x-text="trade.direction.toUpperCase()"></td>
+                            <td class="p-2 font-mono" x-text="'$' + trade.entry_price.toFixed(2)"></td>
+                            <td class="p-2 font-mono" x-text="'$' + trade.exit_price.toFixed(2)"></td>
+                            <td class="p-2">
+                                <span :class="trade.result === 'win' ? 'text-green-400' : 'text-red-400'"
+                                      x-text="trade.result.toUpperCase()"></span>
+                            </td>
+                            <td class="p-2" :class="trade.profit_pct >= 0 ? 'text-green-400' : 'text-red-400'"
+                                x-text="trade.profit_pct.toFixed(2) + '%'"></td>
+                            <td class="p-2 text-muted" x-text="trade.duration_candles + ' candles'"></td>
+                        </tr>
+                    </template>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Previous Backtests -->
+    <div class="bg-card rounded-lg p-6">
+        <h2 class="text-lg font-bold mb-4">Previous Backtests</h2>
+
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="border-b border-gray-700">
+                    <th class="text-left p-2 text-muted">Name</th>
+                    <th class="text-left p-2 text-muted">Trades</th>
+                    <th class="text-left p-2 text-muted">Win Rate</th>
+                    <th class="text-left p-2 text-muted">Profit</th>
+                    <th class="text-left p-2 text-muted">Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for bt in backtests %}
+                <tr class="border-b border-gray-800 hover:bg-gray-800/50">
+                    <td class="p-2">{{ bt.name }}</td>
+                    <td class="p-2">{{ bt.total_trades }}</td>
+                    <td class="p-2 {% if bt.win_rate >= 50 %}text-green-400{% else %}text-red-400{% endif %}">
+                        {{ '%.1f'|format(bt.win_rate) }}%
+                    </td>
+                    <td class="p-2 {% if bt.total_profit_pct >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
+                        {{ '%.2f'|format(bt.total_profit_pct) }}%
+                    </td>
+                    <td class="p-2 text-muted">{{ bt.created_at.strftime('%Y-%m-%d') if bt.created_at else '' }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="5" class="p-4 text-center text-muted">No previous backtests</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function backtestApp() {
+    return {
+        form: {
+            symbol: '{{ symbols[0].symbol if symbols else "BTC/USDT" }}',
+            timeframe: '1h',
+            start_date: new Date(Date.now() - 30*24*60*60*1000).toISOString().split('T')[0],
+            end_date: new Date().toISOString().split('T')[0],
+            pattern_type: 'imbalance'
+        },
+        loading: false,
+        results: null,
+
+        async runBacktest() {
+            this.loading = true;
+            try {
+                const response = await fetch('/backtest/run', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(this.form)
+                });
+                this.results = await response.json();
+            } catch (e) {
+                alert('Backtest failed: ' + e.message);
+            }
+            this.loading = false;
+        }
+    }
+}
+</script>
+{% endblock %}
