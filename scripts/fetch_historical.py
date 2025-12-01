@@ -7,7 +7,7 @@ import sys
 import os
 import time
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -152,7 +152,7 @@ def fetch_symbol_with_logging(app, symbol_name, days):
                     eta = (total_batches - batch_num) / rate if rate > 0 else 0
 
                     # Show date being fetched
-                    current_date = datetime.utcfromtimestamp(current_since / 1000).strftime('%Y-%m-%d')
+                    current_date = datetime.fromtimestamp(current_since / 1000, tz=timezone.utc).strftime('%Y-%m-%d')
 
                     print(f"   [{pct:3d}%] Batch {batch_num}/{total_batches} | "
                           f"Date: {current_date} | "
