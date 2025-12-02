@@ -110,36 +110,33 @@
                             ${{ '%.2f'|format(pattern.zone_low) }} - ${{ '%.2f'|format(pattern.zone_high) }}
                         {% endif %}
                     </td>
-                    {# Entry Price - Bullish: zone_high, Bearish: zone_low #}
+                    {# Entry Price - from trading service #}
                     <td class="p-3 font-mono text-sm {% if pattern.direction == 'bullish' %}text-green-400{% else %}text-red-400{% endif %}">
-                        {% set entry = pattern.zone_high if pattern.direction == 'bullish' else pattern.zone_low %}
+                        {% set entry = pattern.trading_levels.entry %}
                         {% if entry < 0.01 %}${{ '%.6f'|format(entry) }}
                         {% elif entry < 1 %}${{ '%.4f'|format(entry) }}
                         {% elif entry < 100 %}${{ '%.3f'|format(entry) }}
                         {% else %}${{ '%.2f'|format(entry) }}{% endif %}
+                        {% if pattern.pattern_type == 'order_block' %}
+                        <span class="text-xs text-muted ml-1">(OTE)</span>
+                        {% endif %}
                     </td>
-                    {# Stop Loss - Bullish: below zone_low, Bearish: above zone_high #}
+                    {# Stop Loss - from trading service (ATR-based) #}
                     <td class="p-3 font-mono text-sm text-red-500">
-                        {% set zone_size = pattern.zone_high - pattern.zone_low %}
-                        {% set buffer = zone_size * 0.2 %}
-                        {% set sl = pattern.zone_low - buffer if pattern.direction == 'bullish' else pattern.zone_high + buffer %}
+                        {% set sl = pattern.trading_levels.stop_loss %}
                         {% if sl < 0.01 %}${{ '%.6f'|format(sl) }}
                         {% elif sl < 1 %}${{ '%.4f'|format(sl) }}
                         {% elif sl < 100 %}${{ '%.3f'|format(sl) }}
                         {% else %}${{ '%.2f'|format(sl) }}{% endif %}
                     </td>
-                    {# Take Profit - 2:1 R:R ratio #}
+                    {# Take Profit - from trading service (structure-based) #}
                     <td class="p-3 font-mono text-sm text-green-500">
-                        {% set entry = pattern.zone_high if pattern.direction == 'bullish' else pattern.zone_low %}
-                        {% set zone_size = pattern.zone_high - pattern.zone_low %}
-                        {% set buffer = zone_size * 0.2 %}
-                        {% set sl = pattern.zone_low - buffer if pattern.direction == 'bullish' else pattern.zone_high + buffer %}
-                        {% set risk = (entry - sl)|abs %}
-                        {% set tp = entry + (risk * 2) if pattern.direction == 'bullish' else entry - (risk * 2) %}
+                        {% set tp = pattern.trading_levels.take_profit_2 %}
                         {% if tp < 0.01 %}${{ '%.6f'|format(tp) }}
                         {% elif tp < 1 %}${{ '%.4f'|format(tp) }}
                         {% elif tp < 100 %}${{ '%.3f'|format(tp) }}
                         {% else %}${{ '%.2f'|format(tp) }}{% endif %}
+                        <span class="text-xs text-muted ml-1">({{ pattern.trading_levels.risk_reward_2 }}R)</span>
                     </td>
                     <td class="p-3">
                         <span class="px-2 py-1 rounded text-xs

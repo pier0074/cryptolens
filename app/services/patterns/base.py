@@ -10,8 +10,20 @@ import pandas as pd
 # Zones smaller than this are filtered out (too small to trade profitably after fees)
 MIN_ZONE_PERCENT = 0.15  # 0.15% minimum zone size
 
-# Overlap threshold for deduplication (70% = patterns with >70% overlap are duplicates)
-OVERLAP_THRESHOLD = 0.70
+# Timeframe-based overlap thresholds for deduplication
+# Higher timeframes = stricter thresholds (fewer patterns but higher quality)
+# Lower timeframes = looser thresholds (more patterns for scalping)
+OVERLAP_THRESHOLDS = {
+    '1m': 0.50,   # 50% - Allow more patterns for scalping
+    '5m': 0.55,   # 55%
+    '15m': 0.60,  # 60%
+    '30m': 0.65,  # 65%
+    '1h': 0.70,   # 70% - Standard threshold
+    '2h': 0.75,   # 75%
+    '4h': 0.80,   # 80% - Stricter for swing trading
+    '1d': 0.85,   # 85% - Very strict for position trading
+}
+DEFAULT_OVERLAP_THRESHOLD = 0.70
 
 
 class PatternDetector(ABC):
@@ -27,9 +39,16 @@ class PatternDetector(ABC):
         zone_size_pct = ((zone_high - zone_low) / zone_low) * 100
         return zone_size_pct >= MIN_ZONE_PERCENT
 
+    def get_overlap_threshold(self, timeframe: str) -> float:
+        """
+        Get the overlap threshold for a specific timeframe.
+        Higher timeframes use stricter thresholds.
+        """
+        return OVERLAP_THRESHOLDS.get(timeframe, DEFAULT_OVERLAP_THRESHOLD)
+
     def has_overlapping_pattern(
         self, symbol_id: int, timeframe: str, direction: str,
-        zone_low: float, zone_high: float, threshold: float = OVERLAP_THRESHOLD
+        zone_low: float, zone_high: float, threshold: float = None
     ) -> bool:
         """
         Check if there's already an active pattern with overlapping zone.
@@ -41,12 +60,16 @@ class PatternDetector(ABC):
             direction: Pattern direction (bullish/bearish)
             zone_low: New pattern's zone low
             zone_high: New pattern's zone high
-            threshold: Overlap threshold (0-1), default 70%
+            threshold: Override threshold (if None, uses timeframe-based threshold)
 
         Returns:
             True if overlapping pattern exists, False otherwise
         """
         from app.models import Pattern
+
+        # Use timeframe-based threshold if not specified
+        if threshold is None:
+            threshold = self.get_overlap_threshold(timeframe)
 
         existing_patterns = Pattern.query.filter_by(
             symbol_id=symbol_id,

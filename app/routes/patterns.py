@@ -1,9 +1,33 @@
 from flask import Blueprint, render_template, request, jsonify
+import pandas as pd
 from app.models import Symbol, Pattern, Candle
 from app.config import Config
 from app import db
+from app.services.trading import get_trading_levels_for_pattern, calculate_atr
 
 patterns_bp = Blueprint('patterns', __name__)
+
+
+def get_candles_df(symbol_id: int, timeframe: str, limit: int = 100) -> pd.DataFrame:
+    """Get candles as DataFrame for trading calculations"""
+    candles = Candle.query.filter_by(
+        symbol_id=symbol_id,
+        timeframe=timeframe
+    ).order_by(Candle.timestamp.desc()).limit(limit).all()
+
+    if not candles:
+        return pd.DataFrame()
+
+    data = [{
+        'timestamp': c.timestamp,
+        'open': c.open,
+        'high': c.high,
+        'low': c.low,
+        'close': c.close,
+        'volume': c.volume
+    } for c in reversed(candles)]
+
+    return pd.DataFrame(data)
 
 
 @patterns_bp.route('/')
@@ -29,8 +53,28 @@ def index():
     patterns = query.order_by(Pattern.detected_at.desc()).limit(100).all()
     symbols = Symbol.query.filter_by(is_active=True).all()
 
+    # Calculate trading levels for each pattern
+    patterns_with_levels = []
+    candle_cache = {}  # Cache candles by (symbol_id, timeframe)
+
+    for pattern in patterns:
+        cache_key = (pattern.symbol_id, pattern.timeframe)
+
+        # Get candles (cached)
+        if cache_key not in candle_cache:
+            candle_cache[cache_key] = get_candles_df(pattern.symbol_id, pattern.timeframe)
+
+        df = candle_cache[cache_key]
+
+        # Calculate trading levels
+        levels = get_trading_levels_for_pattern(pattern, df)
+
+        # Attach levels to pattern object
+        pattern.trading_levels = levels
+        patterns_with_levels.append(pattern)
+
     return render_template('patterns.html',
-                           patterns=patterns,
+                           patterns=patterns_with_levels,
                            symbols=symbols,
                            timeframes=Config.TIMEFRAMES,
                            current_symbol=symbol_filter,
