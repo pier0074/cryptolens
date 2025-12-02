@@ -49,6 +49,10 @@ class ImbalanceDetector(PatternDetector):
                 zone_low = c1['high']
                 zone_high = c3['low']
 
+                # Skip zones that are too small to trade
+                if not self.is_zone_tradeable(zone_low, zone_high):
+                    continue
+
                 # Check if pattern already exists
                 existing = Pattern.query.filter_by(
                     symbol_id=sym.id,
@@ -83,6 +87,10 @@ class ImbalanceDetector(PatternDetector):
             if c1['low'] > c3['high']:
                 zone_high = c1['low']
                 zone_low = c3['high']
+
+                # Skip zones that are too small to trade
+                if not self.is_zone_tradeable(zone_low, zone_high):
+                    continue
 
                 # Check if pattern already exists
                 existing = Pattern.query.filter_by(

@@ -74,6 +74,10 @@ class OrderBlockDetector(PatternDetector):
                         zone_high = max(df.iloc[j]['open'], df.iloc[j]['close'])
                         zone_low = min(df.iloc[j]['open'], df.iloc[j]['close'])
 
+                        # Skip zones that are too small to trade
+                        if not self.is_zone_tradeable(zone_low, zone_high):
+                            continue
+
                         # Check if pattern already exists
                         existing = Pattern.query.filter_by(
                             symbol_id=sym.id,
@@ -112,6 +116,10 @@ class OrderBlockDetector(PatternDetector):
                     if df.iloc[j]['is_bullish']:
                         zone_high = max(df.iloc[j]['open'], df.iloc[j]['close'])
                         zone_low = min(df.iloc[j]['open'], df.iloc[j]['close'])
+
+                        # Skip zones that are too small to trade
+                        if not self.is_zone_tradeable(zone_low, zone_high):
+                            continue
 
                         # Check if pattern already exists
                         existing = Pattern.query.filter_by(

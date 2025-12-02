@@ -6,9 +6,23 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 import pandas as pd
 
+# Minimum zone size as percentage of price
+# Zones smaller than this are filtered out (too small to trade profitably after fees)
+MIN_ZONE_PERCENT = 0.15  # 0.15% minimum zone size
+
 
 class PatternDetector(ABC):
     """Abstract base class for pattern detection"""
+
+    def is_zone_tradeable(self, zone_low: float, zone_high: float) -> bool:
+        """
+        Check if a zone is large enough to be tradeable.
+        Very small zones (< 0.15%) aren't worth trading after fees.
+        """
+        if zone_low <= 0:
+            return False
+        zone_size_pct = ((zone_high - zone_low) / zone_low) * 100
+        return zone_size_pct >= MIN_ZONE_PERCENT
 
     @property
     @abstractmethod

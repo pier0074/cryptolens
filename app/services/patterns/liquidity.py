@@ -107,6 +107,10 @@ class LiquiditySweepDetector(PatternDetector):
                     zone_low = current['low']
                     zone_high = swing_low['price']
 
+                    # Skip zones that are too small to trade
+                    if not self.is_zone_tradeable(zone_low, zone_high):
+                        continue
+
                     # Check if pattern already exists
                     existing = Pattern.query.filter_by(
                         symbol_id=sym.id,
@@ -150,6 +154,10 @@ class LiquiditySweepDetector(PatternDetector):
                     # This is a bearish liquidity sweep
                     zone_high = current['high']
                     zone_low = swing_high['price']
+
+                    # Skip zones that are too small to trade
+                    if not self.is_zone_tradeable(zone_low, zone_high):
+                        continue
 
                     # Check if pattern already exists
                     existing = Pattern.query.filter_by(
