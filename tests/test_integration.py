@@ -436,6 +436,163 @@ class TestDatabaseIntegrity:
             assert len(four_hourly) == 5
 
 
+class TestLiveNotifications:
+    """
+    Live notification tests - actually sends notifications to NTFY
+    Run with: pytest -m live -v tests/test_integration.py::TestLiveNotifications
+
+    These tests send REAL notifications (with [TEST] prefix) to verify the
+    notification pipeline works end-to-end.
+    """
+
+    @pytest.mark.live
+    def test_live_btc_long_fvg_notification(self, app):
+        """Send REAL test notification: BTC LONG FVG"""
+        with app.app_context():
+            Setting.set('notifications_enabled', 'true')
+
+            # Create BTC symbol
+            btc = Symbol(symbol='BTC/USDT', exchange='binance', is_active=True)
+            db.session.add(btc)
+            db.session.commit()
+
+            # Create FVG pattern with realistic BTC price
+            pattern = Pattern(
+                symbol_id=btc.id,
+                timeframe='4h',
+                pattern_type='imbalance',
+                direction='bullish',
+                zone_high=96000.0,
+                zone_low=94500.0,
+                detected_at=1700000000000,
+                status='active'
+            )
+            db.session.add(pattern)
+            db.session.commit()
+
+            # Create signal with realistic prices
+            signal = Signal(
+                symbol_id=btc.id,
+                direction='long',
+                entry_price=96000.0,
+                stop_loss=94000.0,
+                take_profit_1=98000.0,
+                take_profit_2=100000.0,
+                take_profit_3=102000.0,
+                risk_reward=3.0,
+                confluence_score=4,
+                pattern_id=pattern.id,
+                status='pending',
+                timeframes_aligned='["1h", "4h", "1d"]'
+            )
+            db.session.add(signal)
+            db.session.commit()
+
+            from app.services.notifier import notify_signal
+            result = notify_signal(signal, test_mode=True)
+
+            assert result is True, "Live notification failed to send"
+            print(f"\n[LIVE TEST] BTC LONG FVG notification sent successfully")
+
+    @pytest.mark.live
+    def test_live_eth_short_order_block_notification(self, app):
+        """Send REAL test notification: ETH SHORT Order Block"""
+        with app.app_context():
+            Setting.set('notifications_enabled', 'true')
+
+            # Create ETH symbol
+            eth = Symbol(symbol='ETH/USDT', exchange='binance', is_active=True)
+            db.session.add(eth)
+            db.session.commit()
+
+            # Create Order Block pattern
+            pattern = Pattern(
+                symbol_id=eth.id,
+                timeframe='1h',
+                pattern_type='order_block',
+                direction='bearish',
+                zone_high=3600.0,
+                zone_low=3500.0,
+                detected_at=1700000000000,
+                status='active'
+            )
+            db.session.add(pattern)
+            db.session.commit()
+
+            # Create SHORT signal
+            signal = Signal(
+                symbol_id=eth.id,
+                direction='short',
+                entry_price=3500.0,
+                stop_loss=3650.0,
+                take_profit_1=3350.0,
+                take_profit_2=3200.0,
+                take_profit_3=3050.0,
+                risk_reward=3.0,
+                confluence_score=3,
+                pattern_id=pattern.id,
+                status='pending',
+                timeframes_aligned='["1h", "4h"]'
+            )
+            db.session.add(signal)
+            db.session.commit()
+
+            from app.services.notifier import notify_signal
+            result = notify_signal(signal, test_mode=True)
+
+            assert result is True, "Live notification failed to send"
+            print(f"\n[LIVE TEST] ETH SHORT OB notification sent successfully")
+
+    @pytest.mark.live
+    def test_live_sol_long_liquidity_sweep_notification(self, app):
+        """Send REAL test notification: SOL LONG Liquidity Sweep"""
+        with app.app_context():
+            Setting.set('notifications_enabled', 'true')
+
+            # Create SOL symbol
+            sol = Symbol(symbol='SOL/USDT', exchange='binance', is_active=True)
+            db.session.add(sol)
+            db.session.commit()
+
+            # Create Liquidity Sweep pattern
+            pattern = Pattern(
+                symbol_id=sol.id,
+                timeframe='15m',
+                pattern_type='liquidity_sweep',
+                direction='bullish',
+                zone_high=185.0,
+                zone_low=178.0,
+                detected_at=1700000000000,
+                status='active'
+            )
+            db.session.add(pattern)
+            db.session.commit()
+
+            # Create LONG signal with high confluence
+            signal = Signal(
+                symbol_id=sol.id,
+                direction='long',
+                entry_price=185.0,
+                stop_loss=175.0,
+                take_profit_1=195.0,
+                take_profit_2=205.0,
+                take_profit_3=215.0,
+                risk_reward=3.0,
+                confluence_score=5,
+                pattern_id=pattern.id,
+                status='pending',
+                timeframes_aligned='["5m", "15m", "1h", "4h", "1d"]'
+            )
+            db.session.add(signal)
+            db.session.commit()
+
+            from app.services.notifier import notify_signal
+            result = notify_signal(signal, test_mode=True)
+
+            assert result is True, "Live notification failed to send"
+            print(f"\n[LIVE TEST] SOL LONG LS notification sent successfully")
+
+
 class TestSettingsIntegration:
     """Tests for settings integration"""
 
