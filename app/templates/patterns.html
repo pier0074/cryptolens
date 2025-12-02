@@ -62,6 +62,7 @@
                 <tr class="border-b border-gray-700 bg-gray-800/50">
                     <th class="text-left p-3 text-muted font-medium">Symbol</th>
                     <th class="text-left p-3 text-muted font-medium">TF</th>
+                    <th class="text-left p-3 text-muted font-medium">Type</th>
                     <th class="text-left p-3 text-muted font-medium">Direction</th>
                     <th class="text-left p-3 text-muted font-medium">Zone</th>
                     <th class="text-left p-3 text-muted font-medium">Status</th>
@@ -79,12 +80,32 @@
                     </td>
                     <td class="p-3 text-muted">{{ pattern.timeframe }}</td>
                     <td class="p-3">
+                        {% if pattern.pattern_type == 'imbalance' %}
+                            <span class="px-2 py-1 rounded text-xs bg-purple-900 text-purple-200">FVG</span>
+                        {% elif pattern.pattern_type == 'order_block' %}
+                            <span class="px-2 py-1 rounded text-xs bg-orange-900 text-orange-200">Order Block</span>
+                        {% elif pattern.pattern_type == 'liquidity_sweep' %}
+                            <span class="px-2 py-1 rounded text-xs bg-cyan-900 text-cyan-200">Sweep</span>
+                        {% else %}
+                            <span class="px-2 py-1 rounded text-xs bg-gray-700">{{ pattern.pattern_type }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="p-3">
                         <span class="{% if pattern.direction == 'bullish' %}bullish{% else %}bearish{% endif %} font-medium">
                             {% if pattern.direction == 'bullish' %}🟢 Bullish{% else %}🔴 Bearish{% endif %}
                         </span>
                     </td>
                     <td class="p-3 font-mono text-sm">
-                        ${{ '%.2f'|format(pattern.zone_low) }} - ${{ '%.2f'|format(pattern.zone_high) }}
+                        {# Smart price formatting: more decimals for cheaper coins #}
+                        {% if pattern.zone_low < 0.01 %}
+                            ${{ '%.6f'|format(pattern.zone_low) }} - ${{ '%.6f'|format(pattern.zone_high) }}
+                        {% elif pattern.zone_low < 1 %}
+                            ${{ '%.4f'|format(pattern.zone_low) }} - ${{ '%.4f'|format(pattern.zone_high) }}
+                        {% elif pattern.zone_low < 100 %}
+                            ${{ '%.3f'|format(pattern.zone_low) }} - ${{ '%.3f'|format(pattern.zone_high) }}
+                        {% else %}
+                            ${{ '%.2f'|format(pattern.zone_low) }} - ${{ '%.2f'|format(pattern.zone_high) }}
+                        {% endif %}
                     </td>
                     <td class="p-3">
                         <span class="px-2 py-1 rounded text-xs
@@ -106,7 +127,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="6" class="p-8 text-center text-muted">
+                    <td colspan="7" class="p-8 text-center text-muted">
                         No patterns found. Run a scan to detect patterns.
                     </td>
                 </tr>

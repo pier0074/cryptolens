@@ -78,7 +78,7 @@
                         </a>
                     </div>
                 </div>
-                <div class="flex items-center space-x-4" x-data="schedulerToggle()" x-init="checkStatus()">
+                <div class="flex items-center space-x-4" x-data="schedulerToggle()" x-init="init()">
                     <!-- Scanner Toggle -->
                     <div class="flex items-center space-x-2">
                         <span class="text-sm text-gray-400">Scanner:</span>
@@ -138,7 +138,15 @@
         function schedulerToggle() {
             return {
                 running: false,
-                async checkStatus() {
+                initialized: false,
+                async init() {
+                    if (this.initialized) return;
+                    this.initialized = true;
+                    await this.fetchStatus();
+                    // Poll every 30 seconds (not 5) - just to sync state
+                    setInterval(() => this.fetchStatus(), 30000);
+                },
+                async fetchStatus() {
                     try {
                         const response = await fetch('/api/scheduler/status');
                         const data = await response.json();
@@ -146,8 +154,6 @@
                     } catch (e) {
                         console.error('Failed to get scheduler status:', e);
                     }
-                    // Poll status every 5 seconds
-                    setInterval(() => this.checkStatus(), 5000);
                 },
                 async toggle() {
                     try {
