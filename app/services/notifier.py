@@ -118,7 +118,7 @@ def notify_signal(signal: Signal) -> bool:
     now = datetime.now(timezone.utc)
     timestamp_str = now.strftime("%d/%m/%Y %H:%M UTC")
 
-    # Format timeframes with brackets
+    # Format timeframes with brackets for confluence line
     tfs_bracketed = f"[{tfs_str}]" if tfs_str else ""
 
     # Calculate percentages
@@ -129,20 +129,20 @@ def notify_signal(signal: Signal) -> bool:
     sl_pct = abs((sl - entry) / entry * 100) if entry > 0 else 0
     tp1_pct = abs((tp1 - entry) / entry * 100) if entry > 0 else 0
 
-    # R:R in European format (1:X instead of just X)
-    rr_european = f"1:{signal.risk_reward:.1f}"
+    # R:R in European betting format (percentage return)
+    # R:R of 3.0 means 300% return on risk
+    rr_percent = signal.risk_reward * 100
 
     message = (
-        f"🕐 {timestamp_str}\n"
-        f"📊 Symbol: {symbol_name}\n"
-        f"📈 Direction: {direction_text}\n"
-        f"🔍 Pattern: {pattern_type}\n"
-        f"⏱️ Timeframes: {tfs_bracketed}\n"
-        f"💰 Limit Entry: ${entry:,.4f}\n"
-        f"🛑 Stop Loss: ${sl:,.4f} ({sl_pct:.2f}%)\n"
-        f"🎯 TP1: ${tp1:,.4f} ({tp1_pct:.2f}%)\n"
-        f"⚖️ R:R: {signal.risk_reward:.1f} ({rr_european})\n"
-        f"🔗 Confluence: {signal.confluence_score}/6 TFs"
+        f"{timestamp_str}\n"
+        f"Symbol: {symbol_name}\n"
+        f"Direction: {direction_text}\n"
+        f"Pattern: {pattern_type}\n"
+        f"Limit Entry: ${entry:,.4f}\n"
+        f"Stop Loss: ${sl:,.4f} ({sl_pct:.2f}%)\n"
+        f"TP1: ${tp1:,.4f} ({tp1_pct:.2f}%)\n"
+        f"R:R: {signal.risk_reward:.1f} ({rr_percent:.0f}%)\n"
+        f"Confluence: {signal.confluence_score}/6 {tfs_bracketed}"
     )
 
     # Send notification
@@ -203,7 +203,7 @@ def notify_confluence(symbol: str, direction: str, aligned_timeframes: list,
 
     # Timestamp (European format: DD/MM/YYYY HH:MM)
     now = datetime.now(timezone.utc)
-    timestamp_str = now.strftime("%d/%m/%Y %H:%M UTC")
+    timestamp_str = now.strftime("%d/%m/%Y %H:%MM UTC")
 
     direction_emoji = "🟢" if direction == 'long' else "🔴"
     direction_text = "LONG" if direction == 'long' else "SHORT"
@@ -211,24 +211,23 @@ def notify_confluence(symbol: str, direction: str, aligned_timeframes: list,
     confluence = len(aligned_timeframes)
     tfs_bracketed = f"[{', '.join(aligned_timeframes)}]"
 
-    title = f"🎯 HIGH CONFLUENCE: {symbol} {direction_text}"
+    title = f"{direction_emoji} HIGH CONFLUENCE: {symbol} {direction_text}"
 
     sl_pct = abs((stop_loss - entry) / entry * 100)
-    rr_european = f"1:{risk_reward:.1f}"
+    rr_percent = risk_reward * 100
 
     message = (
-        f"🕐 {timestamp_str}\n"
-        f"⚡ {confluence}/6 Timeframes Aligned!\n"
-        f"⏱️ TFs: {tfs_bracketed}\n\n"
-        f"📍 Entry: ${entry:,.2f}\n"
-        f"🛑 SL: ${stop_loss:,.2f} ({sl_pct:.2f}%)\n"
+        f"{timestamp_str}\n"
+        f"Entry: ${entry:,.2f}\n"
+        f"SL: ${stop_loss:,.2f} ({sl_pct:.2f}%)\n"
     )
 
     for i, tp in enumerate(take_profits[:3], 1):
         tp_pct = abs((tp - entry) / entry * 100)
-        message += f"✅ TP{i}: ${tp:,.2f} ({tp_pct:.2f}%)\n"
+        message += f"TP{i}: ${tp:,.2f} ({tp_pct:.2f}%)\n"
 
-    message += f"⚖️ R:R: {risk_reward:.1f} ({rr_european})"
+    message += f"R:R: {risk_reward:.1f} ({rr_percent:.0f}%)\n"
+    message += f"Confluence: {confluence}/6 {tfs_bracketed}"
 
     return send_notification(
         topic=topic,

@@ -1,0 +1,1 @@
+# Pattern detector tests package
