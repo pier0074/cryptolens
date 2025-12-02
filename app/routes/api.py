@@ -1,5 +1,6 @@
 from functools import wraps
 from flask import Blueprint, request, jsonify
+from sqlalchemy.orm import joinedload
 from app.models import Symbol, Candle, Pattern, Signal, Setting
 from app.config import Config
 from app import db, csrf
@@ -93,7 +94,7 @@ def get_signals():
     direction = request.args.get('direction')
     limit = request.args.get('limit', 50, type=int)
 
-    query = Signal.query
+    query = Signal.query.options(joinedload(Signal.symbol))
 
     if status:
         query = query.filter_by(status=status)
@@ -106,8 +107,7 @@ def get_signals():
     result = []
     for signal in signals:
         data = signal.to_dict()
-        symbol = Symbol.query.get(signal.symbol_id)
-        data['symbol'] = symbol.symbol if symbol else None
+        data['symbol'] = signal.symbol.symbol if signal.symbol else None
         result.append(data)
 
     return jsonify(result)
@@ -115,24 +115,43 @@ def get_signals():
 
 @api_bp.route('/matrix')
 def get_matrix():
-    """Get the symbol/timeframe pattern matrix"""
+    """Get the symbol/timeframe pattern matrix (optimized: 1 query instead of 180)"""
+    from sqlalchemy import func
+
     symbols = Symbol.query.filter_by(is_active=True).all()
     timeframes = Config.TIMEFRAMES
 
-    matrix = {}
-    for symbol in symbols:
-        matrix[symbol.symbol] = {}
-        for tf in timeframes:
-            pattern = Pattern.query.filter_by(
-                symbol_id=symbol.id,
-                timeframe=tf,
-                status='active'
-            ).order_by(Pattern.detected_at.desc()).first()
+    # Initialize matrix with neutral values
+    matrix = {s.symbol: {tf: 'neutral' for tf in timeframes} for s in symbols}
 
-            if pattern:
-                matrix[symbol.symbol][tf] = pattern.direction
-            else:
-                matrix[symbol.symbol][tf] = 'neutral'
+    # Get all active patterns with their symbol in a single query
+    # Subquery to get max detected_at per symbol/timeframe
+    subq = db.session.query(
+        Pattern.symbol_id,
+        Pattern.timeframe,
+        func.max(Pattern.detected_at).label('max_detected')
+    ).filter(
+        Pattern.status == 'active'
+    ).group_by(
+        Pattern.symbol_id,
+        Pattern.timeframe
+    ).subquery()
+
+    # Join to get the actual pattern data
+    patterns = db.session.query(Pattern).join(
+        subq,
+        db.and_(
+            Pattern.symbol_id == subq.c.symbol_id,
+            Pattern.timeframe == subq.c.timeframe,
+            Pattern.detected_at == subq.c.max_detected,
+            Pattern.status == 'active'
+        )
+    ).options(joinedload(Pattern.symbol)).all()
+
+    # Build matrix from results
+    for pattern in patterns:
+        if pattern.symbol and pattern.symbol.symbol in matrix:
+            matrix[pattern.symbol.symbol][pattern.timeframe] = pattern.direction
 
     return jsonify(matrix)
 

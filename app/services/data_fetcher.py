@@ -15,18 +15,32 @@ logger = logging.getLogger(__name__)
 # Binance allows 1000 candles per request (vs Kucoin's 500)
 BATCH_SIZE = 1000
 
+# Singleton exchange instance cache
+_exchange_instance = None
+_exchange_id = None
+
 
 def get_exchange():
-    """Get configured exchange instance"""
+    """Get configured exchange instance (singleton pattern)"""
+    global _exchange_instance, _exchange_id
+
     exchange_id = getattr(Config, 'EXCHANGE', 'binance')
 
+    # Return cached instance if same exchange
+    if _exchange_instance is not None and _exchange_id == exchange_id:
+        return _exchange_instance
+
+    # Create new instance
     exchange_class = getattr(ccxt, exchange_id, ccxt.binance)
-    return exchange_class({
+    _exchange_instance = exchange_class({
         'enableRateLimit': True,
         'options': {
             'defaultType': 'spot'
         }
     })
+    _exchange_id = exchange_id
+
+    return _exchange_instance
 
 
 def fetch_candles(symbol: str, timeframe: str, limit: int = BATCH_SIZE, since: int = None) -> tuple:

@@ -40,28 +40,28 @@
 
 ---
 
-## HIGH PRIORITY (Performance)
+## HIGH PRIORITY (Performance) ✅ COMPLETE
 
 ### N+1 Query Fixes
-- [ ] **Fix signals endpoint N+1** - `api.py:79-84`
+- [x] **Fix signals endpoint N+1** - `api.py:79-84`
   - Use `joinedload(Signal.symbol)`
   - Single query instead of N+1
 
-- [ ] **Fix pattern matrix N+1** - `api.py:96-108`
-  - Currently 180 queries (30 symbols × 6 timeframes)
-  - Rewrite to single query with groupby
+- [x] **Fix pattern matrix N+1** - `api.py:96-108`
+  - Previously 180 queries (30 symbols × 6 timeframes)
+  - Now uses single query with subquery groupby
 
-- [ ] **Cache exchange instance** - `data_fetcher.py:45`
+- [x] **Cache exchange instance** - `data_fetcher.py:45`
   - Singleton pattern for ccxt exchange
   - Avoid recreating on every call
 
 ### Memory Optimization
-- [ ] **Direct SQL to DataFrame** - `aggregator.py:54-70`
+- [x] **Direct SQL to DataFrame** - `aggregator.py:54-70`
   - Use `pd.read_sql()` instead of loading to list first
   - Reduce memory footprint by 50%
 
 ### Caching Layer
-- [ ] **Add Redis caching** (optional)
+- [ ] **Add Redis caching** (optional, future)
   - Cache pattern matrix (invalidate on new patterns)
   - Cache confluence scores
   - Cache symbol list
@@ -303,10 +303,10 @@
 6. ~~Silent logging failures fix~~
 7. ~~Transaction rollback fix~~
 
-### Phase 2: Performance (Week 2)
-1. Fix N+1 queries
-2. Exchange singleton
-3. Direct SQL to DataFrame
+### Phase 2: Performance ✅ COMPLETE
+1. ~~Fix N+1 queries (signals + matrix)~~
+2. ~~Exchange singleton~~
+3. ~~Direct SQL to DataFrame~~
 
 ### Phase 3: Testing (Week 3)
 1. Test infrastructure setup
