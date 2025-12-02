@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{% block title %}CryptoLens{% endblock %}</title>
 
     <!-- TailwindCSS -->
@@ -124,6 +125,11 @@
     </footer>
 
     <script>
+        // CSRF token helper for fetch requests
+        function getCsrfToken() {
+            return document.querySelector('meta[name="csrf-token"]').getAttribute('content');
+        }
+
         async function triggerScan() {
             try {
                 const response = await fetch('/api/scan', { method: 'POST' });

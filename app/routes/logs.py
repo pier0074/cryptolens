@@ -4,7 +4,7 @@ View and filter system logs
 """
 from flask import Blueprint, render_template, request, jsonify
 from app.models import Log, LOG_CATEGORIES, LOG_LEVELS, Symbol
-from app.services.logger import get_recent_logs, get_log_stats, cleanup_old_logs
+from app.services.logger import get_recent_logs, get_log_stats
 
 logs_bp = Blueprint('logs', __name__)
 
@@ -70,11 +70,3 @@ def api_logs():
 def api_stats():
     """API endpoint for log statistics"""
     return jsonify(get_log_stats())
-
-
-@logs_bp.route('/cleanup', methods=['POST'])
-def cleanup():
-    """Cleanup old logs"""
-    days = int(request.form.get('days', 7))
-    deleted = cleanup_old_logs(days)
-    return jsonify({'deleted': deleted, 'days': days})

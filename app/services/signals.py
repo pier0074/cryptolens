@@ -233,12 +233,18 @@ def generate_confluence_signal(symbol: str) -> Optional[Signal]:
         signal.confluence_score = confluence['score']
         signal.timeframes_aligned = json.dumps(confluence['aligned_timeframes'])
 
-        db.session.add(signal)
-        db.session.commit()
+        try:
+            db.session.add(signal)
+            db.session.commit()
 
-        # Notify for high-quality signals
-        from app.services.notifier import notify_signal
-        notify_signal(signal)
+            # Notify for high-quality signals
+            from app.services.notifier import notify_signal
+            notify_signal(signal)
+        except Exception as e:
+            db.session.rollback()
+            from app.services.logger import log_error
+            log_error(f"Failed to save signal: {e}", symbol=symbol)
+            return None
 
     return signal
 

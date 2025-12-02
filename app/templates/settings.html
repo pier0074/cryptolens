@@ -13,6 +13,7 @@
             <h2 class="text-lg font-bold mb-4">Notifications (NTFY.sh)</h2>
 
             <form action="/settings/save" method="POST" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div>
                     <label class="block text-sm text-muted mb-1">NTFY Topic</label>
                     <input type="text" name="ntfy_topic" value="{{ settings.ntfy_topic }}"
@@ -55,6 +56,7 @@
             <h2 class="text-lg font-bold mb-4">Risk Parameters</h2>
 
             <form action="/settings/save" method="POST" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <div>
                     <label class="block text-sm text-muted mb-1">Risk Per Trade (%)</label>
                     <input type="number" name="risk_per_trade" value="{{ settings.risk_per_trade }}"
@@ -89,6 +91,35 @@
                 <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">
                     Save
                 </button>
+            </form>
+        </div>
+
+        <!-- Security -->
+        <div class="bg-card rounded-lg p-6 lg:col-span-2">
+            <h2 class="text-lg font-bold mb-4">API Security</h2>
+
+            <form action="/settings/save" method="POST" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div>
+                    <label class="block text-sm text-muted mb-1">API Key</label>
+                    <input type="text" name="api_key" value="{{ settings.api_key }}"
+                           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 font-mono"
+                           placeholder="Leave empty to disable API authentication">
+                    <p class="text-xs text-muted mt-1">
+                        If set, POST requests to /api/scheduler/* and /api/scan require this key in the X-API-Key header.
+                        Leave empty for open access (development mode).
+                    </p>
+                </div>
+
+                <div class="flex items-center space-x-4">
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">
+                        Save
+                    </button>
+                    <button type="button" @click="generateApiKey()"
+                            class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded">
+                        Generate Random Key
+                    </button>
+                </div>
             </form>
         </div>
 
@@ -140,9 +171,21 @@ function settingsApp() {
     return {
         newSymbol: '',
 
+        generateApiKey() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let key = '';
+            for (let i = 0; i < 32; i++) {
+                key += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            document.querySelector('input[name="api_key"]').value = key;
+        },
+
         async testNotification() {
             try {
-                const response = await fetch('/settings/test-notification', { method: 'POST' });
+                const response = await fetch('/settings/test-notification', {
+                    method: 'POST',
+                    headers: { 'X-CSRFToken': getCsrfToken() }
+                });
                 const data = await response.json();
                 if (data.success) {
                     alert('Test notification sent! Check your NTFY app.');
@@ -159,7 +202,10 @@ function settingsApp() {
             try {
                 const response = await fetch('/settings/symbols', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    },
                     body: JSON.stringify({ action: 'add', symbol: this.newSymbol })
                 });
                 const data = await response.json();
@@ -175,7 +221,10 @@ function settingsApp() {
             try {
                 const response = await fetch('/settings/symbols', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    },
                     body: JSON.stringify({ action: 'toggle', id: id })
                 });
                 const data = await response.json();
@@ -192,7 +241,10 @@ function settingsApp() {
             try {
                 const response = await fetch('/settings/symbols', {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    },
                     body: JSON.stringify({ action: 'delete', id: id })
                 });
                 const data = await response.json();

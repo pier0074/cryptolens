@@ -1,11 +1,23 @@
 import os
+import secrets
 from dotenv import load_dotenv
 
 load_dotenv()
 
+
+def get_secret_key():
+    """Get or generate SECRET_KEY"""
+    key = os.getenv('SECRET_KEY')
+    if key:
+        return key
+    # In development, generate a random key (will change on restart)
+    # In production, SECRET_KEY env var should be set
+    return secrets.token_hex(32)
+
+
 class Config:
     """Base configuration"""
-    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
+    SECRET_KEY = get_secret_key()
     SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///data/cryptolens.db')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     # SQLite timeout to prevent "database is locked" errors
@@ -46,6 +58,10 @@ class DevelopmentConfig(Config):
 class ProductionConfig(Config):
     """Production configuration"""
     DEBUG = False
+
+    def __init__(self):
+        if not os.getenv('SECRET_KEY'):
+            raise ValueError("SECRET_KEY environment variable is required in production")
 
 
 config = {

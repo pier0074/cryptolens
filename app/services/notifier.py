@@ -2,6 +2,7 @@
 Notification Service
 Sends push notifications via NTFY.sh
 """
+import time
 import requests
 from datetime import datetime, timezone
 from app.models import Signal, Symbol, Pattern, Notification, Setting
@@ -12,9 +13,9 @@ from app.services.logger import log_notify, log_error
 
 
 def send_notification(topic: str, title: str, message: str, priority: int = 3,
-                      tags: str = "chart,money") -> bool:
+                      tags: str = "chart,money", max_retries: int = 3) -> bool:
     """
-    Send a push notification via ntfy.sh
+    Send a push notification via ntfy.sh with exponential backoff retry
 
     Args:
         topic: NTFY topic to send to
@@ -22,27 +23,45 @@ def send_notification(topic: str, title: str, message: str, priority: int = 3,
         message: Notification body
         priority: 1=min, 2=low, 3=default, 4=high, 5=urgent
         tags: Comma-separated emoji tags
+        max_retries: Maximum number of retry attempts
 
     Returns:
         True if successful
     """
-    try:
-        # Use JSON API to properly handle UTF-8 titles with emojis
-        response = requests.post(
-            f"{Config.NTFY_URL}",
-            json={
-                "topic": topic,
-                "title": title,
-                "message": message,
-                "priority": priority,
-                "tags": tags.split(",")
-            },
-            timeout=10
-        )
-        return response.status_code == 200
-    except Exception as e:
-        log_error(f"NTFY notification failed: {e}")
-        return False
+    last_error = None
+
+    for attempt in range(max_retries):
+        try:
+            # Use JSON API to properly handle UTF-8 titles with emojis
+            response = requests.post(
+                f"{Config.NTFY_URL}",
+                json={
+                    "topic": topic,
+                    "title": title,
+                    "message": message,
+                    "priority": priority,
+                    "tags": tags.split(",")
+                },
+                timeout=10
+            )
+            if response.status_code == 200:
+                return True
+
+            last_error = f"HTTP {response.status_code}"
+        except requests.exceptions.Timeout:
+            last_error = "Request timeout"
+        except requests.exceptions.ConnectionError:
+            last_error = "Connection error"
+        except Exception as e:
+            last_error = str(e)
+
+        # Exponential backoff: 1s, 2s, 4s
+        if attempt < max_retries - 1:
+            wait_time = 2 ** attempt
+            time.sleep(wait_time)
+
+    log_error(f"NTFY notification failed after {max_retries} attempts: {last_error}")
+    return False
 
 
 def notify_signal(signal: Signal) -> bool:

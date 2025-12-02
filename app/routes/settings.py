@@ -1,7 +1,11 @@
+import re
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
 from app.models import Symbol, Setting
 from app.config import Config
 from app import db
+
+# Valid symbol pattern: BASE/QUOTE format (e.g., BTC/USDT, ETH/BTC)
+SYMBOL_PATTERN = re.compile(r'^[A-Z0-9]{2,10}/[A-Z0-9]{2,10}$')
 
 settings_bp = Blueprint('settings', __name__)
 
@@ -20,6 +24,7 @@ def index():
         'default_rr': Setting.get('default_rr', '3.0'),
         'min_confluence': Setting.get('min_confluence', '2'),
         'notifications_enabled': Setting.get('notifications_enabled', 'true'),
+        'api_key': Setting.get('api_key', ''),
     }
 
     return render_template('settings.html',
@@ -35,7 +40,7 @@ def save():
 
     # Save each setting
     for key in ['ntfy_topic', 'ntfy_priority', 'scan_interval',
-                'risk_per_trade', 'default_rr', 'min_confluence']:
+                'risk_per_trade', 'default_rr', 'min_confluence', 'api_key']:
         if key in data:
             Setting.set(key, data[key])
 
@@ -53,12 +58,23 @@ def manage_symbols():
     action = data.get('action')
 
     if action == 'add':
-        symbol_name = data.get('symbol')
-        if symbol_name and symbol_name not in [s.symbol for s in Symbol.query.all()]:
-            symbol = Symbol(symbol=symbol_name, exchange='kucoin')
-            db.session.add(symbol)
-            db.session.commit()
-            return jsonify({'success': True, 'symbol': symbol.to_dict()})
+        symbol_name = data.get('symbol', '').strip().upper()
+
+        # Validate symbol format
+        if not symbol_name:
+            return jsonify({'success': False, 'error': 'Symbol name is required'}), 400
+
+        if not SYMBOL_PATTERN.match(symbol_name):
+            return jsonify({'success': False, 'error': 'Invalid symbol format. Use BASE/QUOTE (e.g., BTC/USDT)'}), 400
+
+        # Check if symbol already exists
+        if symbol_name in [s.symbol for s in Symbol.query.all()]:
+            return jsonify({'success': False, 'error': 'Symbol already exists'}), 400
+
+        symbol = Symbol(symbol=symbol_name, exchange='kucoin')
+        db.session.add(symbol)
+        db.session.commit()
+        return jsonify({'success': True, 'symbol': symbol.to_dict()})
 
     elif action == 'toggle':
         symbol_id = data.get('id')

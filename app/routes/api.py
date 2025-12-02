@@ -1,9 +1,36 @@
+from functools import wraps
 from flask import Blueprint, request, jsonify
-from app.models import Symbol, Candle, Pattern, Signal
+from app.models import Symbol, Candle, Pattern, Signal, Setting
 from app.config import Config
-from app import db
+from app import db, csrf
 
 api_bp = Blueprint('api', __name__)
+
+# Exempt API from CSRF (uses API key authentication instead)
+csrf.exempt(api_bp)
+
+
+def require_api_key(f):
+    """Decorator to require API key for sensitive endpoints"""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        # Get API key from settings (if not set, endpoints are open)
+        api_key = Setting.get('api_key')
+        if not api_key:
+            # No API key configured - allow access (for development)
+            return f(*args, **kwargs)
+
+        # Check header
+        provided_key = request.headers.get('X-API-Key')
+        if not provided_key:
+            # Also check query param for browser testing
+            provided_key = request.args.get('api_key')
+
+        if provided_key != api_key:
+            return jsonify({'error': 'Unauthorized - Invalid or missing API key'}), 401
+
+        return f(*args, **kwargs)
+    return decorated
 
 
 @api_bp.route('/symbols')
@@ -111,6 +138,7 @@ def get_matrix():
 
 
 @api_bp.route('/scan', methods=['POST'])
+@require_api_key
 def trigger_scan():
     """Manually trigger a pattern scan"""
     from app.services.patterns import scan_all_patterns
@@ -120,6 +148,7 @@ def trigger_scan():
 
 
 @api_bp.route('/fetch', methods=['POST'])
+@require_api_key
 def trigger_fetch():
     """Manually trigger data fetch"""
     data = request.get_json() or {}
@@ -143,6 +172,7 @@ def scheduler_status():
 
 
 @api_bp.route('/scheduler/start', methods=['POST'])
+@require_api_key
 def scheduler_start():
     """Start the background scheduler"""
     from app.services.scheduler import start_scheduler, get_scheduler_status
@@ -153,6 +183,7 @@ def scheduler_start():
 
 
 @api_bp.route('/scheduler/stop', methods=['POST'])
+@require_api_key
 def scheduler_stop():
     """Stop the background scheduler"""
     from app.services.scheduler import stop_scheduler, get_scheduler_status
@@ -162,6 +193,7 @@ def scheduler_stop():
 
 
 @api_bp.route('/scheduler/toggle', methods=['POST'])
+@require_api_key
 def scheduler_toggle():
     """Toggle the scheduler on/off"""
     from app.services.scheduler import start_scheduler, stop_scheduler, get_scheduler_status

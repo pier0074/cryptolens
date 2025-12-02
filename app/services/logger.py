@@ -2,6 +2,7 @@
 Logging Service
 Centralized logging to database and console
 """
+import sys
 import json
 import logging
 from datetime import datetime, timezone
@@ -14,6 +15,10 @@ if not console_logger.handlers:
     handler = logging.StreamHandler()
     handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(message)s', '%H:%M:%S'))
     console_logger.addHandler(handler)
+
+# Track database logging failures to avoid spamming
+_db_log_failures = 0
+_MAX_DB_FAILURES_LOGGED = 3
 
 
 def log(category: str, message: str, level: str = 'INFO',
@@ -73,8 +78,13 @@ def log(category: str, message: str, level: str = 'INFO',
                 db.session.add(log_entry)
                 db.session.commit()
     except Exception as e:
-        # Don't spam console with DB errors
-        pass
+        # Log to stderr but limit spam
+        global _db_log_failures
+        _db_log_failures += 1
+        if _db_log_failures <= _MAX_DB_FAILURES_LOGGED:
+            print(f"[DB LOG ERROR] Failed to write log to database: {e}", file=sys.stderr)
+            if _db_log_failures == _MAX_DB_FAILURES_LOGGED:
+                print("[DB LOG ERROR] Suppressing further database logging errors", file=sys.stderr)
 
 
 def log_fetch(message: str, symbol: str = None, timeframe: str = None, **kwargs):
@@ -167,15 +177,3 @@ def get_log_stats():
     return stats
 
 
-def cleanup_old_logs(days: int = 7):
-    """Delete logs older than specified days"""
-    from app import db
-    from app.models import Log
-    from datetime import timedelta
-
-    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
-    deleted = Log.query.filter(Log.timestamp < cutoff).delete()
-    db.session.commit()
-
-    log_system(f"Cleaned up {deleted} logs older than {days} days")
-    return deleted
