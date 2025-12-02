@@ -153,10 +153,22 @@
   - Sample candle data fixtures (bullish/bearish FVG, no FVG, small FVG)
   - Sample pattern and signal fixtures
 
-### Remaining Tests (Optional)
-- [ ] `tests/test_patterns/test_order_block.py`
-- [ ] `tests/test_patterns/test_liquidity.py`
-- [ ] `tests/test_integration.py`
+### Additional Pattern Tests ✅ COMPLETE
+- [x] `tests/test_patterns/test_order_block.py` (9 tests)
+  - Bullish/bearish order block detection
+  - Weak moves don't create blocks
+  - Fill detection
+- [x] `tests/test_patterns/test_liquidity.py` (10 tests)
+  - Swing point detection
+  - Bullish/bearish sweep detection
+  - Fill/invalidation logic
+- [x] `tests/test_integration.py` (14 tests)
+  - Pattern detection pipeline
+  - Confluence flow
+  - Notification pipeline (BTC/ETH/SOL, LONG/SHORT, FVG/OB/LS)
+  - Test mode notifications
+  - Database integrity
+  - Settings integration
 
 ---
 
@@ -283,6 +295,11 @@
 - [x] Progress bar for aggregation
 - [x] Minimum zone size filter (0.15%)
 - [x] Smart price formatting for cheap coins
+- [x] **Test suite** (101 tests, 54% coverage)
+- [x] **Dynamic notification tags** (direction/symbol/pattern)
+- [x] **Test mode notifications** ([TEST] prefix, `test` tag)
+- [x] **Varied test notifications** (BTC/ETH/SOL, LONG/SHORT, FVG/OB/LS)
+- [x] **European notification format** (timestamp, R:R percentage, confluence timeframes)
 
 ---
 
@@ -304,10 +321,14 @@
 
 ### Phase 3: Testing ✅ COMPLETE
 1. ~~Test infrastructure setup (conftest.py)~~
-2. ~~Pattern detection tests (test_patterns.py - 16 tests)~~
+2. ~~Pattern detection tests~~
+   - test_patterns/test_imbalance.py (16 tests)
+   - test_patterns/test_order_block.py (9 tests)
+   - test_patterns/test_liquidity.py (10 tests)
 3. ~~Signal generation tests (test_signals.py - 20 tests)~~
 4. ~~API tests (test_api.py - 31 tests)~~
-   - Total: 67 tests passing
+5. ~~Integration tests (test_integration.py - 14 tests)~~
+   - **Total: 101 tests passing, 54% coverage**
 
 ### Phase 4: Portfolio & Journal
 1. Database models
@@ -325,4 +346,4 @@
 
 ---
 
-*Last updated: 2025-12-02 (Phase 3 Testing complete)*
+*Last updated: 2025-12-02 (Phase 3 Testing complete - 101 tests, 54% coverage)*

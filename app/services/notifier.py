@@ -64,12 +64,13 @@ def send_notification(topic: str, title: str, message: str, priority: int = 3,
     return False
 
 
-def notify_signal(signal: Signal) -> bool:
+def notify_signal(signal: Signal, test_mode: bool = False) -> bool:
     """
     Send notification for a trading signal
 
     Args:
         signal: The signal to notify about
+        test_mode: If True, adds 'Test' to tags and title
 
     Returns:
         True if successful
@@ -119,14 +120,17 @@ def notify_signal(signal: Signal) -> bool:
     direction_emoji = "🟢" if signal.direction == 'long' else "🔴"
     direction_text = "LONG" if signal.direction == 'long' else "SHORT"
 
-    # Title: just emoji + symbol
-    title = f"{direction_emoji} {direction_text}: {symbol_name}"
+    # Title: emoji + symbol (with Test prefix if test_mode)
+    test_prefix = "[TEST] " if test_mode else ""
+    title = f"{test_prefix}{direction_emoji} {direction_text}: {symbol_name}"
 
     # Extract base symbol (e.g., BTC from BTC/USDT)
     base_symbol = symbol_name.split('/')[0] if '/' in symbol_name else symbol_name
 
-    # Build tags: direction, base symbol, pattern abbreviation
+    # Build tags: direction, base symbol, pattern abbreviation (with test if test_mode)
     tags = f"{signal.direction},{base_symbol},{pattern_abbrev}"
+    if test_mode:
+        tags = f"test,{tags}"
 
     # Timestamp (European format: DD/MM/YYYY HH:MM)
     now = datetime.now(timezone.utc)

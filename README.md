@@ -14,7 +14,8 @@ CryptoLens detects smart money patterns (Fair Value Gaps, Order Blocks, Liquidit
 - **Multi-Timeframe Analysis**: Scans 6 timeframes (1m, 5m, 15m, 1h, 4h, 1d)
 - **Auto-Scanner**: Background scheduler scans for patterns every minute (fetch + aggregate + scan)
 - **Scanner Toggle**: Enable/disable the auto-scanner from the UI with live status indicator
-- **Push Notifications**: Free push notifications via NTFY.sh - no account required
+- **Push Notifications**: Free push notifications via NTFY.sh with dynamic tags (direction, symbol, pattern)
+- **Test Mode Notifications**: Test notifications include `[TEST]` prefix and `test` tag
 - **Interactive Dashboard**: Visual matrix showing patterns for 30 crypto pairs
 - **Pattern Tabs**: Filter dashboard by pattern type (All, FVG, Order Blocks, Sweeps)
 - **Performance Analytics**: Track pattern statistics, win rates, and backtest results
@@ -171,6 +172,61 @@ Price takes out a previous high/low (hunting stop losses) then reverses:
 | `/api/scheduler/stop` | POST | Stop the scanner |
 | `/api/scheduler/toggle` | POST | Toggle scanner on/off |
 
+## Testing
+
+Run the test suite with coverage:
+
+```bash
+# Run all tests
+python -m pytest
+
+# Run with coverage report
+python -m pytest --cov=app --cov-report=term
+
+# Run specific test file
+python -m pytest tests/test_signals.py -v
+```
+
+### Test Coverage
+
+| Module | Stmts | Miss | Cover |
+|--------|-------|------|-------|
+| **Core** |  |  |  |
+| `app/__init__.py` | 41 | 3 | 93% |
+| `app/config.py` | 34 | 3 | 91% |
+| `app/models.py` | 143 | 11 | 92% |
+| **Routes** |  |  |  |
+| `app/routes/api.py` | 127 | 18 | 86% |
+| `app/routes/backtest.py` | 25 | 14 | 44% |
+| `app/routes/dashboard.py` | 50 | 39 | 22% |
+| `app/routes/logs.py` | 30 | 20 | 33% |
+| `app/routes/patterns.py` | 30 | 21 | 30% |
+| `app/routes/settings.py` | 74 | 59 | 20% |
+| `app/routes/signals.py` | 30 | 20 | 33% |
+| `app/routes/stats.py` | 61 | 53 | 13% |
+| **Services** |  |  |  |
+| `app/services/signals.py` | 128 | 23 | 82% |
+| `app/services/notifier.py` | 100 | 35 | 65% |
+| `app/services/logger.py` | 77 | 39 | 49% |
+| `app/services/data_fetcher.py` | 126 | 86 | 32% |
+| `app/services/aggregator.py` | 88 | 69 | 22% |
+| `app/services/scheduler.py` | 98 | 84 | 14% |
+| `app/services/backtester.py` | 98 | 98 | 0% |
+| **Pattern Detectors** |  |  |  |
+| `app/services/patterns/base.py` | 23 | 3 | 87% |
+| `app/services/patterns/liquidity.py` | 106 | 23 | 78% |
+| `app/services/patterns/order_block.py` | 93 | 25 | 73% |
+| `app/services/patterns/imbalance.py` | 78 | 24 | 69% |
+| `app/services/patterns/__init__.py` | 54 | 20 | 63% |
+| **TOTAL** | **1714** | **790** | **54%** |
+
+**Coverage Notes:**
+- Core modules (models, config, init): 91-93%
+- Pattern detectors: 63-87%
+- Signal generation: 82%
+- UI routes: 13-44% (require browser/integration testing)
+- Backtester: 0% (not yet implemented)
+
 ## Project Structure
 
 ```
@@ -203,6 +259,15 @@ cryptolens/
 │   └── templates/           # HTML templates
 ├── scripts/
 │   └── fetch_historical.py  # Download historical data (DB-based resume)
+├── tests/                   # Test suite (101 tests)
+│   ├── conftest.py          # Pytest fixtures
+│   ├── test_api.py          # API endpoint tests
+│   ├── test_signals.py      # Signal generation tests
+│   ├── test_integration.py  # End-to-end integration tests
+│   └── test_patterns/       # Pattern detector tests
+│       ├── test_imbalance.py
+│       ├── test_order_block.py
+│       └── test_liquidity.py
 ├── data/                    # SQLite database (WAL mode for concurrency)
 ├── requirements.txt
 └── run.py
@@ -231,6 +296,8 @@ cryptolens/
 - [x] Scanner toggle in UI (on/off control)
 - [x] Database statistics page (ATH/ATL, candle counts)
 - [x] DB-based progress tracking for fetch_historical
+- [x] Test suite with 101 tests (54% overall coverage)
+- [x] Dynamic notification tags (direction/symbol/pattern)
 - [ ] API trading integration (Binance)
 - [ ] Mobile-responsive design improvements
 - [ ] WebSocket real-time updates

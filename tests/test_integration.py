@@ -163,6 +163,41 @@ class TestNotificationPipeline:
             assert '🟢' in request_json['title']
 
     @patch('app.services.notifier.requests.post')
+    def test_notification_test_mode(self, mock_post, app, sample_symbol, sample_pattern):
+        """Test that test_mode adds 'Test' to tags and title"""
+        mock_post.return_value = MagicMock(status_code=200)
+
+        with app.app_context():
+            Setting.set('notifications_enabled', 'true')
+            db.session.commit()
+
+            signal = Signal(
+                symbol_id=sample_symbol,
+                direction='long',
+                entry_price=97500.0,
+                stop_loss=95000.0,
+                take_profit_1=100000.0,
+                take_profit_2=105000.0,
+                take_profit_3=110000.0,
+                risk_reward=4.0,
+                confluence_score=4,
+                pattern_id=sample_pattern,
+                status='pending'
+            )
+            db.session.add(signal)
+            db.session.commit()
+
+            from app.services.notifier import notify_signal
+            result = notify_signal(signal, test_mode=True)
+
+            assert result is True
+            call_args = mock_post.call_args
+            request_json = call_args[1]['json']
+            # Test mode should add 'test' to tags and '[TEST]' to title
+            assert 'test' in request_json['tags']
+            assert '[TEST]' in request_json['title']
+
+    @patch('app.services.notifier.requests.post')
     def test_short_signal_notification_eth_order_block(self, mock_post, app):
         """Test SHORT notification for ETH with Order Block pattern"""
         mock_post.return_value = MagicMock(status_code=200)

@@ -97,17 +97,65 @@ def manage_symbols():
 
 @settings_bp.route('/test-notification', methods=['POST'])
 def test_notification():
-    """Send a test notification"""
+    """Send 3 varied test notifications to verify all notification types work"""
     from app.services.notifier import send_notification
+    from datetime import datetime, timezone
+    import random
 
     topic = Setting.get('ntfy_topic', Config.NTFY_TOPIC)
     priority = int(Setting.get('ntfy_priority', str(Config.NTFY_PRIORITY)))
 
-    success = send_notification(
-        topic=topic,
-        title='Test Notification',
-        message='CryptoLens notifications are working!',
-        priority=priority
-    )
+    # Timestamp
+    now = datetime.now(timezone.utc)
+    timestamp_str = now.strftime("%d/%m/%Y %H:%M UTC")
 
-    return jsonify({'success': success})
+    # 3 varied test notifications
+    test_signals = [
+        {
+            'direction': 'long', 'emoji': '🟢', 'symbol': 'BTC/USDT',
+            'pattern': 'FVG (Fair Value Gap)', 'abbrev': 'FVG',
+            'entry': 97500.0, 'sl': 95000.0, 'tp1': 100000.0,
+            'rr': 3.0, 'confluence': 4, 'tfs': '15m, 1h, 4h, 1d'
+        },
+        {
+            'direction': 'short', 'emoji': '🔴', 'symbol': 'ETH/USDT',
+            'pattern': 'Order Block', 'abbrev': 'OB',
+            'entry': 3800.0, 'sl': 3900.0, 'tp1': 3700.0,
+            'rr': 2.5, 'confluence': 3, 'tfs': '1h, 4h, 1d'
+        },
+        {
+            'direction': 'long', 'emoji': '🟢', 'symbol': 'SOL/USDT',
+            'pattern': 'Liquidity Sweep', 'abbrev': 'LS',
+            'entry': 180.0, 'sl': 172.0, 'tp1': 188.0,
+            'rr': 2.0, 'confluence': 5, 'tfs': '5m, 15m, 1h, 4h, 1d'
+        }
+    ]
+
+    results = []
+    for sig in test_signals:
+        base = sig['symbol'].split('/')[0]
+        sl_pct = abs((sig['sl'] - sig['entry']) / sig['entry'] * 100)
+        tp1_pct = abs((sig['tp1'] - sig['entry']) / sig['entry'] * 100)
+        rr_pct = sig['rr'] * 100
+
+        title = f"[TEST] {sig['emoji']} {sig['direction'].upper()}: {sig['symbol']}"
+        message = (
+            f"{timestamp_str}\n"
+            f"Symbol: {sig['symbol']}\n"
+            f"Direction: {sig['direction'].upper()}\n"
+            f"Pattern: {sig['pattern']}\n"
+            f"Limit Entry: ${sig['entry']:,.4f}\n"
+            f"Stop Loss: ${sig['sl']:,.4f} ({sl_pct:.2f}%)\n"
+            f"TP1: ${sig['tp1']:,.4f} ({tp1_pct:.2f}%)\n"
+            f"R:R: {sig['rr']:.1f} ({rr_pct:.0f}%)\n"
+            f"Confluence: {sig['confluence']}/6 [{sig['tfs']}]"
+        )
+        tags = f"test,{sig['direction']},{base},{sig['abbrev']}"
+
+        success = send_notification(
+            topic=topic, title=title, message=message,
+            priority=priority, tags=tags
+        )
+        results.append(success)
+
+    return jsonify({'success': all(results), 'sent': sum(results)})
