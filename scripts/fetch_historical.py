@@ -427,7 +427,8 @@ Usage: python fetch_historical.py [options]
 
 Options:
   --days=N      Days of history to fetch (default: 365)
-  --force       Force re-fetch even if data exists
+  --force       Force re-fetch even if data exists (fills gaps)
+  --delete      DELETE all candles and patterns, then re-fetch from scratch
   --status      Show database status only
   --help        Show this help
 
@@ -440,7 +441,8 @@ Examples:
   python fetch_historical.py              # Fetch 1 year of data
   python fetch_historical.py --days=30    # Fetch 30 days
   python fetch_historical.py --status     # Check current DB status
-  python fetch_historical.py --force      # Re-fetch all data
+  python fetch_historical.py --force      # Re-fetch all data (fills gaps)
+  python fetch_historical.py --delete     # Delete DB and start fresh
         """)
         sys.exit(0)
 
@@ -448,5 +450,38 @@ Examples:
         app = create_app()
         show_db_status(app)
         sys.exit(0)
+
+    if '--delete' in sys.argv:
+        app = create_app()
+        with app.app_context():
+            from app.models import Pattern, Signal, Notification, Log
+
+            print("\n⚠️  WARNING: This will delete ALL candles, patterns, signals, and logs!")
+            confirm = input("Type 'DELETE' to confirm: ")
+
+            if confirm != 'DELETE':
+                print("Aborted.")
+                sys.exit(0)
+
+            print("\n🗑️  Deleting all data...")
+
+            # Delete in order of dependencies
+            deleted_notifications = Notification.query.delete()
+            print(f"   Deleted {deleted_notifications} notifications")
+
+            deleted_signals = Signal.query.delete()
+            print(f"   Deleted {deleted_signals} signals")
+
+            deleted_patterns = Pattern.query.delete()
+            print(f"   Deleted {deleted_patterns} patterns")
+
+            deleted_logs = Log.query.delete()
+            print(f"   Deleted {deleted_logs} logs")
+
+            deleted_candles = Candle.query.delete()
+            print(f"   Deleted {deleted_candles} candles")
+
+            db.session.commit()
+            print("✅ Database cleared. Starting fresh fetch...\n")
 
     main()

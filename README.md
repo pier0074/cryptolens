@@ -67,8 +67,11 @@ python scripts/fetch_historical.py --days=30
 # Check current database status
 python scripts/fetch_historical.py --status
 
-# Force re-fetch even if data exists (fills gaps, doesn't delete)
+# Force re-fetch even if data exists (fills gaps)
 python scripts/fetch_historical.py --force
+
+# Delete all candles and start fresh (requires confirmation)
+python scripts/fetch_historical.py --delete
 ```
 
 Progress is tracked in the database - if the script crashes, it will automatically resume from where it left off.
