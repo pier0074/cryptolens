@@ -4,6 +4,7 @@ Tests for Signal Generation
 import pytest
 import json
 from datetime import datetime, timedelta, timezone
+from unittest.mock import patch, MagicMock
 from app.models import Pattern, Symbol, Signal, Setting, Candle
 from app.services.signals import (
     calculate_atr,
@@ -371,8 +372,10 @@ class TestConfluence:
 class TestConfluenceSignal:
     """Tests for confluence-based signal generation"""
 
-    def test_signal_generated_with_sufficient_confluence(self, app, sample_symbol):
+    @patch('app.services.notifier.requests.post')
+    def test_signal_generated_with_sufficient_confluence(self, mock_post, app, sample_symbol):
         """Test signal is generated when confluence threshold is met"""
+        mock_post.return_value = MagicMock(status_code=200)
         with app.app_context():
             # Set minimum confluence to 3
             Setting.set('min_confluence', '3')
@@ -436,8 +439,10 @@ class TestConfluenceSignal:
             signal = generate_confluence_signal('BTC/USDT')
             assert signal is None
 
-    def test_signal_cooldown(self, app, sample_symbol):
+    @patch('app.services.notifier.requests.post')
+    def test_signal_cooldown(self, mock_post, app, sample_symbol):
         """Test signal cooldown prevents duplicate signals"""
+        mock_post.return_value = MagicMock(status_code=200)
         with app.app_context():
             Setting.set('min_confluence', '3')
             Setting.set('signal_cooldown_hours', '4')
@@ -516,8 +521,10 @@ class TestConfluenceSignal:
             # Should be None because no HTF (4h/1d) in aligned timeframes
             assert signal is None
 
-    def test_signal_uses_highest_tf_pattern(self, app, sample_symbol):
+    @patch('app.services.notifier.requests.post')
+    def test_signal_uses_highest_tf_pattern(self, mock_post, app, sample_symbol):
         """Test that signal uses the highest timeframe pattern"""
+        mock_post.return_value = MagicMock(status_code=200)
         with app.app_context():
             Setting.set('min_confluence', '3')
             Setting.set('require_htf', 'false')
