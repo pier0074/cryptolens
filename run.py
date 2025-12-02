@@ -74,18 +74,19 @@ if __name__ == '__main__':
         os.environ['CRYPTOLENS_PORT'] = str(port)
 
     # Start scheduler (only in reloader child process to avoid duplicate jobs)
-    scheduler_enabled = os.getenv('SCHEDULER_ENABLED', 'true').lower() == 'true'
+    # Default: DISABLED to prevent overheating and allow manual control
+    scheduler_enabled = os.getenv('SCHEDULER_ENABLED', 'false').lower() == 'true'
 
     if is_reloader and scheduler_enabled:
         from app.services.scheduler import start_scheduler, stop_scheduler
         scheduler = start_scheduler(app)
         atexit.register(stop_scheduler)
-        print("  ⏰ Auto-scanner: ENABLED (1-minute interval)")
+        print("  ⏰ Auto-scanner: ENABLED (5-minute interval)")
     elif not is_reloader:
         if scheduler_enabled:
             print("  ⏰ Auto-scanner will start when app is ready...")
         else:
-            print("  ⏰ Auto-scanner: DISABLED (set SCHEDULER_ENABLED=true to enable)")
+            print("  ⏰ Auto-scanner: DISABLED (start via API or set SCHEDULER_ENABLED=true)")
 
     if not is_reloader:
         print(f"""
