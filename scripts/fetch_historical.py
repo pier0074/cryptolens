@@ -253,13 +253,44 @@ def fetch_symbol_with_logging(app, symbol_name, days, force_refetch=False):
         bar = progress_bar(total_batches, total_batches)
         print(f"\r   {bar} | Complete | {total_new:,} candles                    ")
 
-        # Aggregate to higher timeframes
-        print(f"   📊 Aggregating 1m candles → 5m, 15m, 1h, 4h, 1d...")
+        # Aggregate to higher timeframes with progress
+        print(f"   📊 Aggregating 1m → 5m, 15m, 1h, 4h, 1d...")
         sys.stdout.flush()
-        agg_results = aggregate_all_timeframes(symbol_name)
+
+        # Progress tracking for aggregation
+        current_tf = {'tf': '', 'stage': '', 'results': {}}
+
+        def agg_progress(tf, stage, current, total):
+            current_tf['tf'] = tf
+            current_tf['stage'] = stage
+            stage_labels = {
+                'loading': 'Loading',
+                'resampling': 'Resampling',
+                'checking': 'Checking',
+                'saving': 'Saving'
+            }
+            stage_label = stage_labels.get(stage, stage)
+
+            if total > 0:
+                pct = (current / total) * 100
+                bar_width = 20
+                filled = int(bar_width * current / total)
+                bar_str = '█' * filled + '░' * (bar_width - filled)
+                # Build results string
+                res_str = ' | '.join(f"{k}={v:,}" for k, v in current_tf['results'].items())
+                if res_str:
+                    res_str = ' | ' + res_str
+                status = f"\r   📊 {tf:>3}: [{bar_str}] {pct:5.1f}% {stage_label}{res_str}    "
+            else:
+                status = f"\r   📊 {tf:>3}: {stage_label}...    "
+            print(status, end='', flush=True)
+
+        agg_results = aggregate_all_timeframes(symbol_name, progress_callback=agg_progress)
         agg_count = sum(agg_results.values())
-        print(f"   📊 Created: 5m={agg_results.get('5m', 0):,} | 15m={agg_results.get('15m', 0):,} | "
-              f"1h={agg_results.get('1h', 0):,} | 4h={agg_results.get('4h', 0):,} | 1d={agg_results.get('1d', 0):,}")
+
+        # Clear line and show final results
+        print(f"\r   📊 Created: 5m={agg_results.get('5m', 0):,} | 15m={agg_results.get('15m', 0):,} | "
+              f"1h={agg_results.get('1h', 0):,} | 4h={agg_results.get('4h', 0):,} | 1d={agg_results.get('1d', 0):,}      ")
 
         elapsed = time.time() - batch_start
         print(f"   ✅ Done! {total_new:,} new + {total_existing:,} existing | "
