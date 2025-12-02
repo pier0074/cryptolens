@@ -230,10 +230,29 @@ class TestSignalsRoutes:
         response = client.get('/signals/?direction=short')
         assert response.status_code == 200
 
-    @pytest.mark.skip(reason="Template signal_detail.html does not exist")
     def test_signal_detail(self, client, app, sample_symbol, sample_pattern):
-        """Test signal detail page - skipped due to missing template"""
-        pass
+        """Test signal detail page"""
+        with app.app_context():
+            signal = Signal(
+                symbol_id=sample_symbol,
+                direction='long',
+                entry_price=95000.0,
+                stop_loss=93000.0,
+                take_profit_1=97000.0,
+                take_profit_2=99000.0,
+                take_profit_3=101000.0,
+                risk_reward=3.0,
+                confluence_score=3,
+                pattern_id=sample_pattern,
+                status='pending'
+            )
+            db.session.add(signal)
+            db.session.commit()
+            signal_id = signal.id
+
+        response = client.get(f'/signals/{signal_id}')
+        assert response.status_code == 200
+        assert b'Signal #' in response.data
 
     def test_signal_detail_not_found(self, client, app):
         """Test signal detail for non-existent signal"""

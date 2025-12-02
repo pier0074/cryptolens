@@ -47,7 +47,7 @@ def generate_signal_from_pattern(pattern: Pattern, current_price: float = None) 
     Returns:
         Signal object or None
     """
-    symbol = Symbol.query.get(pattern.symbol_id)
+    symbol = db.session.get(Symbol, pattern.symbol_id)
     if not symbol:
         return None
 

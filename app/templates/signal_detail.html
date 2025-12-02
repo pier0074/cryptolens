@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block title %}Signal Detail - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between flex-wrap gap-4">
+        <div class="flex items-center space-x-4">
+            <a href="{{ url_for('signals.index') }}" class="text-muted hover:text-white">&larr; Back to Signals</a>
+            <h1 class="text-2xl font-bold">Signal #{{ signal.id }}</h1>
+        </div>
+        <span class="px-3 py-1 rounded text-sm
+            {% if signal.status == 'notified' %}bg-green-900 text-green-200
+            {% elif signal.status == 'filled' %}bg-blue-900 text-blue-200
+            {% elif signal.status == 'stopped' %}bg-red-900 text-red-200
+            {% elif signal.status == 'tp_hit' %}bg-yellow-900 text-yellow-200
+            {% else %}bg-gray-700{% endif %}">
+            {{ signal.status }}
+        </span>
+    </div>
+
+    <!-- Signal Details Card -->
+    <div class="bg-card rounded-lg p-6 border-l-4 {% if signal.direction == 'long' %}border-green-500{% else %}border-red-500{% endif %}">
+        <div class="flex items-center justify-between mb-6">
+            <span class="font-bold text-2xl">{{ signal.symbol_obj.symbol if signal.symbol_obj else 'Unknown' }}</span>
+            <span class="{% if signal.direction == 'long' %}bullish{% else %}bearish{% endif %} font-bold text-2xl">
+                {% if signal.direction == 'long' %}LONG{% else %}SHORT{% endif %}
+            </span>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Price Levels -->
+            <div class="space-y-4">
+                <h3 class="font-semibold text-lg border-b border-gray-700 pb-2">Price Levels</h3>
+                <div class="space-y-3">
+                    <div class="flex justify-between">
+                        <span class="text-muted">Entry Price:</span>
+                        <span class="font-mono text-lg">${{ '%.4f'|format(signal.entry_price) }}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-muted">Stop Loss:</span>
+                        <span class="font-mono text-lg text-red-400">${{ '%.4f'|format(signal.stop_loss) }}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-muted">Take Profit 1 (1:1):</span>
+                        <span class="font-mono text-lg text-green-400">${{ '%.4f'|format(signal.take_profit_1) }}</span>
+                    </div>
+                    {% if signal.take_profit_2 %}
+                    <div class="flex justify-between">
+                        <span class="text-muted">Take Profit 2 (1:2):</span>
+                        <span class="font-mono text-lg text-green-400">${{ '%.4f'|format(signal.take_profit_2) }}</span>
+                    </div>
+                    {% endif %}
+                    {% if signal.take_profit_3 %}
+                    <div class="flex justify-between">
+                        <span class="text-muted">Take Profit 3 (1:{{ '%.0f'|format(signal.risk_reward) }}):</span>
+                        <span class="font-mono text-lg text-green-400">${{ '%.4f'|format(signal.take_profit_3) }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Signal Info -->
+            <div class="space-y-4">
+                <h3 class="font-semibold text-lg border-b border-gray-700 pb-2">Signal Info</h3>
+                <div class="space-y-3">
+                    <div class="flex justify-between">
+                        <span class="text-muted">Risk/Reward:</span>
+                        <span class="font-bold text-lg">1:{{ '%.1f'|format(signal.risk_reward) }}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-muted">Confluence Score:</span>
+                        <span class="font-bold text-lg">{{ signal.confluence_score }}/6</span>
+                    </div>
+                    {% if signal.timeframes_aligned %}
+                    <div class="flex justify-between">
+                        <span class="text-muted">Aligned Timeframes:</span>
+                        <span class="font-mono">{{ signal.timeframes_aligned }}</span>
+                    </div>
+                    {% endif %}
+                    <div class="flex justify-between">
+                        <span class="text-muted">Created:</span>
+                        <span>{{ signal.created_at.strftime('%Y-%m-%d %H:%M') if signal.created_at else 'N/A' }}</span>
+                    </div>
+                    {% if signal.notified_at %}
+                    <div class="flex justify-between">
+                        <span class="text-muted">Notified:</span>
+                        <span>{{ signal.notified_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Status Actions -->
+    <div class="bg-card rounded-lg p-6">
+        <h3 class="font-semibold text-lg mb-4">Update Status</h3>
+        <div class="flex flex-wrap gap-3">
+            <button onclick="updateStatus('filled')" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded">
+                Mark Filled
+            </button>
+            <button onclick="updateStatus('stopped')" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded">
+                Mark Stopped
+            </button>
+            <button onclick="updateStatus('tp_hit')" class="px-4 py-2 bg-yellow-600 hover:bg-yellow-700 rounded">
+                Mark TP Hit
+            </button>
+            <button onclick="updateStatus('pending')" class="px-4 py-2 bg-gray-600 hover:bg-gray-700 rounded">
+                Reset to Pending
+            </button>
+        </div>
+    </div>
+</div>
+
+<script>
+function updateStatus(status) {
+    fetch('{{ url_for("signals.update_status", signal_id=signal.id) }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: status })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            location.reload();
+        } else {
+            alert('Failed to update status');
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('Failed to update status');
+    });
+}
+</script>
+{% endblock %}

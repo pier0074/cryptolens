@@ -78,7 +78,7 @@ def manage_symbols():
 
     elif action == 'toggle':
         symbol_id = data.get('id')
-        symbol = Symbol.query.get(symbol_id)
+        symbol = db.session.get(Symbol, symbol_id)
         if symbol:
             symbol.is_active = not symbol.is_active
             db.session.commit()
@@ -86,7 +86,7 @@ def manage_symbols():
 
     elif action == 'delete':
         symbol_id = data.get('id')
-        symbol = Symbol.query.get(symbol_id)
+        symbol = db.session.get(Symbol, symbol_id)
         if symbol:
             db.session.delete(symbol)
             db.session.commit()

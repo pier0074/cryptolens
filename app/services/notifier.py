@@ -84,11 +84,12 @@ def notify_signal(signal: Signal, test_mode: bool = False) -> bool:
     priority = int(Setting.get('ntfy_priority', str(Config.NTFY_PRIORITY)))
 
     # Get symbol
-    symbol = Symbol.query.get(signal.symbol_id)
+    from app import db
+    symbol = db.session.get(Symbol, signal.symbol_id)
     symbol_name = symbol.symbol if symbol else 'Unknown'
 
     # Get pattern type and abbreviation for tags
-    pattern = Pattern.query.get(signal.pattern_id) if signal.pattern_id else None
+    pattern = db.session.get(Pattern, signal.pattern_id) if signal.pattern_id else None
     pattern_type = 'Unknown'
     pattern_abbrev = 'SIG'  # Default abbreviation
     pattern_tf = ''

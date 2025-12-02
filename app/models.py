@@ -58,7 +58,7 @@ class Symbol(db.Model):
     symbol = db.Column(db.String(20), unique=True, nullable=False)  # e.g., "BTC/USDT"
     exchange = db.Column(db.String(20), default='kucoin')
     is_active = db.Column(db.Boolean, default=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
     candles = db.relationship('Candle', backref='symbol', lazy='dynamic')
@@ -125,7 +125,7 @@ class Pattern(db.Model):
     status = db.Column(db.String(15), default='active')  # 'active', 'filled', 'invalidated'
     filled_at = db.Column(db.Integer, nullable=True)
     fill_percentage = db.Column(db.Float, nullable=True)
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         db.Index('idx_pattern_active', 'symbol_id', 'timeframe', 'status'),
@@ -166,7 +166,7 @@ class Signal(db.Model):
     timeframes_aligned = db.Column(db.Text, nullable=True)  # JSON array of aligned TFs
     pattern_id = db.Column(db.Integer, db.ForeignKey('patterns.id'), nullable=True)
     status = db.Column(db.String(15), default='pending')  # 'pending', 'notified', 'filled', 'stopped', 'tp_hit'
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     notified_at = db.Column(db.DateTime, nullable=True)
 
     # Relationship
@@ -199,7 +199,7 @@ class Notification(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     signal_id = db.Column(db.Integer, db.ForeignKey('signals.id'), nullable=False)
     channel = db.Column(db.String(20), nullable=False)  # 'ntfy', 'telegram', 'email'
-    sent_at = db.Column(db.DateTime, default=datetime.utcnow)
+    sent_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     success = db.Column(db.Boolean, default=True)
     error_message = db.Column(db.Text, nullable=True)
 
@@ -216,19 +216,18 @@ class Setting(db.Model):
 
     key = db.Column(db.String(50), primary_key=True)
     value = db.Column(db.Text, nullable=True)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
     @classmethod
     def get(cls, key, default=None):
         """Get a setting value"""
-        setting = cls.query.get(key)
+        setting = db.session.get(cls, key)
         return setting.value if setting else default
 
     @classmethod
     def set(cls, key, value):
         """Set a setting value"""
-        from app import db
-        setting = cls.query.get(key)
+        setting = db.session.get(cls, key)
         if setting:
             setting.value = value
         else:
@@ -259,7 +258,7 @@ class Backtest(db.Model):
     total_profit_pct = db.Column(db.Float, default=0.0)
     max_drawdown = db.Column(db.Float, default=0.0)
     results_json = db.Column(db.Text, nullable=True)  # Detailed results
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     def __repr__(self):
         return f'<Backtest {self.name} {self.symbol}>'

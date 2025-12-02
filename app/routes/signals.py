@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, jsonify
+from flask import Blueprint, render_template, request, jsonify, abort
 from app.models import Symbol, Signal
 from app import db
 
@@ -23,7 +23,7 @@ def index():
 
     # Enrich with symbol data
     for signal in signals:
-        signal.symbol_obj = Symbol.query.get(signal.symbol_id)
+        signal.symbol_obj = db.session.get(Symbol, signal.symbol_id)
 
     return render_template('signals.html',
                            signals=signals,
@@ -34,8 +34,10 @@ def index():
 @signals_bp.route('/<int:signal_id>')
 def detail(signal_id):
     """Signal detail view"""
-    signal = Signal.query.get_or_404(signal_id)
-    signal.symbol_obj = Symbol.query.get(signal.symbol_id)
+    signal = db.session.get(Signal, signal_id)
+    if signal is None:
+        abort(404)
+    signal.symbol_obj = db.session.get(Symbol, signal.symbol_id)
 
     return render_template('signal_detail.html', signal=signal)
 
@@ -43,7 +45,9 @@ def detail(signal_id):
 @signals_bp.route('/<int:signal_id>/status', methods=['POST'])
 def update_status(signal_id):
     """Update signal status"""
-    signal = Signal.query.get_or_404(signal_id)
+    signal = db.session.get(Signal, signal_id)
+    if signal is None:
+        abort(404)
     data = request.get_json()
 
     if 'status' in data:

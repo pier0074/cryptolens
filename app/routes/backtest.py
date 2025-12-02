@@ -1,4 +1,4 @@
-from flask import Blueprint, render_template, request, jsonify
+from flask import Blueprint, render_template, request, jsonify, abort
 from app.models import Symbol, Backtest
 from app.config import Config
 from app import db
@@ -46,5 +46,7 @@ def run():
 @backtest_bp.route('/<int:backtest_id>')
 def detail(backtest_id):
     """Backtest detail view"""
-    backtest = Backtest.query.get_or_404(backtest_id)
+    backtest = db.session.get(Backtest, backtest_id)
+    if backtest is None:
+        abort(404)
     return render_template('backtest_detail.html', backtest=backtest)
