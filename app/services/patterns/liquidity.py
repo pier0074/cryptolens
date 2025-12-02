@@ -111,7 +111,11 @@ class LiquiditySweepDetector(PatternDetector):
                     if not self.is_zone_tradeable(zone_low, zone_high):
                         continue
 
-                    # Check if pattern already exists
+                    # Skip if overlapping pattern already exists (70% threshold)
+                    if self.has_overlapping_pattern(sym.id, timeframe, 'bullish', zone_low, zone_high):
+                        continue
+
+                    # Check if exact pattern already exists
                     existing = Pattern.query.filter_by(
                         symbol_id=sym.id,
                         timeframe=timeframe,
@@ -159,7 +163,11 @@ class LiquiditySweepDetector(PatternDetector):
                     if not self.is_zone_tradeable(zone_low, zone_high):
                         continue
 
-                    # Check if pattern already exists
+                    # Skip if overlapping pattern already exists (70% threshold)
+                    if self.has_overlapping_pattern(sym.id, timeframe, 'bearish', zone_low, zone_high):
+                        continue
+
+                    # Check if exact pattern already exists
                     existing = Pattern.query.filter_by(
                         symbol_id=sym.id,
                         timeframe=timeframe,

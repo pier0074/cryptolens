@@ -17,5 +17,12 @@ requests>=2.31.0
 # Scheduler
 APScheduler>=3.10.4
 
+# Production Server
+gunicorn>=21.0.0
+
+# Security
+Flask-WTF>=1.2.0
+
 # Development
 pytest>=7.4.0
+pytest-cov>=4.1.0

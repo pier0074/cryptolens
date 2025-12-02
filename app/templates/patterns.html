@@ -65,6 +65,9 @@
                     <th class="text-left p-3 text-muted font-medium">Type</th>
                     <th class="text-left p-3 text-muted font-medium">Direction</th>
                     <th class="text-left p-3 text-muted font-medium">Zone</th>
+                    <th class="text-left p-3 text-muted font-medium">Entry</th>
+                    <th class="text-left p-3 text-muted font-medium">Stop Loss</th>
+                    <th class="text-left p-3 text-muted font-medium">Take Profit</th>
                     <th class="text-left p-3 text-muted font-medium">Status</th>
                     <th class="text-left p-3 text-muted font-medium">Fill %</th>
                 </tr>
@@ -107,6 +110,37 @@
                             ${{ '%.2f'|format(pattern.zone_low) }} - ${{ '%.2f'|format(pattern.zone_high) }}
                         {% endif %}
                     </td>
+                    {# Entry Price - Bullish: zone_high, Bearish: zone_low #}
+                    <td class="p-3 font-mono text-sm {% if pattern.direction == 'bullish' %}text-green-400{% else %}text-red-400{% endif %}">
+                        {% set entry = pattern.zone_high if pattern.direction == 'bullish' else pattern.zone_low %}
+                        {% if entry < 0.01 %}${{ '%.6f'|format(entry) }}
+                        {% elif entry < 1 %}${{ '%.4f'|format(entry) }}
+                        {% elif entry < 100 %}${{ '%.3f'|format(entry) }}
+                        {% else %}${{ '%.2f'|format(entry) }}{% endif %}
+                    </td>
+                    {# Stop Loss - Bullish: below zone_low, Bearish: above zone_high #}
+                    <td class="p-3 font-mono text-sm text-red-500">
+                        {% set zone_size = pattern.zone_high - pattern.zone_low %}
+                        {% set buffer = zone_size * 0.2 %}
+                        {% set sl = pattern.zone_low - buffer if pattern.direction == 'bullish' else pattern.zone_high + buffer %}
+                        {% if sl < 0.01 %}${{ '%.6f'|format(sl) }}
+                        {% elif sl < 1 %}${{ '%.4f'|format(sl) }}
+                        {% elif sl < 100 %}${{ '%.3f'|format(sl) }}
+                        {% else %}${{ '%.2f'|format(sl) }}{% endif %}
+                    </td>
+                    {# Take Profit - 2:1 R:R ratio #}
+                    <td class="p-3 font-mono text-sm text-green-500">
+                        {% set entry = pattern.zone_high if pattern.direction == 'bullish' else pattern.zone_low %}
+                        {% set zone_size = pattern.zone_high - pattern.zone_low %}
+                        {% set buffer = zone_size * 0.2 %}
+                        {% set sl = pattern.zone_low - buffer if pattern.direction == 'bullish' else pattern.zone_high + buffer %}
+                        {% set risk = (entry - sl)|abs %}
+                        {% set tp = entry + (risk * 2) if pattern.direction == 'bullish' else entry - (risk * 2) %}
+                        {% if tp < 0.01 %}${{ '%.6f'|format(tp) }}
+                        {% elif tp < 1 %}${{ '%.4f'|format(tp) }}
+                        {% elif tp < 100 %}${{ '%.3f'|format(tp) }}
+                        {% else %}${{ '%.2f'|format(tp) }}{% endif %}
+                    </td>
                     <td class="p-3">
                         <span class="px-2 py-1 rounded text-xs
                             {% if pattern.status == 'active' %}bg-blue-900 text-blue-200
@@ -117,17 +151,20 @@
                     </td>
                     <td class="p-3">
                         {% if pattern.fill_percentage %}
-                            <div class="w-16 bg-gray-700 rounded-full h-2">
-                                <div class="bg-blue-500 h-2 rounded-full" style="width: {{ pattern.fill_percentage }}%"></div>
+                            <div class="flex items-center space-x-2">
+                                <span class="text-xs text-muted w-8">{{ '%.0f'|format(pattern.fill_percentage) }}%</span>
+                                <div class="w-12 bg-gray-700 rounded-full h-2">
+                                    <div class="{% if pattern.fill_percentage >= 80 %}bg-red-500{% elif pattern.fill_percentage >= 50 %}bg-yellow-500{% else %}bg-blue-500{% endif %} h-2 rounded-full" style="width: {{ pattern.fill_percentage }}%"></div>
+                                </div>
                             </div>
                         {% else %}
-                            <span class="text-muted">-</span>
+                            <span class="text-muted text-xs">0%</span>
                         {% endif %}
                     </td>
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="7" class="p-8 text-center text-muted">
+                    <td colspan="10" class="p-8 text-center text-muted">
                         No patterns found. Run a scan to detect patterns.
                     </td>
                 </tr>
