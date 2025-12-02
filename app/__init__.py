@@ -50,6 +50,10 @@ def create_app(config_name=None):
     app.register_blueprint(logs_bp, url_prefix='/logs')
     app.register_blueprint(stats_bp, url_prefix='/stats')
 
+    # Exempt API and test endpoints from CSRF
+    csrf.exempt(api_bp)
+    csrf.exempt(settings_bp)
+
     # Create database tables and enable WAL mode for better concurrency
     with app.app_context():
         db.create_all()

@@ -169,6 +169,19 @@
   - Test mode notifications
   - Database integrity
   - Settings integration
+- [x] `tests/test_routes.py` (37 tests)
+  - Dashboard routes (4 tests)
+  - Stats routes (4 tests)
+  - Logs routes (6 tests)
+  - Patterns routes (7 tests)
+  - Signals routes (6 tests)
+  - Backtest routes (3 tests)
+  - Settings routes (6 tests)
+- [x] `tests/test_services.py` (26 tests)
+  - Aggregator service (8 tests)
+  - Scheduler service (3 tests)
+  - Logger service (10 tests)
+  - Notifier service (5 tests)
 
 ---
 
@@ -295,7 +308,7 @@
 - [x] Progress bar for aggregation
 - [x] Minimum zone size filter (0.15%)
 - [x] Smart price formatting for cheap coins
-- [x] **Test suite** (101 tests, 54% coverage)
+- [x] **Test suite** (163 tests, 72% coverage)
 - [x] **Dynamic notification tags** (direction/symbol/pattern)
 - [x] **Test mode notifications** ([TEST] prefix, `test` tag)
 - [x] **Varied test notifications** (BTC/ETH/SOL, LONG/SHORT, FVG/OB/LS)
@@ -328,7 +341,9 @@
 3. ~~Signal generation tests (test_signals.py - 20 tests)~~
 4. ~~API tests (test_api.py - 31 tests)~~
 5. ~~Integration tests (test_integration.py - 14 tests)~~
-   - **Total: 101 tests passing, 54% coverage**
+6. ~~UI route tests (test_routes.py - 37 tests)~~
+7. ~~Service tests (test_services.py - 26 tests)~~
+   - **Total: 163 tests passing, 72% coverage**
 
 ### Phase 4: Portfolio & Journal
 1. Database models
@@ -346,4 +361,4 @@
 
 ---
 
-*Last updated: 2025-12-02 (Phase 3 Testing complete - 101 tests, 54% coverage)*
+*Last updated: 2025-12-02 (Phase 3 Testing complete - 163 tests, 72% coverage)*
