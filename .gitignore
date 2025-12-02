@@ -23,7 +23,10 @@ ENV/
 # Database
 *.db
 *.db-journal
+*.db-shm
+*.db-wal
 data/*.db
+data/*.db-*
 data/*.json
 
 # OS
