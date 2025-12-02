@@ -86,9 +86,10 @@ def notify_signal(signal: Signal) -> bool:
     symbol = Symbol.query.get(signal.symbol_id)
     symbol_name = symbol.symbol if symbol else 'Unknown'
 
-    # Get pattern type
+    # Get pattern type and abbreviation for tags
     pattern = Pattern.query.get(signal.pattern_id) if signal.pattern_id else None
     pattern_type = 'Unknown'
+    pattern_abbrev = 'SIG'  # Default abbreviation
     pattern_tf = ''
     if pattern:
         pattern_types = {
@@ -96,7 +97,13 @@ def notify_signal(signal: Signal) -> bool:
             'order_block': 'Order Block',
             'liquidity_sweep': 'Liquidity Sweep'
         }
+        pattern_abbrevs = {
+            'imbalance': 'FVG',
+            'order_block': 'OB',
+            'liquidity_sweep': 'LS'
+        }
         pattern_type = pattern_types.get(pattern.pattern_type, pattern.pattern_type)
+        pattern_abbrev = pattern_abbrevs.get(pattern.pattern_type, 'SIG')
         pattern_tf = pattern.timeframe
 
     # Get aligned timeframes
@@ -112,7 +119,14 @@ def notify_signal(signal: Signal) -> bool:
     direction_emoji = "🟢" if signal.direction == 'long' else "🔴"
     direction_text = "LONG" if signal.direction == 'long' else "SHORT"
 
+    # Title: just emoji + symbol
     title = f"{direction_emoji} {direction_text}: {symbol_name}"
+
+    # Extract base symbol (e.g., BTC from BTC/USDT)
+    base_symbol = symbol_name.split('/')[0] if '/' in symbol_name else symbol_name
+
+    # Build tags: direction, base symbol, pattern abbreviation
+    tags = f"{signal.direction},{base_symbol},{pattern_abbrev}"
 
     # Timestamp (European format: DD/MM/YYYY HH:MM)
     now = datetime.now(timezone.utc)
@@ -151,7 +165,7 @@ def notify_signal(signal: Signal) -> bool:
         title=title,
         message=message,
         priority=priority,
-        tags="chart,money,cryptocurrency"
+        tags=tags
     )
 
     # Log notification
@@ -203,7 +217,7 @@ def notify_confluence(symbol: str, direction: str, aligned_timeframes: list,
 
     # Timestamp (European format: DD/MM/YYYY HH:MM)
     now = datetime.now(timezone.utc)
-    timestamp_str = now.strftime("%d/%m/%Y %H:%MM UTC")
+    timestamp_str = now.strftime("%d/%m/%Y %H:%M UTC")
 
     direction_emoji = "🟢" if direction == 'long' else "🔴"
     direction_text = "LONG" if direction == 'long' else "SHORT"
@@ -211,7 +225,14 @@ def notify_confluence(symbol: str, direction: str, aligned_timeframes: list,
     confluence = len(aligned_timeframes)
     tfs_bracketed = f"[{', '.join(aligned_timeframes)}]"
 
+    # Title with colored emoji
     title = f"{direction_emoji} HIGH CONFLUENCE: {symbol} {direction_text}"
+
+    # Extract base symbol (e.g., BTC from BTC/USDT)
+    base_symbol = symbol.split('/')[0] if '/' in symbol else symbol
+
+    # Build tags: direction, base symbol
+    tags = f"{direction},{base_symbol},confluence"
 
     sl_pct = abs((stop_loss - entry) / entry * 100)
     rr_percent = risk_reward * 100
@@ -234,5 +255,5 @@ def notify_confluence(symbol: str, direction: str, aligned_timeframes: list,
         title=title,
         message=message,
         priority=priority,
-        tags="rotating_light,chart,fire"
+        tags=tags
     )

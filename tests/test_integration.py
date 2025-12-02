@@ -123,62 +123,193 @@ class TestNotificationPipeline:
     """Tests for notification sending"""
 
     @patch('app.services.notifier.requests.post')
-    def test_signal_notification_sent(self, mock_post, app, sample_symbol, sample_pattern):
-        """Test that notifications are sent for signals"""
+    def test_long_signal_notification_btc_fvg(self, mock_post, app, sample_symbol, sample_pattern):
+        """Test LONG notification for BTC with FVG pattern"""
         mock_post.return_value = MagicMock(status_code=200)
 
         with app.app_context():
-            # Enable notifications
             Setting.set('notifications_enabled', 'true')
             db.session.commit()
 
-            # Get the pattern
-            pattern = Pattern.query.get(sample_pattern)
-
-            # Create a signal
+            # Create LONG signal with FVG pattern
             signal = Signal(
                 symbol_id=sample_symbol,
                 direction='long',
-                entry_price=103.5,
-                stop_loss=100.0,
-                take_profit_1=107.0,
-                take_profit_2=110.5,
-                take_profit_3=114.0,
-                risk_reward=3.0,
-                confluence_score=3,
+                entry_price=97500.0,
+                stop_loss=95000.0,
+                take_profit_1=100000.0,
+                take_profit_2=105000.0,
+                take_profit_3=110000.0,
+                risk_reward=4.0,
+                confluence_score=4,
                 pattern_id=sample_pattern,
                 status='pending',
-                timeframes_aligned='["1h", "4h", "1d"]'
+                timeframes_aligned='["15m", "1h", "4h", "1d"]'
             )
             db.session.add(signal)
             db.session.commit()
 
-            # Send notification
             from app.services.notifier import notify_signal
             result = notify_signal(signal)
 
             assert result is True
             assert mock_post.called
+            # Check tags contain direction, symbol, pattern
+            call_args = mock_post.call_args
+            request_json = call_args[1]['json']
+            assert 'long' in request_json['tags']
+            assert 'BTC' in request_json['tags']
+            assert 'FVG' in request_json['tags']
+            assert '🟢' in request_json['title']
 
     @patch('app.services.notifier.requests.post')
-    def test_notification_disabled(self, mock_post, app, sample_symbol, sample_pattern):
+    def test_short_signal_notification_eth_order_block(self, mock_post, app):
+        """Test SHORT notification for ETH with Order Block pattern"""
+        mock_post.return_value = MagicMock(status_code=200)
+
+        with app.app_context():
+            Setting.set('notifications_enabled', 'true')
+
+            # Create ETH symbol
+            eth_symbol = Symbol(symbol='ETH/USDT', exchange='binance', is_active=True)
+            db.session.add(eth_symbol)
+            db.session.commit()
+
+            # Create Order Block pattern
+            pattern = Pattern(
+                symbol_id=eth_symbol.id,
+                timeframe='4h',
+                pattern_type='order_block',
+                direction='bearish',
+                zone_high=2100.0,
+                zone_low=2050.0,
+                detected_at=1700000000000,
+                status='active'
+            )
+            db.session.add(pattern)
+            db.session.commit()
+
+            # Create SHORT signal
+            signal = Signal(
+                symbol_id=eth_symbol.id,
+                direction='short',
+                entry_price=2050.0,
+                stop_loss=2100.0,
+                take_profit_1=2000.0,
+                take_profit_2=1950.0,
+                take_profit_3=1900.0,
+                risk_reward=3.0,
+                confluence_score=2,
+                pattern_id=pattern.id,
+                status='pending',
+                timeframes_aligned='["4h", "1d"]'
+            )
+            db.session.add(signal)
+            db.session.commit()
+
+            from app.services.notifier import notify_signal
+            result = notify_signal(signal)
+
+            assert result is True
+            call_args = mock_post.call_args
+            request_json = call_args[1]['json']
+            assert 'short' in request_json['tags']
+            assert 'ETH' in request_json['tags']
+            assert 'OB' in request_json['tags']
+            assert '🔴' in request_json['title']
+
+    @patch('app.services.notifier.requests.post')
+    def test_long_signal_notification_sol_liquidity_sweep(self, mock_post, app):
+        """Test LONG notification for SOL with Liquidity Sweep pattern"""
+        mock_post.return_value = MagicMock(status_code=200)
+
+        with app.app_context():
+            Setting.set('notifications_enabled', 'true')
+
+            # Create SOL symbol
+            sol_symbol = Symbol(symbol='SOL/USDT', exchange='binance', is_active=True)
+            db.session.add(sol_symbol)
+            db.session.commit()
+
+            # Create Liquidity Sweep pattern
+            pattern = Pattern(
+                symbol_id=sol_symbol.id,
+                timeframe='1h',
+                pattern_type='liquidity_sweep',
+                direction='bullish',
+                zone_high=180.0,
+                zone_low=175.0,
+                detected_at=1700000000000,
+                status='active'
+            )
+            db.session.add(pattern)
+            db.session.commit()
+
+            # Create LONG signal with high confluence
+            signal = Signal(
+                symbol_id=sol_symbol.id,
+                direction='long',
+                entry_price=180.0,
+                stop_loss=172.0,
+                take_profit_1=188.0,
+                take_profit_2=196.0,
+                take_profit_3=204.0,
+                risk_reward=2.5,
+                confluence_score=5,
+                pattern_id=pattern.id,
+                status='pending',
+                timeframes_aligned='["5m", "15m", "1h", "4h", "1d"]'
+            )
+            db.session.add(signal)
+            db.session.commit()
+
+            from app.services.notifier import notify_signal
+            result = notify_signal(signal)
+
+            assert result is True
+            call_args = mock_post.call_args
+            request_json = call_args[1]['json']
+            assert 'long' in request_json['tags']
+            assert 'SOL' in request_json['tags']
+            assert 'LS' in request_json['tags']
+            assert '🟢' in request_json['title']
+            assert 'SOL/USDT' in request_json['title']
+
+    @patch('app.services.notifier.requests.post')
+    def test_notification_disabled(self, mock_post, app):
         """Test that notifications respect the enabled setting"""
         with app.app_context():
-            # Disable notifications
             Setting.set('notifications_enabled', 'false')
+
+            # Create XRP symbol
+            xrp_symbol = Symbol(symbol='XRP/USDT', exchange='binance', is_active=True)
+            db.session.add(xrp_symbol)
+            db.session.commit()
+
+            pattern = Pattern(
+                symbol_id=xrp_symbol.id,
+                timeframe='1h',
+                pattern_type='imbalance',
+                direction='bearish',
+                zone_high=0.65,
+                zone_low=0.62,
+                detected_at=1700000000000,
+                status='active'
+            )
+            db.session.add(pattern)
             db.session.commit()
 
             signal = Signal(
-                symbol_id=sample_symbol,
-                direction='long',
-                entry_price=103.5,
-                stop_loss=100.0,
-                take_profit_1=107.0,
-                take_profit_2=110.5,
-                take_profit_3=114.0,
+                symbol_id=xrp_symbol.id,
+                direction='short',
+                entry_price=0.62,
+                stop_loss=0.65,
+                take_profit_1=0.59,
+                take_profit_2=0.56,
+                take_profit_3=0.53,
                 risk_reward=3.0,
-                confluence_score=3,
-                pattern_id=sample_pattern,
+                confluence_score=1,
+                pattern_id=pattern.id,
                 status='pending'
             )
             db.session.add(signal)
