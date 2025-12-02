@@ -133,3 +133,44 @@ def trigger_fetch():
         return jsonify({'success': True, 'candles_fetched': new_count})
 
     return jsonify({'error': 'Symbol and timeframe required'}), 400
+
+
+@api_bp.route('/scheduler/status')
+def scheduler_status():
+    """Get current scheduler status"""
+    from app.services.scheduler import get_scheduler_status
+    return jsonify(get_scheduler_status())
+
+
+@api_bp.route('/scheduler/start', methods=['POST'])
+def scheduler_start():
+    """Start the background scheduler"""
+    from app.services.scheduler import start_scheduler, get_scheduler_status
+    from flask import current_app
+
+    start_scheduler(current_app)
+    return jsonify(get_scheduler_status())
+
+
+@api_bp.route('/scheduler/stop', methods=['POST'])
+def scheduler_stop():
+    """Stop the background scheduler"""
+    from app.services.scheduler import stop_scheduler, get_scheduler_status
+
+    stop_scheduler()
+    return jsonify(get_scheduler_status())
+
+
+@api_bp.route('/scheduler/toggle', methods=['POST'])
+def scheduler_toggle():
+    """Toggle the scheduler on/off"""
+    from app.services.scheduler import start_scheduler, stop_scheduler, get_scheduler_status
+    from flask import current_app
+
+    status = get_scheduler_status()
+    if status['running']:
+        stop_scheduler()
+    else:
+        start_scheduler(current_app)
+
+    return jsonify(get_scheduler_status())

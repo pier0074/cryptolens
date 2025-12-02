@@ -2,12 +2,12 @@
 """
 Historical Data Fetcher Script
 Downloads historical candle data for all symbols (sequential to avoid SQLite locks)
+Progress is tracked via database - no external files needed.
 """
 import sys
 import os
 import time
-import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -16,33 +16,7 @@ from app import create_app, db
 from app.models import Symbol, Candle
 from app.services.aggregator import aggregate_all_timeframes
 from app.config import Config
-
-# Progress file to track completed symbols
-PROGRESS_FILE = os.path.join(os.path.dirname(__file__), '..', 'data', 'fetch_progress.json')
-
-
-def load_progress():
-    """Load progress from file"""
-    try:
-        if os.path.exists(PROGRESS_FILE):
-            with open(PROGRESS_FILE, 'r') as f:
-                return json.load(f)
-    except Exception:
-        pass
-    return {'completed': [], 'in_progress': {}, 'started_at': None}
-
-
-def save_progress(progress):
-    """Save progress to file"""
-    os.makedirs(os.path.dirname(PROGRESS_FILE), exist_ok=True)
-    with open(PROGRESS_FILE, 'w') as f:
-        json.dump(progress, f, indent=2)
-
-
-def clear_progress():
-    """Clear progress file"""
-    if os.path.exists(PROGRESS_FILE):
-        os.remove(PROGRESS_FILE)
+from sqlalchemy import func
 
 
 def format_time(seconds):
@@ -63,13 +37,75 @@ def progress_bar(current, total, width=30, prefix=''):
     return f"{prefix}[{bar}] {pct*100:5.1f}%"
 
 
-def fetch_symbol_with_logging(app, symbol_name, days):
+def get_symbol_progress(symbol_id, target_start_ts):
+    """
+    Get fetch progress for a symbol from database
+
+    Returns:
+        dict with 'candle_count', 'oldest_ts', 'newest_ts', 'needs_fetch', 'resume_from_ts'
+    """
+    # Get candle stats for 1m timeframe
+    stats = db.session.query(
+        func.count(Candle.id),
+        func.min(Candle.timestamp),
+        func.max(Candle.timestamp)
+    ).filter(
+        Candle.symbol_id == symbol_id,
+        Candle.timeframe == '1m'
+    ).first()
+
+    candle_count = stats[0] or 0
+    oldest_ts = stats[1]
+    newest_ts = stats[2]
+
+    # Determine if we need to fetch and where to resume from
+    now_ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    if candle_count == 0:
+        # No candles at all - start from target_start
+        return {
+            'candle_count': 0,
+            'oldest_ts': None,
+            'newest_ts': None,
+            'needs_fetch': True,
+            'resume_from_ts': target_start_ts,
+            'status': 'new'
+        }
+
+    # Check if we have recent data (within last hour = considered up-to-date)
+    one_hour_ago = now_ts - (60 * 60 * 1000)
+    has_recent = newest_ts >= one_hour_ago
+
+    # Check if we have old enough data
+    has_full_history = oldest_ts <= target_start_ts + (60 * 60 * 1000)  # Within 1 hour of target
+
+    if has_recent and has_full_history:
+        return {
+            'candle_count': candle_count,
+            'oldest_ts': oldest_ts,
+            'newest_ts': newest_ts,
+            'needs_fetch': False,
+            'resume_from_ts': None,
+            'status': 'complete'
+        }
+
+    # Need to fetch - resume from newest timestamp
+    return {
+        'candle_count': candle_count,
+        'oldest_ts': oldest_ts,
+        'newest_ts': newest_ts,
+        'needs_fetch': True,
+        'resume_from_ts': newest_ts + 60000 if newest_ts else target_start_ts,  # +1 minute
+        'status': 'partial'
+    }
+
+
+def fetch_symbol_with_logging(app, symbol_name, days, force_refetch=False):
     """
     Fetch historical data for a single symbol with detailed logging
     Uses Binance (1000 candles/batch) with batch DB checking for speed
     """
     import ccxt
-    from datetime import timedelta
 
     with app.app_context():
         # Use Binance for faster fetching (1000 candles vs 500)
@@ -88,15 +124,28 @@ def fetch_symbol_with_logging(app, symbol_name, days):
         # Calculate time range
         now = datetime.now(timezone.utc)
         start_time = now - timedelta(days=days)
-        since = int(start_time.timestamp() * 1000)
+        target_start_ts = int(start_time.timestamp() * 1000)
         now_ts = int(now.timestamp() * 1000)
 
-        # Check for resume point from previous run
-        progress = load_progress()
-        if symbol_name in progress.get('in_progress', {}):
-            resume_info = progress['in_progress'][symbol_name]
-            since = resume_info['last_timestamp']
-            print(f"   ⏩ Resuming from checkpoint (batch {resume_info['batch']}, {resume_info['candles_fetched']:,} candles already saved)")
+        # Check existing progress from DB
+        progress = get_symbol_progress(sym.id, target_start_ts)
+
+        if not progress['needs_fetch'] and not force_refetch:
+            print(f"\n{'─'*50}")
+            print(f"📊 {symbol_name}")
+            print(f"   ✅ Already complete: {progress['candle_count']:,} candles in DB")
+            return {
+                'symbol': symbol_name,
+                'success': True,
+                'new_candles': 0,
+                'existing_candles': progress['candle_count'],
+                'aggregated': 0,
+                'time': 0,
+                'skipped': True
+            }
+
+        # Determine starting point
+        since = progress['resume_from_ts']
 
         # Timeframe settings - Binance allows 1000 candles per request
         timeframe = '1m'
@@ -109,15 +158,19 @@ def fetch_symbol_with_logging(app, symbol_name, days):
 
         print(f"\n{'─'*50}")
         print(f"📊 {symbol_name}")
+
+        if progress['status'] == 'partial':
+            existing_date = datetime.fromtimestamp(progress['newest_ts'] / 1000, tz=timezone.utc)
+            print(f"   ⏩ Resuming from {existing_date.strftime('%Y-%m-%d %H:%M')} ({progress['candle_count']:,} candles in DB)")
+
         print(f"   Target: ~{total_candles_needed:,} candles ({total_batches} batches)")
-        print(f"   Range: {start_time.strftime('%Y-%m-%d')} → {now.strftime('%Y-%m-%d')}")
+        print(f"   Range: {datetime.fromtimestamp(since/1000, tz=timezone.utc).strftime('%Y-%m-%d')} → {now.strftime('%Y-%m-%d')}")
         sys.stdout.flush()
 
         total_new = 0
         total_existing = 0
         current_since = since
         batch_num = 0
-        last_log_pct = -10
         batch_start = time.time()
 
         while current_since < now_ts:
@@ -181,16 +234,6 @@ def fetch_symbol_with_logging(app, symbol_name, days):
                 status = f"\r   {bar} | {current_date} | {total_new:,} candles | ETA: {format_time(eta)}    "
                 print(status, end='', flush=True)
 
-                # Save progress checkpoint every 50 batches
-                if batch_num % 50 == 0:
-                    progress = load_progress()
-                    progress['in_progress'][symbol_name] = {
-                        'last_timestamp': current_since,
-                        'candles_fetched': total_new,
-                        'batch': batch_num
-                    }
-                    save_progress(progress)
-
                 # Move to next batch - use last timestamp to avoid gaps
                 if ohlcv:
                     current_since = ohlcv[-1][0] + candle_duration
@@ -218,12 +261,6 @@ def fetch_symbol_with_logging(app, symbol_name, days):
         print(f"   📊 Created: 5m={agg_results.get('5m', 0):,} | 15m={agg_results.get('15m', 0):,} | "
               f"1h={agg_results.get('1h', 0):,} | 4h={agg_results.get('4h', 0):,} | 1d={agg_results.get('1d', 0):,}")
 
-        # Clean up in_progress entry now that symbol is complete
-        progress = load_progress()
-        if symbol_name in progress.get('in_progress', {}):
-            del progress['in_progress'][symbol_name]
-            save_progress(progress)
-
         elapsed = time.time() - batch_start
         print(f"   ✅ Done! {total_new:,} new + {total_existing:,} existing | "
               f"Aggregated: {agg_count:,} | Time: {format_time(elapsed)}")
@@ -235,8 +272,43 @@ def fetch_symbol_with_logging(app, symbol_name, days):
             'new_candles': total_new,
             'existing_candles': total_existing,
             'aggregated': agg_count,
-            'time': elapsed
+            'time': elapsed,
+            'skipped': False
         }
+
+
+def show_db_status(app):
+    """Show current database status for all symbols"""
+    with app.app_context():
+        symbols = Symbol.query.filter_by(is_active=True).all()
+
+        print(f"\n{'═'*60}")
+        print(f"  Database Status")
+        print(f"{'═'*60}")
+
+        total_candles = 0
+        for sym in symbols:
+            count = Candle.query.filter_by(symbol_id=sym.id, timeframe='1m').count()
+            total_candles += count
+
+            # Get date range
+            oldest = db.session.query(func.min(Candle.timestamp)).filter(
+                Candle.symbol_id == sym.id, Candle.timeframe == '1m'
+            ).scalar()
+            newest = db.session.query(func.max(Candle.timestamp)).filter(
+                Candle.symbol_id == sym.id, Candle.timeframe == '1m'
+            ).scalar()
+
+            if oldest and newest:
+                oldest_date = datetime.fromtimestamp(oldest / 1000, tz=timezone.utc).strftime('%Y-%m-%d')
+                newest_date = datetime.fromtimestamp(newest / 1000, tz=timezone.utc).strftime('%Y-%m-%d')
+                print(f"  {sym.symbol:12} | {count:>10,} candles | {oldest_date} → {newest_date}")
+            else:
+                print(f"  {sym.symbol:12} | {count:>10,} candles | No data")
+
+        print(f"{'─'*60}")
+        print(f"  Total: {total_candles:,} candles (1m timeframe)")
+        print(f"{'═'*60}\n")
 
 
 def main():
@@ -245,13 +317,11 @@ def main():
 
     # Parse arguments
     days = 365  # Default 1 year
+    force = '--force' in sys.argv
 
     for arg in sys.argv:
         if arg.startswith('--days='):
             days = int(arg.split('=')[1])
-
-    # Load progress
-    progress = load_progress()
 
     with app.app_context():
         symbols = Symbol.query.filter_by(is_active=True).all()
@@ -264,50 +334,61 @@ def main():
             db.session.commit()
             symbols = Symbol.query.filter_by(is_active=True).all()
 
+        # Calculate target start timestamp
+        now = datetime.now(timezone.utc)
+        target_start_ts = int((now - timedelta(days=days)).timestamp() * 1000)
+
         # Check which symbols need fetching
-        completed = set(progress.get('completed', []))
-        remaining = [s for s in symbols if s.symbol not in completed]
+        symbols_status = []
+        for sym in symbols:
+            progress = get_symbol_progress(sym.id, target_start_ts)
+            symbols_status.append({
+                'symbol': sym,
+                'progress': progress,
+                'needs_fetch': progress['needs_fetch'] or force
+            })
 
-        if not remaining:
-            print("All symbols already fetched! Use --force to re-fetch.")
-            print("Clearing progress file...")
-            clear_progress()
-            return
-
-        if completed:
-            print(f"\n🔄 Resuming... {len(completed)} done, {len(remaining)} remaining")
-        else:
-            progress['started_at'] = datetime.now().isoformat()
+        remaining = [s for s in symbols_status if s['needs_fetch']]
+        complete = [s for s in symbols_status if not s['needs_fetch']]
 
         print(f"\n{'═'*60}")
         print(f"  CryptoLens Historical Data Fetcher")
         print(f"{'═'*60}")
-        print(f"  📈 Symbols to fetch: {len(remaining)}")
+        print(f"  📈 Total symbols: {len(symbols)}")
+        print(f"  ✅ Already complete: {len(complete)}")
+        print(f"  📥 Need fetching: {len(remaining)}")
         print(f"  📅 Days of history: {days} ({days/365:.1f} years)")
         print(f"  📊 Est. candles/symbol: ~{days * 24 * 60:,}")
         print(f"  ⏱️  Mode: Sequential (SQLite safe)")
         print(f"{'═'*60}")
 
+        if not remaining:
+            print("\n✅ All symbols already have complete data!")
+            print("   Use --force to re-fetch anyway.")
+            show_db_status(app)
+            return
+
         start_time = time.time()
         completed_count = 0
         total_new_candles = 0
         total_agg_candles = 0
+        skipped_count = 0
 
         # Process symbols sequentially
-        for i, symbol in enumerate(remaining):
+        for i, item in enumerate(remaining):
+            symbol = item['symbol']
             completed_count += 1
             print(f"\n[{completed_count}/{len(remaining)}] Processing {symbol.symbol}...")
 
             try:
-                result = fetch_symbol_with_logging(app, symbol.symbol, days)
+                result = fetch_symbol_with_logging(app, symbol.symbol, days, force_refetch=force)
 
                 if result['success']:
-                    total_new_candles += result['new_candles']
-                    total_agg_candles += result['aggregated']
-
-                    # Mark as completed
-                    progress['completed'].append(symbol.symbol)
-                    save_progress(progress)
+                    if result.get('skipped'):
+                        skipped_count += 1
+                    else:
+                        total_new_candles += result['new_candles']
+                        total_agg_candles += result['aggregated']
 
             except Exception as e:
                 print(f"   ❌ Failed: {e}")
@@ -327,13 +408,11 @@ def main():
         print(f"  ✅ Historical data fetch complete!")
         print(f"{'═'*60}")
         print(f"  ⏱️  Total time: {format_time(total_time)}")
-        print(f"  📈 Symbols fetched: {completed_count}")
+        print(f"  📈 Symbols processed: {completed_count}")
+        print(f"  ⏭️  Skipped (complete): {skipped_count}")
         print(f"  📊 New candles: {total_new_candles:,}")
         print(f"  📊 Aggregated: {total_agg_candles:,}")
         print(f"{'═'*60}\n")
-
-        # Clear progress file on successful completion
-        clear_progress()
 
 
 if __name__ == '__main__':
@@ -348,24 +427,26 @@ Usage: python fetch_historical.py [options]
 
 Options:
   --days=N      Days of history to fetch (default: 365)
-  --force       Clear progress and start fresh
-  --clear       Just clear progress file
+  --force       Force re-fetch even if data exists
+  --status      Show database status only
   --help        Show this help
+
+Progress Tracking:
+  Progress is tracked automatically via the database.
+  If the script crashes, it will resume from where it left off
+  based on the most recent candles stored in the DB.
 
 Examples:
   python fetch_historical.py              # Fetch 1 year of data
   python fetch_historical.py --days=30    # Fetch 30 days
-  python fetch_historical.py --force      # Start fresh
+  python fetch_historical.py --status     # Check current DB status
+  python fetch_historical.py --force      # Re-fetch all data
         """)
         sys.exit(0)
 
-    if '--force' in sys.argv:
-        clear_progress()
-        print("Progress cleared. Starting fresh...")
-
-    if '--clear' in sys.argv:
-        clear_progress()
-        print("Progress file cleared.")
+    if '--status' in sys.argv:
+        app = create_app()
+        show_db_status(app)
         sys.exit(0)
 
     main()

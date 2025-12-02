@@ -32,6 +32,11 @@
         .pattern-cell:hover {
             transform: scale(1.1);
         }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
     </style>
 
     {% block extra_css %}{% endblock %}
@@ -65,13 +70,27 @@
                         <a href="/logs" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'logs' in request.endpoint %}bg-gray-800{% endif %}">
                             Logs
                         </a>
+                        <a href="/stats" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'stats' in request.endpoint %}bg-gray-800{% endif %}">
+                            Stats
+                        </a>
                         <a href="/settings" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'settings' in request.endpoint %}bg-gray-800{% endif %}">
                             Settings
                         </a>
                     </div>
                 </div>
-                <div class="flex items-center space-x-4">
-                    <button onclick="triggerScan()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-md text-sm font-medium">
+                <div class="flex items-center space-x-4" x-data="schedulerToggle()" x-init="checkStatus()">
+                    <!-- Scanner Toggle -->
+                    <div class="flex items-center space-x-2">
+                        <span class="text-sm text-gray-400">Scanner:</span>
+                        <button @click="toggle()"
+                                :class="running ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-600 hover:bg-gray-700'"
+                                class="px-3 py-2 rounded-md text-sm font-medium flex items-center space-x-2 transition-colors">
+                            <span :class="running ? 'bg-green-300' : 'bg-gray-400'" class="w-2 h-2 rounded-full" :style="running && 'animation: pulse 2s infinite'"></span>
+                            <span x-text="running ? 'ON' : 'OFF'"></span>
+                        </button>
+                    </div>
+                    <!-- Scan Now only visible when scanner is OFF -->
+                    <button x-show="!running" x-cloak onclick="triggerScan()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-md text-sm font-medium">
                         Scan Now
                     </button>
                 </div>
@@ -113,6 +132,32 @@
                 location.reload();
             } catch (e) {
                 alert('Scan failed: ' + e.message);
+            }
+        }
+
+        function schedulerToggle() {
+            return {
+                running: false,
+                async checkStatus() {
+                    try {
+                        const response = await fetch('/api/scheduler/status');
+                        const data = await response.json();
+                        this.running = data.running;
+                    } catch (e) {
+                        console.error('Failed to get scheduler status:', e);
+                    }
+                    // Poll status every 5 seconds
+                    setInterval(() => this.checkStatus(), 5000);
+                },
+                async toggle() {
+                    try {
+                        const response = await fetch('/api/scheduler/toggle', { method: 'POST' });
+                        const data = await response.json();
+                        this.running = data.running;
+                    } catch (e) {
+                        alert('Failed to toggle scheduler: ' + e.message);
+                    }
+                }
             }
         }
     </script>

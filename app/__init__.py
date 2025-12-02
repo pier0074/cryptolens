@@ -36,6 +36,7 @@ def create_app(config_name=None):
     from app.routes.settings import settings_bp
     from app.routes.api import api_bp
     from app.routes.logs import logs_bp
+    from app.routes.stats import stats_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(patterns_bp, url_prefix='/patterns')
@@ -44,6 +45,7 @@ def create_app(config_name=None):
     app.register_blueprint(settings_bp, url_prefix='/settings')
     app.register_blueprint(api_bp, url_prefix='/api')
     app.register_blueprint(logs_bp, url_prefix='/logs')
+    app.register_blueprint(stats_bp, url_prefix='/stats')
 
     # Create database tables and enable WAL mode for better concurrency
     with app.app_context():

@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+
+{% block title %}Database Statistics - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+        <h1 class="text-2xl font-bold">Database Statistics</h1>
+        <button onclick="location.reload()" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-md text-sm">
+            Refresh
+        </button>
+    </div>
+
+    <!-- Overall Stats Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-sm">Symbols</div>
+            <div class="text-2xl font-bold">{{ symbols_count }}</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-sm">Total Candles</div>
+            <div class="text-2xl font-bold">{{ "{:,}".format(total_candles) }}</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-sm">Patterns</div>
+            <div class="text-2xl font-bold">{{ "{:,}".format(total_patterns) }}</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-sm">Signals</div>
+            <div class="text-2xl font-bold">{{ "{:,}".format(total_signals) }}</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-sm">DB Size</div>
+            <div class="text-2xl font-bold">{{ "%.1f"|format(db_size / 1024 / 1024) }} MB</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-sm">Avg/Symbol</div>
+            <div class="text-2xl font-bold">{{ "{:,}".format((total_candles // symbols_count) if symbols_count > 0 else 0) }}</div>
+        </div>
+    </div>
+
+    <!-- Candles by Timeframe -->
+    <div class="bg-card rounded-lg p-4">
+        <h2 class="text-lg font-semibold mb-4">Candles by Timeframe</h2>
+        <div class="grid grid-cols-6 gap-4">
+            {% for tf, count in overall_tf_counts.items() %}
+            <div class="text-center">
+                <div class="text-muted text-sm">{{ tf }}</div>
+                <div class="text-xl font-bold">{{ "{:,}".format(count) }}</div>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- Symbol Stats Table -->
+    <div class="bg-card rounded-lg overflow-hidden">
+        <div class="p-4 border-b border-gray-700">
+            <h2 class="text-lg font-semibold">Per-Symbol Statistics</h2>
+        </div>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead class="bg-darker">
+                    <tr>
+                        <th class="px-4 py-3 text-left">Symbol</th>
+                        <th class="px-4 py-3 text-right">Price</th>
+                        <th class="px-4 py-3 text-right">24h</th>
+                        <th class="px-4 py-3 text-right">ATH</th>
+                        <th class="px-4 py-3 text-right">ATL</th>
+                        <th class="px-4 py-3 text-right">From ATH</th>
+                        <th class="px-4 py-3 text-center">1m</th>
+                        <th class="px-4 py-3 text-center">5m</th>
+                        <th class="px-4 py-3 text-center">15m</th>
+                        <th class="px-4 py-3 text-center">1h</th>
+                        <th class="px-4 py-3 text-center">4h</th>
+                        <th class="px-4 py-3 text-center">1d</th>
+                        <th class="px-4 py-3 text-left">Date Range</th>
+                        <th class="px-4 py-3 text-center">Patterns</th>
+                        <th class="px-4 py-3 text-center">Status</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-700">
+                    {% for stat in symbol_stats %}
+                    <tr class="hover:bg-gray-800">
+                        <td class="px-4 py-3 font-medium">{{ stat.symbol }}</td>
+                        <td class="px-4 py-3 text-right font-mono">
+                            {% if stat.current_price %}
+                                ${{ "{:,.4f}".format(stat.current_price) if stat.current_price < 1 else "{:,.2f}".format(stat.current_price) }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-right">
+                            {% if stat.price_change_24h is not none %}
+                                <span class="{{ 'bullish' if stat.price_change_24h >= 0 else 'bearish' }}">
+                                    {{ "+%.2f"|format(stat.price_change_24h) if stat.price_change_24h >= 0 else "%.2f"|format(stat.price_change_24h) }}%
+                                </span>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-right font-mono text-green-400">
+                            {% if stat.all_time_high %}
+                                ${{ "{:,.4f}".format(stat.all_time_high) if stat.all_time_high < 1 else "{:,.2f}".format(stat.all_time_high) }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-right font-mono text-red-400">
+                            {% if stat.all_time_low %}
+                                ${{ "{:,.4f}".format(stat.all_time_low) if stat.all_time_low < 1 else "{:,.2f}".format(stat.all_time_low) }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-right">
+                            {% if stat.ath_distance is not none %}
+                                <span class="text-yellow-400">-{{ "%.1f"|format(stat.ath_distance) }}%</span>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-center text-muted">{{ "{:,}".format(stat.candles_by_tf['1m']) }}</td>
+                        <td class="px-4 py-3 text-center text-muted">{{ "{:,}".format(stat.candles_by_tf['5m']) }}</td>
+                        <td class="px-4 py-3 text-center text-muted">{{ "{:,}".format(stat.candles_by_tf['15m']) }}</td>
+                        <td class="px-4 py-3 text-center text-muted">{{ "{:,}".format(stat.candles_by_tf['1h']) }}</td>
+                        <td class="px-4 py-3 text-center text-muted">{{ "{:,}".format(stat.candles_by_tf['4h']) }}</td>
+                        <td class="px-4 py-3 text-center text-muted">{{ "{:,}".format(stat.candles_by_tf['1d']) }}</td>
+                        <td class="px-4 py-3 text-muted text-xs">
+                            {% if stat.oldest_date and stat.newest_date %}
+                                {{ stat.oldest_date[:10] }} - {{ stat.newest_date[:10] }}
+                            {% else %}
+                                No data
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-center">
+                            <span class="text-blue-400">{{ stat.active_patterns }}</span>
+                            <span class="text-muted">/{{ stat.total_patterns }}</span>
+                        </td>
+                        <td class="px-4 py-3 text-center">
+                            {% if stat.freshness == 'live' %}
+                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-green-900 text-green-300">
+                                    Live
+                                </span>
+                            {% elif stat.freshness == 'recent' %}
+                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-yellow-900 text-yellow-300">
+                                    {{ stat.age_minutes }}m ago
+                                </span>
+                            {% elif stat.freshness == 'stale' %}
+                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-orange-900 text-orange-300">
+                                    {{ (stat.age_minutes // 60) }}h ago
+                                </span>
+                            {% elif stat.freshness == 'old' %}
+                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-red-900 text-red-300">
+                                    Old
+                                </span>
+                            {% else %}
+                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-700 text-gray-400">
+                                    No data
+                                </span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="bg-card rounded-lg p-4">
+        <h3 class="font-semibold mb-2">Legend</h3>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-muted">
+            <div>
+                <span class="inline-block w-3 h-3 rounded-full bg-green-500 mr-2"></span>
+                <strong>Live:</strong> Updated < 5 min ago
+            </div>
+            <div>
+                <span class="inline-block w-3 h-3 rounded-full bg-yellow-500 mr-2"></span>
+                <strong>Recent:</strong> Updated < 1 hour ago
+            </div>
+            <div>
+                <span class="inline-block w-3 h-3 rounded-full bg-orange-500 mr-2"></span>
+                <strong>Stale:</strong> Updated < 24 hours ago
+            </div>
+            <div>
+                <span class="inline-block w-3 h-3 rounded-full bg-red-500 mr-2"></span>
+                <strong>Old:</strong> Updated > 24 hours ago
+            </div>
+        </div>
+        <div class="mt-4 text-sm text-muted">
+            <p><strong>ATH/ATL:</strong> All-Time High/Low within the data range in the database</p>
+            <p><strong>From ATH:</strong> Current price distance from All-Time High</p>
+            <p><strong>Patterns:</strong> Active patterns / Total patterns detected</p>
+        </div>
+    </div>
+</div>
+{% endblock %}

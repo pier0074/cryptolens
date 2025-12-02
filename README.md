@@ -12,14 +12,17 @@ CryptoLens detects smart money patterns (Fair Value Gaps, Order Blocks, Liquidit
 
 - **3 Pattern Types**: Detects Fair Value Gaps (Imbalances), Order Blocks, and Liquidity Sweeps
 - **Multi-Timeframe Analysis**: Scans 6 timeframes (1m, 5m, 15m, 1h, 4h, 1d)
-- **Auto-Scanner**: Background scheduler scans for patterns every minute
+- **Auto-Scanner**: Background scheduler scans for patterns every minute (fetch + aggregate + scan)
+- **Scanner Toggle**: Enable/disable the auto-scanner from the UI with live status indicator
 - **Push Notifications**: Free push notifications via NTFY.sh - no account required
 - **Interactive Dashboard**: Visual matrix showing patterns for 30 crypto pairs
 - **Pattern Tabs**: Filter dashboard by pattern type (All, FVG, Order Blocks, Sweeps)
 - **Performance Analytics**: Track pattern statistics, win rates, and backtest results
+- **Database Statistics**: Per-symbol stats page with ATH/ATL, candle counts, data freshness
+- **Comprehensive Logging**: Full logging system with categories (fetch, aggregate, scan, signal, notify)
 - **Candlestick Charts**: TradingView-style charts with pattern overlays
 - **Backtesting**: Test strategy performance on historical data
-- **REST API**: Full API for future automation
+- **REST API**: Full API for automation and scheduler control
 
 ## Screenshots
 
@@ -55,24 +58,42 @@ cp .env.example .env
 ### 3. Fetch Historical Data
 
 ```bash
-# Fetch 1 year of data for all 30 symbols
+# Fetch 1 year of data for all 30 symbols (auto-resumes if interrupted)
 python scripts/fetch_historical.py
 
-# Or fetch less data for faster testing
+# Fetch less data for faster testing
 python scripts/fetch_historical.py --days=30
+
+# Check current database status
+python scripts/fetch_historical.py --status
+
+# Force re-fetch even if data exists (fills gaps, doesn't delete)
+python scripts/fetch_historical.py --force
 ```
+
+Progress is tracked in the database - if the script crashes, it will automatically resume from where it left off.
 
 The fetcher shows detailed progress:
 ```
-[1/30] Processing BTC/USDT...
+════════════════════════════════════════════════════════════
+  CryptoLens Historical Data Fetcher
+════════════════════════════════════════════════════════════
+  📈 Total symbols: 30
+  ✅ Already complete: 5
+  📥 Need fetching: 25
+  📅 Days of history: 365 (1.0 years)
+  📊 Est. candles/symbol: ~525,600
+
+[1/25] Processing BTC/USDT...
 ──────────────────────────────────────────────────
 📊 BTC/USDT
-   Target: ~525,600 candles (1052 batches)
+   Target: ~525,600 candles (526 batches)
    Range: 2024-12-01 → 2025-12-01
-   [ 10%] Batch 105/1052 | Date: 2025-01-12 | New: 52,500 | ETA: 8.5m
-   [ 20%] Batch 210/1052 | Date: 2025-02-23 | New: 105,000 | ETA: 7.2m
-   ...
-   ✅ Done! 504,073 new + 21,527 existing | Aggregated: 5,230 | Time: 9.2m
+   [████████████████████████████░░] 95.0% | 2025-11-28 | 500,000 candles | ETA: 13s
+   [██████████████████████████████] 100.0% | Complete | 525,600 candles
+   📊 Aggregating 1m candles → 5m, 15m, 1h, 4h, 1d...
+   📊 Created: 5m=105,120 | 15m=35,040 | 1h=8,760 | 4h=2,190 | 1d=365
+   ✅ Done! 504,073 new + 21,527 existing | Aggregated: 151,475 | Time: 9.2m
 ```
 
 ### 4. Run the Application
@@ -142,6 +163,10 @@ Price takes out a previous high/low (hunting stop losses) then reverses:
 | `/api/matrix` | GET | Get pattern matrix |
 | `/api/scan` | POST | Trigger pattern scan |
 | `/api/fetch` | POST | Trigger data fetch |
+| `/api/scheduler/status` | GET | Get scanner status |
+| `/api/scheduler/start` | POST | Start the scanner |
+| `/api/scheduler/stop` | POST | Stop the scanner |
+| `/api/scheduler/toggle` | POST | Toggle scanner on/off |
 
 ## Project Structure
 
@@ -150,18 +175,21 @@ cryptolens/
 ├── app/
 │   ├── __init__.py          # Flask app factory
 │   ├── config.py            # Configuration
-│   ├── models.py            # Database models
+│   ├── models.py            # Database models (Symbol, Candle, Pattern, Signal, Log)
 │   ├── routes/              # Web routes
 │   │   ├── dashboard.py     # Main dashboard + analytics
 │   │   ├── patterns.py      # Pattern visualization
 │   │   ├── signals.py       # Trade signals
 │   │   ├── backtest.py      # Backtesting
 │   │   ├── settings.py      # Settings
-│   │   └── api.py           # REST API
+│   │   ├── logs.py          # Logging viewer
+│   │   ├── stats.py         # Database statistics
+│   │   └── api.py           # REST API + scheduler control
 │   ├── services/            # Business logic
-│   │   ├── data_fetcher.py  # CCXT integration
+│   │   ├── data_fetcher.py  # CCXT/Binance integration
 │   │   ├── aggregator.py    # Timeframe aggregation
-│   │   ├── scheduler.py     # Auto-scanner
+│   │   ├── scheduler.py     # Auto-scanner (every minute)
+│   │   ├── logger.py        # Centralized logging system
 │   │   ├── patterns/        # Pattern detectors
 │   │   │   ├── imbalance.py    # Fair Value Gaps
 │   │   │   ├── order_block.py  # Order Blocks
@@ -171,9 +199,8 @@ cryptolens/
 │   │   └── backtester.py    # Backtesting engine
 │   └── templates/           # HTML templates
 ├── scripts/
-│   ├── fetch_historical.py  # Download historical data
-│   └── scan_patterns.py     # Run pattern scanner
-├── data/                    # SQLite database
+│   └── fetch_historical.py  # Download historical data (DB-based resume)
+├── data/                    # SQLite database (WAL mode for concurrency)
 ├── requirements.txt
 └── run.py
 ```
@@ -197,7 +224,11 @@ cryptolens/
 - [x] Auto-scheduled scanning (1-minute)
 - [x] Performance analytics dashboard
 - [x] Pattern type tabs on dashboard
-- [ ] API trading integration (Kucoin)
+- [x] Comprehensive logging system with web viewer
+- [x] Scanner toggle in UI (on/off control)
+- [x] Database statistics page (ATH/ATL, candle counts)
+- [x] DB-based progress tracking for fetch_historical
+- [ ] API trading integration (Binance)
 - [ ] Mobile-responsive design improvements
 - [ ] WebSocket real-time updates
 - [ ] Multi-exchange support
