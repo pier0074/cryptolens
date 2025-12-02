@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block title %}{% if is_edit %}Edit Trade{% else %}New Trade{% endif %} - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl mx-auto">
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-2xl font-bold">{% if is_edit %}Edit Trade{% else %}New Trade{% endif %}</h1>
+        <a href="{{ url_for('portfolio.detail', portfolio_id=portfolio.id) }}" class="text-muted hover:text-white text-sm">
+            &larr; Back to {{ portfolio.name }}
+        </a>
+    </div>
+
+    <div class="bg-card rounded-lg p-6">
+        <form method="POST" class="space-y-6">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <!-- Trade Setup -->
+            <div class="border-b border-gray-700 pb-6">
+                <h2 class="text-lg font-medium mb-4">Trade Setup</h2>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Symbol *</label>
+                        <select name="symbol" required
+                                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
+                            <option value="">Select...</option>
+                            {% for s in symbols %}
+                            <option value="{{ s.symbol }}" {% if trade and trade.symbol == s.symbol %}selected{% endif %}>
+                                {{ s.symbol }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Direction *</label>
+                        <select name="direction" required
+                                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
+                            <option value="long" {% if trade and trade.direction == 'long' %}selected{% endif %}>Long</option>
+                            <option value="short" {% if trade and trade.direction == 'short' %}selected{% endif %}>Short</option>
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Timeframe</label>
+                        <select name="timeframe"
+                                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
+                            <option value="">Select...</option>
+                            {% for tf in ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '1d'] %}
+                            <option value="{{ tf }}" {% if trade and trade.timeframe == tf %}selected{% endif %}>{{ tf }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Pattern Type</label>
+                        <select name="pattern_type"
+                                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
+                            <option value="">Select...</option>
+                            <option value="imbalance" {% if trade and trade.pattern_type == 'imbalance' %}selected{% endif %}>FVG/Imbalance</option>
+                            <option value="order_block" {% if trade and trade.pattern_type == 'order_block' %}selected{% endif %}>Order Block</option>
+                            <option value="liquidity_sweep" {% if trade and trade.pattern_type == 'liquidity_sweep' %}selected{% endif %}>Liquidity Sweep</option>
+                            <option value="breaker" {% if trade and trade.pattern_type == 'breaker' %}selected{% endif %}>Breaker</option>
+                            <option value="other" {% if trade and trade.pattern_type == 'other' %}selected{% endif %}>Other</option>
+                        </select>
+                    </div>
+                </div>
+
+                {% if signals and not is_edit %}
+                <div class="mt-4">
+                    <label class="block text-sm font-medium mb-2">Link to Signal (optional)</label>
+                    <select name="signal_id"
+                            class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
+                        <option value="">No linked signal</option>
+                        {% for signal in signals %}
+                        <option value="{{ signal.id }}">
+                            Signal #{{ signal.id }} - {{ signal.direction|upper }} @ ${{ signal.entry_price }}
+                        </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+            </div>
+
+            <!-- Entry Details (only for new trades) -->
+            {% if not is_edit %}
+            <div class="border-b border-gray-700 pb-6">
+                <h2 class="text-lg font-medium mb-4">Entry Details</h2>
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Entry Price *</label>
+                        <input type="number" name="entry_price" step="any" min="0" required
+                               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                               placeholder="0.00">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Quantity *</label>
+                        <input type="number" name="entry_quantity" step="any" min="0" required
+                               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                               placeholder="0.00">
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Risk Management -->
+            <div class="border-b border-gray-700 pb-6">
+                <h2 class="text-lg font-medium mb-4">Risk Management</h2>
+                <div class="grid grid-cols-3 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Stop Loss</label>
+                        <input type="number" name="stop_loss" step="any" min="0"
+                               value="{{ trade.stop_loss if trade and trade.stop_loss else '' }}"
+                               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                               placeholder="0.00">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Take Profit</label>
+                        <input type="number" name="take_profit" step="any" min="0"
+                               value="{{ trade.take_profit if trade and trade.take_profit else '' }}"
+                               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                               placeholder="0.00">
+                    </div>
+
+                    {% if not is_edit %}
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Risk % of Portfolio</label>
+                        <input type="number" name="risk_percent" step="0.1" min="0" max="100"
+                               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                               placeholder="e.g., 2">
+                        <p class="text-xs text-muted mt-1">Max: ${{ '%.2f'|format(portfolio.current_balance) }}</p>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Notes -->
+            <div>
+                <h2 class="text-lg font-medium mb-4">Notes</h2>
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Setup Notes</label>
+                        <textarea name="setup_notes" rows="3"
+                                  class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                                  placeholder="Why are you taking this trade? What's the setup?">{{ trade.setup_notes if trade else '' }}</textarea>
+                    </div>
+
+                    {% if is_edit %}
+                    <div>
+                        <label class="block text-sm font-medium mb-2">Lessons Learned</label>
+                        <textarea name="lessons_learned" rows="3"
+                                  class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                                  placeholder="What did you learn from this trade?">{{ trade.lessons_learned if trade else '' }}</textarea>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Submit -->
+            <div class="flex justify-end space-x-3 pt-4 border-t border-gray-700">
+                <a href="{{ url_for('portfolio.detail', portfolio_id=portfolio.id) }}"
+                   class="px-6 py-2 rounded bg-gray-700 hover:bg-gray-600">
+                    Cancel
+                </a>
+                <button type="submit"
+                        class="px-6 py-2 rounded bg-green-600 hover:bg-green-700">
+                    {% if is_edit %}Save Changes{% else %}Open Trade{% endif %}
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+
+{% block title %}Portfolio - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold">Portfolios</h1>
+            <p class="text-muted text-sm mt-1">Track and manage your trading portfolios</p>
+        </div>
+        <div class="flex space-x-3">
+            <a href="{{ url_for('portfolio.tags') }}" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm">
+                Manage Tags
+            </a>
+            <a href="{{ url_for('portfolio.create') }}" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm">
+                + New Portfolio
+            </a>
+        </div>
+    </div>
+
+    <!-- Summary Cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-sm">Total Balance</div>
+            <div class="text-2xl font-bold mt-1">${{ '%.2f'|format(total_balance) }}</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-sm">Total PnL</div>
+            <div class="text-2xl font-bold mt-1 {% if total_pnl >= 0 %}bullish{% else %}bearish{% endif %}">
+                {% if total_pnl >= 0 %}+{% endif %}${{ '%.2f'|format(total_pnl) }}
+            </div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-sm">Active Portfolios</div>
+            <div class="text-2xl font-bold mt-1">{{ portfolios|length }}</div>
+        </div>
+    </div>
+
+    <!-- Portfolios List -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {% for portfolio in portfolios %}
+        <a href="{{ url_for('portfolio.detail', portfolio_id=portfolio.id) }}"
+           class="bg-card rounded-lg p-6 hover:ring-2 hover:ring-blue-500 transition-all">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-lg font-bold">{{ portfolio.name }}</h3>
+                <span class="text-sm text-muted">{{ portfolio.currency }}</span>
+            </div>
+
+            {% if portfolio.description %}
+            <p class="text-sm text-muted mb-4 line-clamp-2">{{ portfolio.description }}</p>
+            {% endif %}
+
+            <div class="space-y-2">
+                <div class="flex justify-between text-sm">
+                    <span class="text-muted">Balance:</span>
+                    <span class="font-medium">${{ '%.2f'|format(portfolio.current_balance) }}</span>
+                </div>
+                <div class="flex justify-between text-sm">
+                    <span class="text-muted">Total PnL:</span>
+                    <span class="font-medium {% if portfolio.total_pnl >= 0 %}bullish{% else %}bearish{% endif %}">
+                        {% if portfolio.total_pnl >= 0 %}+{% endif %}${{ '%.2f'|format(portfolio.total_pnl) }}
+                        ({{ '%.1f'|format(portfolio.total_pnl_percent) }}%)
+                    </span>
+                </div>
+                <div class="flex justify-between text-sm">
+                    <span class="text-muted">Open Trades:</span>
+                    <span class="font-medium">{{ portfolio.open_trades_count }}</span>
+                </div>
+            </div>
+
+            <div class="mt-4 pt-4 border-t border-gray-700">
+                <div class="w-full bg-gray-700 rounded-full h-2">
+                    {% set pnl_pct = portfolio.total_pnl_percent %}
+                    {% if pnl_pct > 0 %}
+                    <div class="bg-green-500 h-2 rounded-full" style="width: {{ [pnl_pct, 100]|min }}%"></div>
+                    {% elif pnl_pct < 0 %}
+                    <div class="bg-red-500 h-2 rounded-full" style="width: {{ [pnl_pct|abs, 100]|min }}%"></div>
+                    {% endif %}
+                </div>
+            </div>
+        </a>
+        {% else %}
+        <div class="col-span-full bg-card rounded-lg p-8 text-center">
+            <div class="text-muted text-lg mb-4">No portfolios yet</div>
+            <a href="{{ url_for('portfolio.create') }}" class="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded text-sm inline-block">
+                Create Your First Portfolio
+            </a>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endblock %}

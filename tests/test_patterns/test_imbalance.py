@@ -4,7 +4,7 @@ Tests for Pattern Detection
 import pytest
 from app.models import Pattern, Symbol, Candle
 from app.services.patterns.imbalance import ImbalanceDetector
-from app.services.patterns.base import MIN_ZONE_PERCENT
+from app.config import Config
 from app import db
 
 

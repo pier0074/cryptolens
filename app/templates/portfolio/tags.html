@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}Trade Tags - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto space-y-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold">Trade Tags</h1>
+            <p class="text-muted text-sm mt-1">Organize and categorize your trades</p>
+        </div>
+        <a href="{{ url_for('portfolio.index') }}" class="text-muted hover:text-white text-sm">
+            &larr; Back to Portfolios
+        </a>
+    </div>
+
+    <!-- Create Tag Form -->
+    <div class="bg-card rounded-lg p-6">
+        <h2 class="text-lg font-medium mb-4">Create New Tag</h2>
+        <form method="POST" action="{{ url_for('portfolio.create_tag') }}" class="space-y-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="grid grid-cols-3 gap-4">
+                <div class="col-span-2">
+                    <label class="block text-sm font-medium mb-2">Tag Name *</label>
+                    <input type="text" name="name" required
+                           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                           placeholder="e.g., Breakout, Reversal, High RR">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium mb-2">Color</label>
+                    <input type="color" name="color" value="#6366f1"
+                           class="w-full h-10 bg-gray-800 border border-gray-700 rounded cursor-pointer">
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-sm font-medium mb-2">Description</label>
+                <input type="text" name="description"
+                       class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                       placeholder="Optional description">
+            </div>
+
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm">
+                Create Tag
+            </button>
+        </form>
+    </div>
+
+    <!-- Existing Tags -->
+    <div class="bg-card rounded-lg p-6">
+        <h2 class="text-lg font-medium mb-4">Existing Tags</h2>
+        {% if tags %}
+        <div class="space-y-3">
+            {% for tag in tags %}
+            <div class="flex items-center justify-between p-3 bg-gray-800/50 rounded-lg">
+                <div class="flex items-center space-x-3">
+                    <span class="w-4 h-4 rounded" style="background-color: {{ tag.color }}"></span>
+                    <div>
+                        <span class="font-medium">{{ tag.name }}</span>
+                        {% if tag.description %}
+                        <p class="text-xs text-muted">{{ tag.description }}</p>
+                        {% endif %}
+                    </div>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <span class="text-sm text-muted">{{ tag.trades|length }} trades</span>
+                    <form method="POST" action="{{ url_for('portfolio.delete_tag', tag_id=tag.id) }}"
+                          onsubmit="return confirm('Delete this tag?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="text-red-400 hover:text-red-300 text-sm">
+                            Delete
+                        </button>
+                    </form>
+                </div>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted text-center py-4">No tags created yet.</p>
+        {% endif %}
+    </div>
+
+    <!-- Suggested Tags -->
+    <div class="bg-gray-800/30 rounded-lg p-4">
+        <h3 class="text-sm font-medium text-muted mb-3">Suggested Tags</h3>
+        <div class="flex flex-wrap gap-2 text-sm">
+            <span class="px-3 py-1 rounded bg-gray-700">Breakout</span>
+            <span class="px-3 py-1 rounded bg-gray-700">Reversal</span>
+            <span class="px-3 py-1 rounded bg-gray-700">Trend Following</span>
+            <span class="px-3 py-1 rounded bg-gray-700">Mean Reversion</span>
+            <span class="px-3 py-1 rounded bg-gray-700">High Confluence</span>
+            <span class="px-3 py-1 rounded bg-gray-700">Scalp</span>
+            <span class="px-3 py-1 rounded bg-gray-700">Swing</span>
+            <span class="px-3 py-1 rounded bg-gray-700">News-based</span>
+            <span class="px-3 py-1 rounded bg-gray-700">FVG Fill</span>
+            <span class="px-3 py-1 rounded bg-gray-700">Order Block</span>
+        </div>
+    </div>
+</div>
+{% endblock %}

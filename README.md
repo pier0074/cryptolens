@@ -1,32 +1,46 @@
-# CryptoLens 🔍
+# CryptoLens
 
 **Smart Money Pattern Detection System for Crypto Trading**
 
-CryptoLens detects smart money patterns (Fair Value Gaps, Order Blocks, Liquidity Sweeps) across multiple timeframes, sends push notifications for trade setups, and provides a web dashboard for visualization and backtesting.
+CryptoLens detects smart money patterns (Fair Value Gaps, Order Blocks, Liquidity Sweeps) across multiple timeframes, sends push notifications for trade setups, and provides a web dashboard for visualization, backtesting, and trade journaling.
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
 ![Flask](https://img.shields.io/badge/Flask-3.0-green.svg)
+![Tests](https://img.shields.io/badge/Tests-164%20passing-brightgreen.svg)
 ![License](https://img.shields.io/badge/License-MIT-yellow.svg)
 
 ## Features
 
-- **3 Pattern Types**: Detects Fair Value Gaps (Imbalances), Order Blocks, and Liquidity Sweeps
+### Pattern Detection
+- **3 Pattern Types**: Fair Value Gaps (Imbalances), Order Blocks, Liquidity Sweeps
 - **Multi-Timeframe Analysis**: Scans 6 timeframes (1m, 5m, 15m, 1h, 4h, 1d)
-- **Auto-Scanner**: Background scheduler scans for patterns every minute (fetch + aggregate + scan)
-- **Scanner Toggle**: Enable/disable the auto-scanner from the UI with live status indicator
-- **Push Notifications**: Free push notifications via NTFY.sh with dynamic tags (direction, symbol, pattern)
-- **Test Mode Notifications**: Test notifications include `[TEST]` prefix and `test` tag
-- **Interactive Dashboard**: Visual matrix showing patterns for 30 crypto pairs
-- **Pattern Tabs**: Filter dashboard by pattern type (All, FVG, Order Blocks, Sweeps)
-- **Performance Analytics**: Track pattern statistics, win rates, and backtest results
-- **Database Statistics**: Per-symbol stats page with ATH/ATL, candle counts, data freshness
-- **Comprehensive Logging**: Full logging system with categories (fetch, aggregate, scan, signal, notify)
-- **Candlestick Charts**: TradingView-style charts with pattern overlays
-- **Backtesting**: Test strategy performance on historical data
-- **REST API**: Full API for automation and scheduler control
-- **CSRF Protection**: Secure forms with Flask-WTF CSRF tokens
-- **API Authentication**: Optional API key for scheduler control endpoints
-- **Comprehensive Tests**: 163 tests with 72% coverage
+- **Smart Filtering**: Minimum zone size (0.15%), overlap deduplication
+- **Fill Tracking**: Monitors when price revisits pattern zones
+
+### Scanning & Alerts
+- **Smart Scheduler**: 5-minute intervals with timeframe-aware checks (only scans TFs that could have new data)
+- **Scanner Toggle**: Enable/disable from UI with live status
+- **Push Notifications**: Free via NTFY.sh with dynamic tags (direction, symbol, pattern)
+- **Confluence Scoring**: Higher confidence when multiple timeframes align
+
+### Portfolio & Journal (NEW)
+- **Portfolio Management**: Track multiple portfolios with balance tracking
+- **Trade Logging**: Entry/exit, stop loss, take profit, fees
+- **Journal Entries**: Pre-trade, during, post-trade notes with mood tracking
+- **Trade Tags**: Organize trades with custom colored tags
+- **Analytics**: Win rate, profit factor, R-multiples, performance by symbol
+
+### Dashboard & Analytics
+- **Pattern Matrix**: Visual grid showing patterns for 30 crypto pairs
+- **Performance Stats**: Win rates, backtest results
+- **Database Stats**: Per-symbol ATH/ATL, candle counts, data freshness
+- **Candlestick Charts**: TradingView-style with pattern overlays
+
+### Technical
+- **REST API**: Full API for automation
+- **164 Tests**: Comprehensive test suite
+- **CSRF Protection**: Secure forms
+- **API Authentication**: Optional API key for sensitive endpoints
 
 ## Screenshots
 
@@ -111,7 +125,7 @@ python run.py
 
 Visit `http://localhost:5000` in your browser.
 
-The auto-scanner will start automatically, scanning for patterns every minute.
+The scanner can be started from Settings or via the API (disabled by default).
 
 ## Pattern Types
 
@@ -174,6 +188,10 @@ Price takes out a previous high/low (hunting stop losses) then reverses:
 | `/api/scheduler/start` | POST | Start the scanner |
 | `/api/scheduler/stop` | POST | Stop the scanner |
 | `/api/scheduler/toggle` | POST | Toggle scanner on/off |
+| `/portfolio/api/portfolios` | GET | List all portfolios |
+| `/portfolio/api/portfolios/<id>` | GET | Get portfolio detail |
+| `/portfolio/api/portfolios/<id>/trades` | GET | Get portfolio trades |
+| `/portfolio/api/portfolios/<id>/stats` | GET | Get portfolio statistics |
 
 ## Testing
 
@@ -237,12 +255,13 @@ python -m pytest tests/test_signals.py -v
 cryptolens/
 ├── app/
 │   ├── __init__.py          # Flask app factory
-│   ├── config.py            # Configuration
-│   ├── models.py            # Database models (Symbol, Candle, Pattern, Signal, Log)
+│   ├── config.py            # Configuration (pattern thresholds, timeframes)
+│   ├── models.py            # Database models
 │   ├── routes/              # Web routes
 │   │   ├── dashboard.py     # Main dashboard + analytics
 │   │   ├── patterns.py      # Pattern visualization
 │   │   ├── signals.py       # Trade signals
+│   │   ├── portfolio.py     # Portfolio & trade journal (NEW)
 │   │   ├── backtest.py      # Backtesting
 │   │   ├── settings.py      # Settings
 │   │   ├── logs.py          # Logging viewer
@@ -251,9 +270,10 @@ cryptolens/
 │   ├── services/            # Business logic
 │   │   ├── data_fetcher.py  # CCXT/Binance integration
 │   │   ├── aggregator.py    # Timeframe aggregation
-│   │   ├── scheduler.py     # Auto-scanner (every minute)
-│   │   ├── logger.py        # Centralized logging system
+│   │   ├── scheduler.py     # Smart scanner (5-min interval)
+│   │   ├── logger.py        # Centralized logging
 │   │   ├── patterns/        # Pattern detectors
+│   │   │   ├── base.py         # Base class with shared logic
 │   │   │   ├── imbalance.py    # Fair Value Gaps
 │   │   │   ├── order_block.py  # Order Blocks
 │   │   │   └── liquidity.py    # Liquidity Sweeps
@@ -261,20 +281,18 @@ cryptolens/
 │   │   ├── notifier.py      # NTFY notifications
 │   │   └── backtester.py    # Backtesting engine
 │   └── templates/           # HTML templates
+│       └── portfolio/       # Portfolio UI templates (NEW)
 ├── scripts/
-│   └── fetch_historical.py  # Download historical data (DB-based resume)
-├── tests/                   # Test suite (163 tests, 72% coverage)
+│   └── fetch_historical.py  # Download historical data
+├── tests/                   # Test suite (164 tests)
 │   ├── conftest.py          # Pytest fixtures
-│   ├── test_api.py          # API endpoint tests (31 tests)
-│   ├── test_signals.py      # Signal generation tests (20 tests)
-│   ├── test_integration.py  # End-to-end integration tests (14 tests)
-│   ├── test_routes.py       # UI route tests (37 tests)
-│   ├── test_services.py     # Service tests (26 tests)
-│   └── test_patterns/       # Pattern detector tests (35 tests)
-│       ├── test_imbalance.py
-│       ├── test_order_block.py
-│       └── test_liquidity.py
-├── data/                    # SQLite database (WAL mode for concurrency)
+│   ├── test_api.py          # API tests (31)
+│   ├── test_signals.py      # Signal tests (20)
+│   ├── test_integration.py  # Integration tests (14)
+│   ├── test_routes.py       # Route tests (37)
+│   ├── test_services.py     # Service tests (26)
+│   └── test_patterns/       # Pattern tests (36)
+├── data/                    # SQLite database (WAL mode)
 ├── requirements.txt
 └── run.py
 ```
@@ -295,19 +313,18 @@ cryptolens/
 - [x] Fair Value Gap detection
 - [x] Order Blocks detection
 - [x] Liquidity Sweeps detection
-- [x] Auto-scheduled scanning (1-minute)
+- [x] Smart scheduled scanning (5-minute, timeframe-aware)
 - [x] Performance analytics dashboard
-- [x] Pattern type tabs on dashboard
 - [x] Comprehensive logging system with web viewer
 - [x] Scanner toggle in UI (on/off control)
 - [x] Database statistics page (ATH/ATL, candle counts)
-- [x] DB-based progress tracking for fetch_historical
-- [x] Test suite with 163 tests (72% coverage)
+- [x] Test suite with 164 tests
 - [x] Dynamic notification tags (direction/symbol/pattern)
-- [ ] API trading integration (Binance)
-- [ ] Mobile-responsive design improvements
+- [x] Portfolio & trade journal system
+- [x] DRY pattern detector architecture
 - [ ] WebSocket real-time updates
 - [ ] Multi-exchange support
+- [ ] Mobile-responsive improvements
 
 ## Disclaimer
 

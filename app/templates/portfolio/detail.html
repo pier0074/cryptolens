@@ -1,0 +1,172 @@
+{% extends "base.html" %}
+
+{% block title %}{{ portfolio.name }} - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="space-y-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between flex-wrap gap-4">
+        <div>
+            <div class="flex items-center space-x-3">
+                <a href="{{ url_for('portfolio.index') }}" class="text-muted hover:text-white">
+                    &larr;
+                </a>
+                <h1 class="text-2xl font-bold">{{ portfolio.name }}</h1>
+            </div>
+            {% if portfolio.description %}
+            <p class="text-muted text-sm mt-1">{{ portfolio.description }}</p>
+            {% endif %}
+        </div>
+        <div class="flex items-center space-x-3">
+            <a href="{{ url_for('portfolio.new_trade', portfolio_id=portfolio.id) }}"
+               class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm">
+                + New Trade
+            </a>
+            <a href="{{ url_for('portfolio.edit', portfolio_id=portfolio.id) }}"
+               class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm">
+                Edit
+            </a>
+            <form method="POST" action="{{ url_for('portfolio.delete', portfolio_id=portfolio.id) }}"
+                  onsubmit="return confirm('Are you sure you want to delete this portfolio?');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-sm">
+                    Delete
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-xs uppercase">Balance</div>
+            <div class="text-xl font-bold mt-1">${{ '%.2f'|format(portfolio.current_balance) }}</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-xs uppercase">Total PnL</div>
+            <div class="text-xl font-bold mt-1 {% if portfolio.total_pnl >= 0 %}bullish{% else %}bearish{% endif %}">
+                {% if portfolio.total_pnl >= 0 %}+{% endif %}${{ '%.2f'|format(portfolio.total_pnl) }}
+            </div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-xs uppercase">Win Rate</div>
+            <div class="text-xl font-bold mt-1">{{ stats.win_rate }}%</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-xs uppercase">Total Trades</div>
+            <div class="text-xl font-bold mt-1">{{ stats.total_trades }}</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-xs uppercase">Avg Win</div>
+            <div class="text-xl font-bold mt-1 bullish">${{ stats.avg_win }}</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-xs uppercase">Avg Loss</div>
+            <div class="text-xl font-bold mt-1 bearish">${{ stats.avg_loss }}</div>
+        </div>
+    </div>
+
+    <!-- Trades Filter -->
+    <div class="bg-card rounded-lg p-4">
+        <form method="GET" class="flex items-center space-x-4">
+            <label class="text-sm text-muted">Filter:</label>
+            <select name="status" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
+                <option value="">All Trades</option>
+                {% for status in trade_statuses %}
+                <option value="{{ status }}" {% if current_status == status %}selected{% endif %}>
+                    {{ status|capitalize }}
+                </option>
+                {% endfor %}
+            </select>
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm">
+                Apply
+            </button>
+        </form>
+    </div>
+
+    <!-- Trades List -->
+    <div class="bg-card rounded-lg overflow-hidden">
+        <table class="w-full">
+            <thead>
+                <tr class="border-b border-gray-700 bg-gray-800/50">
+                    <th class="text-left p-3 text-muted font-medium text-sm">Symbol</th>
+                    <th class="text-left p-3 text-muted font-medium text-sm">Direction</th>
+                    <th class="text-left p-3 text-muted font-medium text-sm">Entry</th>
+                    <th class="text-left p-3 text-muted font-medium text-sm">Exit</th>
+                    <th class="text-left p-3 text-muted font-medium text-sm">PnL</th>
+                    <th class="text-left p-3 text-muted font-medium text-sm">Status</th>
+                    <th class="text-left p-3 text-muted font-medium text-sm">Date</th>
+                    <th class="text-left p-3 text-muted font-medium text-sm">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for trade in trades %}
+                <tr class="border-b border-gray-800 hover:bg-gray-800/50">
+                    <td class="p-3">
+                        <a href="{{ url_for('portfolio.trade_detail', portfolio_id=portfolio.id, trade_id=trade.id) }}"
+                           class="font-medium hover:text-blue-400">
+                            {{ trade.symbol }}
+                        </a>
+                        {% if trade.timeframe %}
+                        <span class="text-xs text-muted ml-1">{{ trade.timeframe }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="p-3">
+                        <span class="{% if trade.direction == 'long' %}bullish{% else %}bearish{% endif %} font-medium">
+                            {{ trade.direction|upper }}
+                        </span>
+                    </td>
+                    <td class="p-3 font-mono text-sm">
+                        ${{ '%.4f'|format(trade.entry_price) if trade.entry_price < 1 else '%.2f'|format(trade.entry_price) }}
+                    </td>
+                    <td class="p-3 font-mono text-sm">
+                        {% if trade.exit_price %}
+                        ${{ '%.4f'|format(trade.exit_price) if trade.exit_price < 1 else '%.2f'|format(trade.exit_price) }}
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td class="p-3 font-mono text-sm">
+                        {% if trade.pnl_amount is not none %}
+                        <span class="{% if trade.pnl_amount >= 0 %}bullish{% else %}bearish{% endif %}">
+                            {% if trade.pnl_amount >= 0 %}+{% endif %}${{ '%.2f'|format(trade.pnl_amount) }}
+                            {% if trade.pnl_r %}<span class="text-xs">({{ '%.1f'|format(trade.pnl_r) }}R)</span>{% endif %}
+                        </span>
+                        {% else %}
+                        <span class="text-muted">-</span>
+                        {% endif %}
+                    </td>
+                    <td class="p-3">
+                        <span class="px-2 py-1 rounded text-xs
+                            {% if trade.status == 'open' %}bg-blue-900 text-blue-200
+                            {% elif trade.status == 'closed' %}bg-green-900 text-green-200
+                            {% else %}bg-gray-700{% endif %}">
+                            {{ trade.status }}
+                        </span>
+                    </td>
+                    <td class="p-3 text-sm text-muted">
+                        {{ trade.entry_time.strftime('%Y-%m-%d') if trade.entry_time else '-' }}
+                    </td>
+                    <td class="p-3">
+                        <a href="{{ url_for('portfolio.trade_detail', portfolio_id=portfolio.id, trade_id=trade.id) }}"
+                           class="text-blue-400 hover:text-blue-300 text-sm">
+                            View
+                        </a>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="8" class="p-8 text-center text-muted">
+                        No trades yet.
+                        <a href="{{ url_for('portfolio.new_trade', portfolio_id=portfolio.id) }}"
+                           class="text-blue-400 hover:underline">
+                            Create your first trade
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

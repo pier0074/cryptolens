@@ -49,6 +49,33 @@ class Config:
     # Exchange (binance has better rate limits and 1000 candles/request)
     EXCHANGE = 'binance'
 
+    # Data fetching
+    BATCH_SIZE = 1000  # Binance allows 1000 candles per request
+    RATE_LIMIT_DELAY = 0.1  # Minimum delay between API calls (seconds)
+
+    # Pattern detection
+    MIN_ZONE_PERCENT = 0.15  # Minimum zone size as % of price
+    ORDER_BLOCK_STRENGTH_MULTIPLIER = 1.5  # Body must be this much larger than avg
+
+    # Timeframe overlap thresholds (for pattern deduplication)
+    OVERLAP_THRESHOLDS = {
+        '1m': 0.50, '5m': 0.55, '15m': 0.60, '30m': 0.65,
+        '1h': 0.70, '2h': 0.75, '4h': 0.80, '1d': 0.85,
+    }
+    DEFAULT_OVERLAP_THRESHOLD = 0.70
+
+    # Timeframe to milliseconds mapping (for historical fetch calculations)
+    TIMEFRAME_MS = {
+        '1m': 60 * 1000,
+        '5m': 5 * 60 * 1000,
+        '15m': 15 * 60 * 1000,
+        '30m': 30 * 60 * 1000,
+        '1h': 60 * 60 * 1000,
+        '2h': 2 * 60 * 60 * 1000,
+        '4h': 4 * 60 * 60 * 1000,
+        '1d': 24 * 60 * 60 * 1000
+    }
+
 
 class DevelopmentConfig(Config):
     """Development configuration"""

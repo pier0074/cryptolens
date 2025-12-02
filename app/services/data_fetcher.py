@@ -2,6 +2,7 @@
 Data Fetcher Service
 Fetches OHLC candles via CCXT (Binance by default - 1000 candles/request)
 """
+from typing import Tuple, List, Dict, Any, Optional, Callable
 import ccxt
 import time
 import logging
@@ -11,9 +12,6 @@ from app.models import Symbol, Candle
 from app.config import Config
 
 logger = logging.getLogger(__name__)
-
-# Binance allows 1000 candles per request (vs Kucoin's 500)
-BATCH_SIZE = 1000
 
 # Singleton exchange instance cache
 _exchange_instance = None
@@ -43,7 +41,7 @@ def get_exchange():
     return _exchange_instance
 
 
-def fetch_candles(symbol: str, timeframe: str, limit: int = BATCH_SIZE, since: int = None) -> tuple:
+def fetch_candles(symbol: str, timeframe: str, limit: int = None, since: int = None) -> Tuple[int, int]:
     """
     Fetch candles for a symbol/timeframe
 
@@ -56,6 +54,9 @@ def fetch_candles(symbol: str, timeframe: str, limit: int = BATCH_SIZE, since: i
     Returns:
         Tuple of (new_candles_saved, total_fetched_from_api)
     """
+    if limit is None:
+        limit = Config.BATCH_SIZE
+
     exchange = get_exchange()
 
     # Get or create symbol
@@ -148,21 +149,13 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
     since = int(start_time.timestamp() * 1000)
     now = int(now_dt.timestamp() * 1000)
 
-    # Timeframe to milliseconds mapping
-    tf_ms = {
-        '1m': 60 * 1000,
-        '5m': 5 * 60 * 1000,
-        '15m': 15 * 60 * 1000,
-        '1h': 60 * 60 * 1000,
-        '4h': 4 * 60 * 60 * 1000,
-        '1d': 24 * 60 * 60 * 1000
-    }
+    # Get candle duration from config
+    candle_duration = Config.TIMEFRAME_MS.get(timeframe, 60 * 1000)
 
-    candle_duration = tf_ms.get(timeframe, 60 * 1000)
-
-    # Calculate total batches needed (using BATCH_SIZE)
+    # Calculate total batches needed
+    batch_size = Config.BATCH_SIZE
     total_candles_needed = (now - since) // candle_duration
-    total_batches = max(1, (total_candles_needed // BATCH_SIZE) + 1)
+    total_batches = max(1, (total_candles_needed // batch_size) + 1)
 
     if verbose:
         print(f"    📊 {symbol} - Fetching ~{total_candles_needed:,} candles in {total_batches} batches...")
@@ -179,7 +172,7 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
         batch_num += 1
 
         try:
-            new_count, api_count = fetch_candles(symbol, timeframe, limit=BATCH_SIZE, since=current_since)
+            new_count, api_count = fetch_candles(symbol, timeframe, limit=batch_size, since=current_since)
             total_new += new_count
             total_api += api_count
 
@@ -208,10 +201,10 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
                     sys.stdout.flush()
 
             # Move to next batch
-            current_since += BATCH_SIZE * candle_duration
+            current_since += batch_size * candle_duration
 
-            # Rate limiting (Binance is faster)
-            time.sleep(max(exchange.rateLimit / 1000, 0.1))
+            # Rate limiting
+            time.sleep(max(exchange.rateLimit / 1000, Config.RATE_LIMIT_DELAY))
 
         except Exception as e:
             logger.warning(f"{symbol} batch {batch_num}: {e}")

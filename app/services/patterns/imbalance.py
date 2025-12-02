@@ -8,9 +8,8 @@ Detects price imbalances where:
 These gaps often get "filled" when price returns to them.
 """
 from typing import List, Dict, Any
-import pandas as pd
 from app.services.patterns.base import PatternDetector
-from app.models import Symbol, Pattern
+from app.models import Symbol
 from app import db
 
 
@@ -41,169 +40,43 @@ class ImbalanceDetector(PatternDetector):
 
         for i in range(2, len(df)):
             c1 = df.iloc[i - 2]  # First candle
-            c2 = df.iloc[i - 1]  # Middle candle (the impulse)
             c3 = df.iloc[i]      # Third candle
 
             # Bullish Imbalance: Gap between c1 high and c3 low
             if c1['high'] < c3['low']:
                 zone_low = c1['high']
                 zone_high = c3['low']
+                detected_at = int(c3['timestamp'])
 
-                # Skip zones that are too small to trade
-                if not self.is_zone_tradeable(zone_low, zone_high):
-                    continue
-
-                # Skip if overlapping pattern already exists (70% threshold)
-                if self.has_overlapping_pattern(sym.id, timeframe, 'bullish', zone_low, zone_high):
-                    continue
-
-                # Check if exact pattern already exists (same timestamp)
-                existing = Pattern.query.filter_by(
-                    symbol_id=sym.id,
-                    timeframe=timeframe,
-                    pattern_type='imbalance',
-                    detected_at=int(c3['timestamp'])
-                ).first()
-
-                if not existing:
-                    pattern = Pattern(
-                        symbol_id=sym.id,
-                        timeframe=timeframe,
-                        pattern_type='imbalance',
-                        direction='bullish',
-                        zone_high=zone_high,
-                        zone_low=zone_low,
-                        detected_at=int(c3['timestamp']),
-                        status='active'
+                if self._should_save_pattern(sym.id, timeframe, 'bullish', zone_low, zone_high):
+                    pattern_dict = self.save_pattern(
+                        sym.id, timeframe, 'bullish', zone_low, zone_high, detected_at, symbol
                     )
-                    db.session.add(pattern)
-                    patterns.append({
-                        'type': 'imbalance',
-                        'direction': 'bullish',
-                        'zone_high': zone_high,
-                        'zone_low': zone_low,
-                        'detected_at': int(c3['timestamp']),
-                        'symbol': symbol,
-                        'timeframe': timeframe
-                    })
+                    if pattern_dict:
+                        patterns.append(pattern_dict)
 
             # Bearish Imbalance: Gap between c1 low and c3 high
             if c1['low'] > c3['high']:
                 zone_high = c1['low']
                 zone_low = c3['high']
+                detected_at = int(c3['timestamp'])
 
-                # Skip zones that are too small to trade
-                if not self.is_zone_tradeable(zone_low, zone_high):
-                    continue
-
-                # Skip if overlapping pattern already exists (70% threshold)
-                if self.has_overlapping_pattern(sym.id, timeframe, 'bearish', zone_low, zone_high):
-                    continue
-
-                # Check if exact pattern already exists (same timestamp)
-                existing = Pattern.query.filter_by(
-                    symbol_id=sym.id,
-                    timeframe=timeframe,
-                    pattern_type='imbalance',
-                    detected_at=int(c3['timestamp'])
-                ).first()
-
-                if not existing:
-                    pattern = Pattern(
-                        symbol_id=sym.id,
-                        timeframe=timeframe,
-                        pattern_type='imbalance',
-                        direction='bearish',
-                        zone_high=zone_high,
-                        zone_low=zone_low,
-                        detected_at=int(c3['timestamp']),
-                        status='active'
+                if self._should_save_pattern(sym.id, timeframe, 'bearish', zone_low, zone_high):
+                    pattern_dict = self.save_pattern(
+                        sym.id, timeframe, 'bearish', zone_low, zone_high, detected_at, symbol
                     )
-                    db.session.add(pattern)
-                    patterns.append({
-                        'type': 'imbalance',
-                        'direction': 'bearish',
-                        'zone_high': zone_high,
-                        'zone_low': zone_low,
-                        'detected_at': int(c3['timestamp']),
-                        'symbol': symbol,
-                        'timeframe': timeframe
-                    })
+                    if pattern_dict:
+                        patterns.append(pattern_dict)
 
         db.session.commit()
         return patterns
 
-    def check_fill(self, pattern: Dict[str, Any], current_price: float) -> Dict[str, Any]:
-        """
-        Check if an imbalance has been filled
-
-        An imbalance is considered:
-        - Partially filled: Price has entered the zone
-        - Fully filled: Price has crossed through the entire zone
-        - Invalidated: Price moved significantly away without filling
-        """
-        zone_high = pattern['zone_high']
-        zone_low = pattern['zone_low']
-        direction = pattern['direction']
-
-        if direction == 'bullish':
-            # For bullish imbalance, we're waiting for price to come DOWN to fill
-            if current_price <= zone_low:
-                # Fully filled
-                return {**pattern, 'status': 'filled', 'fill_percentage': 100}
-            elif current_price <= zone_high:
-                # Partially filled
-                fill_pct = ((zone_high - current_price) / (zone_high - zone_low)) * 100
-                return {**pattern, 'status': 'active', 'fill_percentage': min(fill_pct, 100)}
-            else:
-                # Not yet filled
-                return {**pattern, 'status': 'active', 'fill_percentage': 0}
-
-        else:  # bearish
-            # For bearish imbalance, we're waiting for price to come UP to fill
-            if current_price >= zone_high:
-                # Fully filled
-                return {**pattern, 'status': 'filled', 'fill_percentage': 100}
-            elif current_price >= zone_low:
-                # Partially filled
-                fill_pct = ((current_price - zone_low) / (zone_high - zone_low)) * 100
-                return {**pattern, 'status': 'active', 'fill_percentage': min(fill_pct, 100)}
-            else:
-                # Not yet filled
-                return {**pattern, 'status': 'active', 'fill_percentage': 0}
-
-    def update_pattern_status(self, symbol: str, timeframe: str, current_price: float) -> int:
-        """
-        Update the status of all active patterns for a symbol/timeframe
-
-        Returns:
-            Number of patterns updated
-        """
-        sym = Symbol.query.filter_by(symbol=symbol).first()
-        if not sym:
-            return 0
-
-        patterns = Pattern.query.filter_by(
-            symbol_id=sym.id,
-            timeframe=timeframe,
-            pattern_type='imbalance',
-            status='active'
-        ).all()
-
-        updated = 0
-        for pattern in patterns:
-            pattern_dict = pattern.to_dict()
-            pattern_dict['direction'] = pattern.direction
-
-            result = self.check_fill(pattern_dict, current_price)
-
-            if result['status'] != pattern.status:
-                pattern.status = result['status']
-                if result['status'] == 'filled':
-                    pattern.filled_at = int(pd.Timestamp.now(tz="UTC").timestamp() * 1000)
-                updated += 1
-
-            pattern.fill_percentage = result.get('fill_percentage', 0)
-
-        db.session.commit()
-        return updated
+    def _should_save_pattern(
+        self, symbol_id: int, timeframe: str, direction: str, zone_low: float, zone_high: float
+    ) -> bool:
+        """Check if pattern should be saved (passes all validation)"""
+        if not self.is_zone_tradeable(zone_low, zone_high):
+            return False
+        if self.has_overlapping_pattern(symbol_id, timeframe, direction, zone_low, zone_high):
+            return False
+        return True
