@@ -4,36 +4,6 @@
 
 ---
 
-## Current Architecture
-
-### Background Processing (Cron-based)
-```bash
-# Pattern scanning (every 5 minutes)
-# Fetches fresh 1m candles, aggregates, detects patterns, sends notifications
-*/5 * * * * cd /path/to/cryptolens && venv/bin/python scripts/scan.py
-
-# Pattern cleanup (every 30 minutes)
-# Marks expired patterns based on timeframe settings
-*/30 * * * * cd /path/to/cryptolens && venv/bin/python scripts/cleanup_patterns.py
-
-# Historical data backfill (daily at midnight, optional)
-0 0 * * * cd /path/to/cryptolens && venv/bin/python scripts/fetch_historical.py --days 7
-```
-
-### Pattern Expiry (Timeframe-based)
-| Timeframe | Expiry | Rationale |
-|-----------|--------|-----------|
-| 1m | 4h | LTF structure changes quickly |
-| 5m | 12h | |
-| 15m | 24h | |
-| 30m | 48h | |
-| 1h | 72h (3d) | MTF - stays relevant longer |
-| 2h | 120h (5d) | |
-| 4h | 168h (7d) | |
-| 1d | 336h (14d) | HTF - most significant |
-
----
-
 ## Pending Tasks
 
 ### High Priority
@@ -48,8 +18,13 @@
 
 ## Future Enhancements (Optional)
 
+### Pattern Improvements
+- [ ] **Swing-based pattern invalidation** - Expire patterns when new swing forms beyond zone
+- [ ] **ATR-based expiry** - More dynamic than static time-based
+- [ ] **Pattern ML scoring** - Train on historical fill rates
+
 ### Real-time Features
-- [ ] WebSocket for live price updates on charts
+- [ ] WebSocket for live price updates
 - [ ] Real-time pattern notifications in UI
 - [ ] Signal alerts without page refresh
 
@@ -58,28 +33,53 @@
 - [ ] Add Coinbase, Kraken, Bybit adapters
 - [ ] Exchange selector in settings
 
-### Advanced Features
+### Other
 - [ ] Custom alert rules (price alerts, volume spikes)
-- [ ] Pattern ML scoring (train on historical fill rates)
 - [ ] Redis caching layer (pattern matrix, confluence scores)
-- [ ] Swing-based pattern invalidation (more sophisticated than time-based)
+- [ ] Gap detection in fetch_historical.py (currently only --force fills gaps)
 
 ---
 
-## Completed (Phases 1-6)
+## Completed
 
+### Phase 6: Architecture (Dec 2025)
+- Cron-based scheduling (replaced APScheduler)
+- Async parallel fetch script (fetch.py)
+- Pattern detection script (detect.py)
+- Pattern expiry system (timeframe-based)
+- Stats page optimization (390→10 queries)
+
+### Phase 5: Code Quality
+- Type hints in key services
+- Configuration centralization
+- DRY pattern detector refactoring
+
+### Phase 4: Portfolio & Journal
+- Portfolio management
+- Trade logging with journal entries
+- Performance analytics
+
+### Phase 3: Testing
+- 164 tests passing
+- API, routes, services, patterns covered
+
+### Phase 2: Performance
+- N+1 query fixes
+- Exchange instance caching
+- Direct SQL to DataFrame
+
+### Phase 1: Security
+- API key authentication
+- CSRF protection
+- Input validation
+- Notification retry logic
+
+### Core Features
 - Pattern detection (FVG, Order Block, Liquidity Sweep)
 - Multi-timeframe aggregation
 - Signal generation with confluence
-- NTFY notifications with dynamic tags
+- NTFY notifications
 - Backtesting system
-- Portfolio & Trade Journal
-- Security (API keys, CSRF, input validation)
-- Performance (N+1 fixes, batch queries, caching)
-- Test suite (164 tests)
-- Cron-based scheduling (replaced APScheduler)
-- Pattern expiry system
-- Optimized stats page (390→10 queries)
 
 ---
 
