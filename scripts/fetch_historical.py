@@ -1,315 +1,297 @@
 #!/usr/bin/env python3
 """
-Historical Data Fetcher Script
-Downloads historical candle data for all symbols (sequential to avoid SQLite locks)
-Progress is tracked via database - no external files needed.
+Historical Data Fetcher with Gap Detection
+
+Features:
+- Async parallel fetching for speed
+- Gap detection and filling
+- Progress tracking via database
+- Hourly cron for gap filling, manual for initial load
+
+Usage:
+  python fetch_historical.py                    # Initial load (1 year)
+  python fetch_historical.py --days=30          # Fetch 30 days
+  python fetch_historical.py --gaps             # Find and fill gaps only
+  python fetch_historical.py --status           # Show DB status
+  python fetch_historical.py --delete           # Delete all data
+
+Cron (hourly gap check):
+  0 * * * * cd /path/to/cryptolens && venv/bin/python scripts/fetch_historical.py --gaps
 """
 import sys
 import os
 import time
+import asyncio
 from datetime import datetime, timezone, timedelta
+from typing import List, Tuple, Optional
 
-# Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import create_app, db
-from app.models import Symbol, Candle
-from app.services.aggregator import aggregate_all_timeframes
-from app.config import Config
+import ccxt.async_support as ccxt_async
 from sqlalchemy import func
 
 
 def format_time(seconds):
-    """Format seconds into human readable time"""
     if seconds < 60:
         return f"{seconds:.0f}s"
     elif seconds < 3600:
         return f"{seconds/60:.1f}m"
-    else:
-        return f"{seconds/3600:.1f}h"
+    return f"{seconds/3600:.1f}h"
 
 
-def progress_bar(current, total, width=30, prefix=''):
-    """Generate a progress bar string"""
+def progress_bar(current, total, width=30):
     pct = current / total if total > 0 else 0
     filled = int(width * pct)
-    bar = '█' * filled + '░' * (width - filled)
-    return f"{prefix}[{bar}] {pct*100:5.1f}%"
+    return f"[{'█' * filled}{'░' * (width - filled)}] {pct*100:5.1f}%"
 
 
-def get_symbol_progress(symbol_id, target_start_ts):
+def find_gaps(symbol_id: int, start_ts: int, end_ts: int, max_gap_minutes: int = 5) -> List[Tuple[int, int]]:
     """
-    Get fetch progress for a symbol from database
+    Find gaps in 1m candle data for a symbol.
 
-    Returns:
-        dict with 'candle_count', 'oldest_ts', 'newest_ts', 'needs_fetch', 'resume_from_ts'
+    Returns list of (gap_start_ts, gap_end_ts) tuples.
+    Only returns gaps larger than max_gap_minutes.
     """
-    # Get candle stats for 1m timeframe
-    stats = db.session.query(
-        func.count(Candle.id),
-        func.min(Candle.timestamp),
-        func.max(Candle.timestamp)
-    ).filter(
+    from app import db
+    from app.models import Candle
+
+    # Get all timestamps in range, ordered
+    timestamps = db.session.query(Candle.timestamp).filter(
         Candle.symbol_id == symbol_id,
-        Candle.timeframe == '1m'
-    ).first()
+        Candle.timeframe == '1m',
+        Candle.timestamp >= start_ts,
+        Candle.timestamp <= end_ts
+    ).order_by(Candle.timestamp).all()
 
-    candle_count = stats[0] or 0
-    oldest_ts = stats[1]
-    newest_ts = stats[2]
+    timestamps = [t[0] for t in timestamps]
 
-    # Determine if we need to fetch and where to resume from
-    now_ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+    if len(timestamps) < 2:
+        return [(start_ts, end_ts)] if len(timestamps) == 0 else []
 
-    if candle_count == 0:
-        # No candles at all - start from target_start
-        return {
-            'candle_count': 0,
-            'oldest_ts': None,
-            'newest_ts': None,
-            'needs_fetch': True,
-            'resume_from_ts': target_start_ts,
-            'status': 'new'
-        }
+    gaps = []
+    expected_interval = 60 * 1000  # 1 minute in ms
+    max_gap_ms = max_gap_minutes * 60 * 1000
 
-    # Check if we have recent data (within last hour = considered up-to-date)
-    one_hour_ago = now_ts - (60 * 60 * 1000)
-    has_recent = newest_ts >= one_hour_ago
+    for i in range(1, len(timestamps)):
+        gap = timestamps[i] - timestamps[i-1]
+        if gap > max_gap_ms:
+            gaps.append((timestamps[i-1] + expected_interval, timestamps[i] - expected_interval))
 
-    # Check if we have old enough data
-    has_full_history = oldest_ts <= target_start_ts + (60 * 60 * 1000)  # Within 1 hour of target
+    # Check gap at start
+    if timestamps[0] - start_ts > max_gap_ms:
+        gaps.insert(0, (start_ts, timestamps[0] - expected_interval))
 
-    if has_recent and has_full_history:
-        return {
-            'candle_count': candle_count,
-            'oldest_ts': oldest_ts,
-            'newest_ts': newest_ts,
-            'needs_fetch': False,
-            'resume_from_ts': None,
-            'status': 'complete'
-        }
+    # Check gap at end (but not beyond current time - fetch.py handles that)
+    now_ts = int(datetime.now(timezone.utc).timestamp() * 1000) - (5 * 60 * 1000)  # 5 min buffer
+    if now_ts - timestamps[-1] > max_gap_ms and timestamps[-1] < end_ts:
+        gaps.append((timestamps[-1] + expected_interval, min(end_ts, now_ts)))
 
-    # Need to fetch - resume from newest timestamp
-    return {
-        'candle_count': candle_count,
-        'oldest_ts': oldest_ts,
-        'newest_ts': newest_ts,
-        'needs_fetch': True,
-        'resume_from_ts': newest_ts + 60000 if newest_ts else target_start_ts,  # +1 minute
-        'status': 'partial'
-    }
+    return gaps
 
 
-def fetch_symbol_with_logging(app, symbol_name, days, force_refetch=False):
-    """
-    Fetch historical data for a single symbol with detailed logging
-    Uses Binance (1000 candles/batch) with batch DB checking for speed
-    """
-    import ccxt
+async def fetch_range_async(exchange, symbol: str, start_ts: int, end_ts: int,
+                           verbose: bool = False) -> List:
+    """Fetch candles for a time range using async."""
+    all_candles = []
+    current_ts = start_ts
+    batch_size = 1000
 
+    while current_ts < end_ts:
+        try:
+            ohlcv = await exchange.fetch_ohlcv(symbol, '1m', since=current_ts, limit=batch_size)
+            if not ohlcv:
+                break
+
+            all_candles.extend(ohlcv)
+
+            # Move to next batch
+            last_ts = ohlcv[-1][0]
+            if last_ts <= current_ts:
+                break
+            current_ts = last_ts + 60000
+
+            if verbose and len(all_candles) % 10000 == 0:
+                print(f"    Fetched {len(all_candles):,} candles...", end='\r')
+
+        except Exception as e:
+            if verbose:
+                print(f"    Error at {current_ts}: {e}")
+            await asyncio.sleep(1)
+            current_ts += batch_size * 60000
+
+    return all_candles
+
+
+def save_candles_batch(symbol_id: int, candles: List, verbose: bool = False) -> int:
+    """Save candles to database, skipping duplicates."""
+    from app import db
+    from app.models import Candle
+
+    if not candles:
+        return 0
+
+    # Get existing timestamps
+    timestamps = [c[0] for c in candles]
+    existing = set(
+        c.timestamp for c in Candle.query.filter(
+            Candle.symbol_id == symbol_id,
+            Candle.timeframe == '1m',
+            Candle.timestamp.in_(timestamps)
+        ).all()
+    )
+
+    new_count = 0
+    for candle in candles:
+        ts, o, h, l, c, v = candle
+        if ts in existing:
+            continue
+        if any(x is None or x <= 0 for x in [o, h, l, c]):
+            continue
+
+        db.session.add(Candle(
+            symbol_id=symbol_id,
+            timeframe='1m',
+            timestamp=ts,
+            open=o, high=h, low=l, close=c,
+            volume=v or 0
+        ))
+        new_count += 1
+
+    if new_count > 0:
+        db.session.commit()
+
+    return new_count
+
+
+async def fill_gaps_for_symbol(exchange, symbol_name: str, symbol_id: int,
+                               days: int, verbose: bool = False) -> dict:
+    """Find and fill gaps for a single symbol."""
+    from app import create_app
+
+    now = datetime.now(timezone.utc)
+    start_ts = int((now - timedelta(days=days)).timestamp() * 1000)
+    end_ts = int(now.timestamp() * 1000) - (5 * 60 * 1000)  # 5 min buffer
+
+    app = create_app()
     with app.app_context():
-        # Use Binance for faster fetching (1000 candles vs 500)
-        exchange = ccxt.binance({
-            'enableRateLimit': True,
-            'options': {'defaultType': 'spot'}
-        })
+        gaps = find_gaps(symbol_id, start_ts, end_ts)
 
-        # Get or create symbol
-        sym = Symbol.query.filter_by(symbol=symbol_name).first()
-        if not sym:
-            sym = Symbol(symbol=symbol_name, exchange='binance')
-            db.session.add(sym)
-            db.session.commit()
+    if not gaps:
+        return {'symbol': symbol_name, 'gaps': 0, 'filled': 0}
 
-        # Calculate time range
-        now = datetime.now(timezone.utc)
-        start_time = now - timedelta(days=days)
-        target_start_ts = int(start_time.timestamp() * 1000)
-        now_ts = int(now.timestamp() * 1000)
+    total_filled = 0
+    for gap_start, gap_end in gaps:
+        if verbose:
+            gap_duration = (gap_end - gap_start) / (60 * 1000)
+            print(f"    Gap: {gap_duration:.0f} minutes")
 
-        # Check existing progress from DB
-        progress = get_symbol_progress(sym.id, target_start_ts)
+        candles = await fetch_range_async(exchange, symbol_name, gap_start, gap_end, verbose)
 
-        if not progress['needs_fetch'] and not force_refetch:
-            print(f"\n{'─'*50}")
-            print(f"📊 {symbol_name}")
-            print(f"   ✅ Already complete: {progress['candle_count']:,} candles in DB")
-            return {
-                'symbol': symbol_name,
-                'success': True,
-                'new_candles': 0,
-                'existing_candles': progress['candle_count'],
-                'aggregated': 0,
-                'time': 0,
-                'skipped': True
-            }
+        if candles:
+            with app.app_context():
+                filled = save_candles_batch(symbol_id, candles, verbose)
+                total_filled += filled
 
-        # Determine starting point
-        since = progress['resume_from_ts']
+    return {'symbol': symbol_name, 'gaps': len(gaps), 'filled': total_filled}
 
-        # Timeframe settings - Binance allows 1000 candles per request
-        timeframe = '1m'
-        candle_duration = 60 * 1000  # 1 minute in ms
-        batch_size = 1000  # Binance limit
 
-        # Calculate totals
-        total_candles_needed = (now_ts - since) // candle_duration
-        total_batches = max(1, (total_candles_needed // batch_size) + 1)
+async def fetch_symbol_full(exchange, symbol_name: str, symbol_id: int,
+                           days: int, verbose: bool = False) -> dict:
+    """Fetch full history for a symbol."""
+    from app import create_app
 
-        print(f"\n{'─'*50}")
-        print(f"📊 {symbol_name}")
+    now = datetime.now(timezone.utc)
+    start_ts = int((now - timedelta(days=days)).timestamp() * 1000)
+    end_ts = int(now.timestamp() * 1000)
 
-        if progress['status'] == 'partial':
-            existing_date = datetime.fromtimestamp(progress['newest_ts'] / 1000, tz=timezone.utc)
-            print(f"   ⏩ Resuming from {existing_date.strftime('%Y-%m-%d %H:%M')} ({progress['candle_count']:,} candles in DB)")
+    if verbose:
+        print(f"\n  {symbol_name}:")
+        print(f"    Range: {days} days ({(end_ts - start_ts) // (60*60*1000*24)} days)")
 
-        print(f"   Target: ~{total_candles_needed:,} candles ({total_batches} batches)")
-        print(f"   Range: {datetime.fromtimestamp(since/1000, tz=timezone.utc).strftime('%Y-%m-%d')} → {now.strftime('%Y-%m-%d')}")
-        sys.stdout.flush()
+    candles = await fetch_range_async(exchange, symbol_name, start_ts, end_ts, verbose)
 
-        total_new = 0
-        total_existing = 0
-        current_since = since
-        batch_num = 0
-        batch_start = time.time()
+    if verbose:
+        print(f"    Fetched {len(candles):,} candles")
 
-        while current_since < now_ts:
-            batch_num += 1
+    app = create_app()
+    with app.app_context():
+        new_count = save_candles_batch(symbol_id, candles, verbose)
 
+    if verbose:
+        print(f"    Saved {new_count:,} new candles")
+
+    return {'symbol': symbol_name, 'fetched': len(candles), 'new': new_count}
+
+
+async def run_gap_fill(symbols: List[Tuple[str, int]], days: int, verbose: bool = False):
+    """Fill gaps for all symbols in parallel."""
+    exchange = ccxt_async.binance({
+        'enableRateLimit': True,
+        'options': {'defaultType': 'spot'}
+    })
+
+    try:
+        tasks = [fill_gaps_for_symbol(exchange, name, sid, days, verbose)
+                 for name, sid in symbols]
+        results = await asyncio.gather(*tasks)
+        return results
+    finally:
+        await exchange.close()
+
+
+async def run_full_fetch(symbols: List[Tuple[str, int]], days: int, verbose: bool = False):
+    """Fetch full history for all symbols (sequential for progress display)."""
+    exchange = ccxt_async.binance({
+        'enableRateLimit': True,
+        'options': {'defaultType': 'spot'}
+    })
+
+    try:
+        results = []
+        for i, (name, sid) in enumerate(symbols):
+            if verbose:
+                print(f"\n[{i+1}/{len(symbols)}] {name}")
+
+            result = await fetch_symbol_full(exchange, name, sid, days, verbose)
+            results.append(result)
+
+        return results
+    finally:
+        await exchange.close()
+
+
+def aggregate_all_symbols(verbose: bool = False):
+    """Aggregate 1m candles to all higher timeframes."""
+    from app import create_app
+    from app.models import Symbol
+    from app.services.aggregator import aggregate_all_timeframes
+
+    app = create_app()
+    with app.app_context():
+        symbols = Symbol.query.filter_by(is_active=True).all()
+
+        if verbose:
+            print("\nAggregating to higher timeframes...")
+
+        for sym in symbols:
+            if verbose:
+                print(f"  {sym.symbol}...", end=' ')
             try:
-                # Fetch from exchange
-                ohlcv = exchange.fetch_ohlcv(symbol_name, timeframe, since=current_since, limit=batch_size)
-
-                if not ohlcv:
-                    break
-
-                # Batch check existing timestamps (much faster than individual queries)
-                timestamps = [c[0] for c in ohlcv]
-                existing_timestamps = set(
-                    c.timestamp for c in Candle.query.filter(
-                        Candle.symbol_id == sym.id,
-                        Candle.timeframe == timeframe,
-                        Candle.timestamp.in_(timestamps)
-                    ).all()
-                )
-
-                # Save only new candles
-                new_in_batch = 0
-                for candle in ohlcv:
-                    timestamp, open_price, high, low, close, volume = candle
-
-                    if timestamp in existing_timestamps:
-                        total_existing += 1
-                        continue
-
-                    # Validate OHLC data
-                    if any(v is None or v <= 0 for v in [open_price, high, low, close]):
-                        continue
-
-                    new_candle = Candle(
-                        symbol_id=sym.id,
-                        timeframe=timeframe,
-                        timestamp=timestamp,
-                        open=open_price,
-                        high=high,
-                        low=low,
-                        close=close,
-                        volume=volume or 0
-                    )
-                    db.session.add(new_candle)
-                    new_in_batch += 1
-
-                # Commit this batch
-                db.session.commit()
-                total_new += new_in_batch
-
-                # Progress bar update (every batch for smooth animation)
-                elapsed = time.time() - batch_start
-                rate = batch_num / elapsed if elapsed > 0 else 0
-                eta = (total_batches - batch_num) / rate if rate > 0 else 0
-                current_date = datetime.fromtimestamp(current_since / 1000, tz=timezone.utc).strftime('%Y-%m-%d')
-
-                # In-place progress bar
-                bar = progress_bar(batch_num, total_batches)
-                status = f"\r   {bar} | {current_date} | {total_new:,} candles | ETA: {format_time(eta)}    "
-                print(status, end='', flush=True)
-
-                # Move to next batch - use last timestamp to avoid gaps
-                if ohlcv:
-                    current_since = ohlcv[-1][0] + candle_duration
-                else:
-                    current_since += batch_size * candle_duration
-
-                # Binance rate limit is generous, minimal delay needed
-                time.sleep(0.1)
-
+                results = aggregate_all_timeframes(sym.symbol)
+                if verbose:
+                    totals = sum(results.values())
+                    print(f"{totals:,} candles")
             except Exception as e:
-                print(f"   ⚠️  Batch {batch_num} error: {e}")
-                sys.stdout.flush()
-                time.sleep(2)
-                continue
-
-        # Show 100% complete
-        bar = progress_bar(total_batches, total_batches)
-        print(f"\r   {bar} | Complete | {total_new:,} candles                    ")
-
-        # Aggregate to higher timeframes with progress
-        print(f"   📊 Aggregating 1m → 5m, 15m, 1h, 4h, 1d...")
-        sys.stdout.flush()
-
-        # Progress tracking for aggregation
-        current_tf = {'tf': '', 'stage': '', 'results': {}}
-
-        def agg_progress(tf, stage, current, total):
-            current_tf['tf'] = tf
-            current_tf['stage'] = stage
-            stage_labels = {
-                'loading': 'Loading',
-                'resampling': 'Resampling',
-                'checking': 'Checking',
-                'saving': 'Saving'
-            }
-            stage_label = stage_labels.get(stage, stage)
-
-            if total > 0:
-                pct = (current / total) * 100
-                bar_width = 20
-                filled = int(bar_width * current / total)
-                bar_str = '█' * filled + '░' * (bar_width - filled)
-                # Build results string
-                res_str = ' | '.join(f"{k}={v:,}" for k, v in current_tf['results'].items())
-                if res_str:
-                    res_str = ' | ' + res_str
-                status = f"\r   📊 {tf:>3}: [{bar_str}] {pct:5.1f}% {stage_label}{res_str}    "
-            else:
-                status = f"\r   📊 {tf:>3}: {stage_label}...    "
-            print(status, end='', flush=True)
-
-        agg_results = aggregate_all_timeframes(symbol_name, progress_callback=agg_progress)
-        agg_count = sum(agg_results.values())
-
-        # Clear line and show final results
-        print(f"\r   📊 Created: 5m={agg_results.get('5m', 0):,} | 15m={agg_results.get('15m', 0):,} | "
-              f"1h={agg_results.get('1h', 0):,} | 4h={agg_results.get('4h', 0):,} | 1d={agg_results.get('1d', 0):,}      ")
-
-        elapsed = time.time() - batch_start
-        print(f"   ✅ Done! {total_new:,} new + {total_existing:,} existing | "
-              f"Aggregated: {agg_count:,} | Time: {format_time(elapsed)}")
-        sys.stdout.flush()
-
-        return {
-            'symbol': symbol_name,
-            'success': True,
-            'new_candles': total_new,
-            'existing_candles': total_existing,
-            'aggregated': agg_count,
-            'time': elapsed,
-            'skipped': False
-        }
+                if verbose:
+                    print(f"ERROR: {e}")
 
 
-def show_db_status(app):
-    """Show current database status for all symbols"""
+def show_status():
+    """Show database status."""
+    from app import create_app, db
+    from app.models import Symbol, Candle
+
+    app = create_app()
     with app.app_context():
         symbols = Symbol.query.filter_by(is_active=True).all()
 
@@ -317,12 +299,11 @@ def show_db_status(app):
         print(f"  Database Status")
         print(f"{'═'*60}")
 
-        total_candles = 0
+        total = 0
         for sym in symbols:
             count = Candle.query.filter_by(symbol_id=sym.id, timeframe='1m').count()
-            total_candles += count
+            total += count
 
-            # Get date range
             oldest = db.session.query(func.min(Candle.timestamp)).filter(
                 Candle.symbol_id == sym.id, Candle.timeframe == '1m'
             ).scalar()
@@ -332,187 +313,115 @@ def show_db_status(app):
 
             if oldest and newest:
                 oldest_date = datetime.fromtimestamp(oldest / 1000, tz=timezone.utc).strftime('%Y-%m-%d')
-                newest_date = datetime.fromtimestamp(newest / 1000, tz=timezone.utc).strftime('%Y-%m-%d')
-                print(f"  {sym.symbol:12} | {count:>10,} candles | {oldest_date} → {newest_date}")
+                newest_date = datetime.fromtimestamp(newest / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')
+                print(f"  {sym.symbol:12} | {count:>10,} | {oldest_date} → {newest_date}")
             else:
-                print(f"  {sym.symbol:12} | {count:>10,} candles | No data")
+                print(f"  {sym.symbol:12} | {count:>10,} | No data")
 
         print(f"{'─'*60}")
-        print(f"  Total: {total_candles:,} candles (1m timeframe)")
+        print(f"  Total: {total:,} candles (1m)")
         print(f"{'═'*60}\n")
 
 
-def main():
-    """Fetch historical data for all symbols"""
+def delete_all():
+    """Delete all data."""
+    from app import create_app, db
+    from app.models import Candle, Pattern, Signal, Notification, Log
+
     app = create_app()
+    with app.app_context():
+        print("\n⚠️  This will delete ALL data!")
+        confirm = input("Type 'DELETE' to confirm: ")
 
-    # Parse arguments
-    days = 365  # Default 1 year
-    force = '--force' in sys.argv
+        if confirm != 'DELETE':
+            print("Aborted.")
+            return False
 
-    for arg in sys.argv:
-        if arg.startswith('--days='):
-            days = int(arg.split('=')[1])
+        print("\nDeleting...")
+        Notification.query.delete()
+        Signal.query.delete()
+        Pattern.query.delete()
+        Log.query.delete()
+        Candle.query.delete()
+        db.session.commit()
+        print("Done.")
+        return True
 
+
+def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='Historical data fetcher')
+    parser.add_argument('--days', type=int, default=365, help='Days of history (default: 365)')
+    parser.add_argument('--gaps', action='store_true', help='Only fill gaps (for hourly cron)')
+    parser.add_argument('--status', action='store_true', help='Show database status')
+    parser.add_argument('--delete', action='store_true', help='Delete all data')
+    parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
+    parser.add_argument('--no-aggregate', action='store_true', help='Skip aggregation')
+    args = parser.parse_args()
+
+    if args.status:
+        show_status()
+        return
+
+    if args.delete:
+        if delete_all():
+            # Continue with fetch after delete
+            pass
+        else:
+            return
+
+    # Get symbols
+    from app import create_app
+    from app.models import Symbol
+    from app.config import Config
+
+    app = create_app()
     with app.app_context():
         symbols = Symbol.query.filter_by(is_active=True).all()
 
         if not symbols:
-            print("No symbols found. Initializing default symbols...")
-            for symbol_name in Config.SYMBOLS:
-                symbol = Symbol(symbol=symbol_name, exchange='binance')
-                db.session.add(symbol)
+            print("Initializing default symbols...")
+            for name in Config.SYMBOLS:
+                db.session.add(Symbol(symbol=name, exchange='binance'))
             db.session.commit()
             symbols = Symbol.query.filter_by(is_active=True).all()
 
-        # Calculate target start timestamp
-        now = datetime.now(timezone.utc)
-        target_start_ts = int((now - timedelta(days=days)).timestamp() * 1000)
+        symbol_list = [(s.symbol, s.id) for s in symbols]
 
-        # Check which symbols need fetching
-        symbols_status = []
-        for sym in symbols:
-            progress = get_symbol_progress(sym.id, target_start_ts)
-            symbols_status.append({
-                'symbol': sym,
-                'progress': progress,
-                'needs_fetch': progress['needs_fetch'] or force
-            })
+    start_time = time.time()
 
-        remaining = [s for s in symbols_status if s['needs_fetch']]
-        complete = [s for s in symbols_status if not s['needs_fetch']]
+    print(f"\n{'═'*60}")
+    print(f"  CryptoLens Historical Data Fetcher")
+    print(f"{'═'*60}")
+    print(f"  Mode: {'Gap fill' if args.gaps else 'Full fetch'}")
+    print(f"  Symbols: {len(symbol_list)}")
+    print(f"  Days: {args.days}")
+    print(f"{'═'*60}")
 
-        print(f"\n{'═'*60}")
-        print(f"  CryptoLens Historical Data Fetcher")
-        print(f"{'═'*60}")
-        print(f"  📈 Total symbols: {len(symbols)}")
-        print(f"  ✅ Already complete: {len(complete)}")
-        print(f"  📥 Need fetching: {len(remaining)}")
-        print(f"  📅 Days of history: {days} ({days/365:.1f} years)")
-        print(f"  📊 Est. candles/symbol: ~{days * 24 * 60:,}")
-        print(f"  ⏱️  Mode: Sequential (SQLite safe)")
-        print(f"{'═'*60}")
+    if args.gaps:
+        # Gap fill mode (for hourly cron)
+        results = asyncio.run(run_gap_fill(symbol_list, args.days, args.verbose))
 
-        if not remaining:
-            print("\n✅ All symbols already have complete data!")
-            print("   Use --force to re-fetch anyway.")
-            show_db_status(app)
-            return
+        total_gaps = sum(r['gaps'] for r in results)
+        total_filled = sum(r['filled'] for r in results)
 
-        start_time = time.time()
-        completed_count = 0
-        total_new_candles = 0
-        total_agg_candles = 0
-        skipped_count = 0
+        print(f"\n  Gaps found: {total_gaps}")
+        print(f"  Candles filled: {total_filled:,}")
+    else:
+        # Full fetch mode
+        results = asyncio.run(run_full_fetch(symbol_list, args.days, args.verbose))
 
-        # Process symbols sequentially
-        for i, item in enumerate(remaining):
-            symbol = item['symbol']
-            completed_count += 1
-            print(f"\n[{completed_count}/{len(remaining)}] Processing {symbol.symbol}...")
+        total_new = sum(r['new'] for r in results)
+        print(f"\n  New candles: {total_new:,}")
 
-            try:
-                result = fetch_symbol_with_logging(app, symbol.symbol, days, force_refetch=force)
+    # Aggregate
+    if not args.no_aggregate:
+        aggregate_all_symbols(args.verbose)
 
-                if result['success']:
-                    if result.get('skipped'):
-                        skipped_count += 1
-                    else:
-                        total_new_candles += result['new_candles']
-                        total_agg_candles += result['aggregated']
-
-            except Exception as e:
-                print(f"   ❌ Failed: {e}")
-
-            # Overall progress
-            elapsed = time.time() - start_time
-            if completed_count > 0:
-                avg_time = elapsed / completed_count
-                remaining_time = avg_time * (len(remaining) - completed_count)
-                print(f"\n   📊 Overall: {completed_count}/{len(remaining)} symbols | "
-                      f"Elapsed: {format_time(elapsed)} | "
-                      f"ETA: {format_time(remaining_time)}")
-
-        # Done!
-        total_time = time.time() - start_time
-        print(f"\n{'═'*60}")
-        print(f"  ✅ Historical data fetch complete!")
-        print(f"{'═'*60}")
-        print(f"  ⏱️  Total time: {format_time(total_time)}")
-        print(f"  📈 Symbols processed: {completed_count}")
-        print(f"  ⏭️  Skipped (complete): {skipped_count}")
-        print(f"  📊 New candles: {total_new_candles:,}")
-        print(f"  📊 Aggregated: {total_agg_candles:,}")
-        print(f"{'═'*60}\n")
+    elapsed = time.time() - start_time
+    print(f"\n  Time: {format_time(elapsed)}")
+    print(f"{'═'*60}\n")
 
 
 if __name__ == '__main__':
-    print("\n" + "═"*60)
-    print("  CryptoLens Data Fetcher")
-    print("═"*60)
-
-    # Check for flags
-    if '--help' in sys.argv:
-        print("""
-Usage: python fetch_historical.py [options]
-
-Options:
-  --days=N      Days of history to fetch (default: 365)
-  --force       Force re-fetch even if data exists (fills gaps)
-  --delete      DELETE all candles and patterns, then re-fetch from scratch
-  --status      Show database status only
-  --help        Show this help
-
-Progress Tracking:
-  Progress is tracked automatically via the database.
-  If the script crashes, it will resume from where it left off
-  based on the most recent candles stored in the DB.
-
-Examples:
-  python fetch_historical.py              # Fetch 1 year of data
-  python fetch_historical.py --days=30    # Fetch 30 days
-  python fetch_historical.py --status     # Check current DB status
-  python fetch_historical.py --force      # Re-fetch all data (fills gaps)
-  python fetch_historical.py --delete     # Delete DB and start fresh
-        """)
-        sys.exit(0)
-
-    if '--status' in sys.argv:
-        app = create_app()
-        show_db_status(app)
-        sys.exit(0)
-
-    if '--delete' in sys.argv:
-        app = create_app()
-        with app.app_context():
-            from app.models import Pattern, Signal, Notification, Log
-
-            print("\n⚠️  WARNING: This will delete ALL candles, patterns, signals, and logs!")
-            confirm = input("Type 'DELETE' to confirm: ")
-
-            if confirm != 'DELETE':
-                print("Aborted.")
-                sys.exit(0)
-
-            print("\n🗑️  Deleting all data...")
-
-            # Delete in order of dependencies
-            deleted_notifications = Notification.query.delete()
-            print(f"   Deleted {deleted_notifications} notifications")
-
-            deleted_signals = Signal.query.delete()
-            print(f"   Deleted {deleted_signals} signals")
-
-            deleted_patterns = Pattern.query.delete()
-            print(f"   Deleted {deleted_patterns} patterns")
-
-            deleted_logs = Log.query.delete()
-            print(f"   Deleted {deleted_logs} logs")
-
-            deleted_candles = Candle.query.delete()
-            print(f"   Deleted {deleted_candles} candles")
-
-            db.session.commit()
-            print("✅ Database cleared. Starting fresh fetch...\n")
-
     main()

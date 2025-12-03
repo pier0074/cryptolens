@@ -11,10 +11,10 @@ Detects SMC patterns (Fair Value Gaps, Order Blocks, Liquidity Sweeps) across mu
 ## Features
 
 - **Pattern Detection**: FVG, Order Blocks, Liquidity Sweeps across 6 timeframes
-- **Smart Filtering**: Minimum zone size (0.15%), overlap deduplication, timeframe-based expiry
+- **Event-Driven**: Each symbol processed immediately after fetch (no waiting)
 - **Push Notifications**: Free via NTFY.sh with dynamic tags
 - **Portfolio & Journal**: Trade logging, journal entries, performance analytics
-- **Backtesting**: Test pattern performance on historical data
+- **Pattern Expiry**: Timeframe-based auto-expiry (LTF=4h, HTF=14d)
 
 ## Quick Start
 
@@ -27,7 +27,7 @@ source venv/bin/activate
 pip install -r requirements.txt
 
 # Fetch historical data (1 year)
-python scripts/fetch_historical.py
+python scripts/fetch_historical.py -v
 
 # Run the web app
 python run.py
@@ -37,20 +37,18 @@ Visit `http://localhost:5000`
 
 ## Background Processing (Cron)
 
-CryptoLens uses lightweight cron scripts instead of APScheduler for better CPU efficiency:
+Event-driven architecture for maximum reactivity:
 
 ```bash
-# Edit crontab
 crontab -e
 
-# Add these entries:
-# Fetch latest candles (every minute, async parallel)
+# Real-time: Fetch → Aggregate → Detect → Notify (per symbol, as each completes)
 * * * * * cd /path/to/cryptolens && venv/bin/python scripts/fetch.py
 
-# Detect patterns and send notifications (every 5 minutes)
-*/5 * * * * cd /path/to/cryptolens && venv/bin/python scripts/detect.py
+# Gap fill: Find and fill any missing candles
+0 * * * * cd /path/to/cryptolens && venv/bin/python scripts/fetch_historical.py --gaps
 
-# Cleanup expired patterns (every 30 minutes)
+# Cleanup: Mark expired patterns
 */30 * * * * cd /path/to/cryptolens && venv/bin/python scripts/cleanup_patterns.py
 ```
 
@@ -58,34 +56,43 @@ crontab -e
 
 | Script | Purpose | Frequency |
 |--------|---------|-----------|
-| `fetch.py` | Async parallel fetch of latest 1m candles | Every 1 min |
-| `detect.py` | Aggregate, detect patterns, send notifications | Every 5 min |
+| `fetch.py` | Async fetch → aggregate → detect → notify (per symbol) | Every 1 min |
+| `fetch_historical.py` | Initial load or gap filling | Manual / hourly |
 | `cleanup_patterns.py` | Mark expired patterns | Every 30 min |
-| `fetch_historical.py` | Download historical data | Manual/daily |
-| `scan.py` | Combined fetch+detect (legacy) | Every 5 min |
+
+### How fetch.py Works
+
+```
+1. Fetch all 30 symbols in parallel (async)
+2. As each symbol completes:
+   → Save candles
+   → Aggregate to higher timeframes
+   → Detect patterns
+   → Update pattern status
+3. Generate signals (batch)
+
+Result: BTC patterns detected in ~1s, not waiting for 29 other symbols
+```
 
 ### Historical Data
 
 ```bash
-python scripts/fetch_historical.py              # Fetch 1 year
-python scripts/fetch_historical.py --days=30    # Fetch 30 days
-python scripts/fetch_historical.py --status     # Check DB status
-python scripts/fetch_historical.py --force      # Re-fetch all (fills gaps)
-python scripts/fetch_historical.py --delete     # Delete DB and start fresh
+python scripts/fetch_historical.py              # Full load (1 year)
+python scripts/fetch_historical.py --days=30    # 30 days
+python scripts/fetch_historical.py --gaps       # Find and fill gaps
+python scripts/fetch_historical.py --status     # DB status
+python scripts/fetch_historical.py --delete     # Reset DB
 ```
 
 ## Pattern Expiry
 
-Patterns auto-expire based on timeframe (LTF changes faster than HTF):
-
-| Timeframe | Expiry |
-|-----------|--------|
-| 1m | 4 hours |
-| 5m | 12 hours |
-| 15m | 24 hours |
-| 1h | 3 days |
-| 4h | 7 days |
-| 1d | 14 days |
+| Timeframe | Expiry | Rationale |
+|-----------|--------|-----------|
+| 1m | 4h | LTF structure changes quickly |
+| 5m | 12h | |
+| 1h | 3 days | MTF - stays relevant longer |
+| 4h | 7 days | |
+| 1d | 14 days | HTF - most significant |
 
 ## Notifications
 
@@ -98,19 +105,16 @@ Patterns auto-expire based on timeframe (LTF changes faster than HTF):
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/symbols` | GET | List symbols |
-| `/api/candles/<symbol>/<tf>` | GET | Candle data |
 | `/api/patterns` | GET | Detected patterns |
 | `/api/signals` | GET | Trade signals |
 | `/api/matrix` | GET | Pattern matrix |
 | `/api/scan/run` | POST | Trigger manual scan |
-| `/api/scheduler/status` | GET | Scanner status |
 
 ## Testing
 
 ```bash
-python -m pytest                    # Run all tests
+python -m pytest                    # All tests
 python -m pytest --cov=app          # With coverage
-python -m pytest tests/test_api.py  # Specific file
 ```
 
 ## Project Structure
@@ -118,15 +122,13 @@ python -m pytest tests/test_api.py  # Specific file
 ```
 cryptolens/
 ├── app/
-│   ├── routes/          # Web routes (dashboard, patterns, signals, portfolio, api)
-│   ├── services/        # Business logic (patterns/, signals, notifier, aggregator)
+│   ├── routes/          # Web routes
+│   ├── services/        # Business logic (patterns/, signals, notifier)
 │   └── templates/       # HTML templates
 ├── scripts/
-│   ├── fetch.py         # Async parallel candle fetcher
-│   ├── detect.py        # Pattern detection
-│   ├── cleanup_patterns.py
-│   ├── fetch_historical.py
-│   └── scan.py          # Combined (legacy)
+│   ├── fetch.py         # Real-time fetch with pattern detection
+│   ├── fetch_historical.py  # Historical data & gap filling
+│   └── cleanup_patterns.py  # Pattern expiry
 ├── tests/               # 164 tests
 └── run.py
 ```
