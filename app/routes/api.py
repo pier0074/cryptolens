@@ -214,14 +214,18 @@ def scheduler_stop():
 @api_bp.route('/scheduler/toggle', methods=['POST'])
 @require_api_key
 def scheduler_toggle():
-    """Toggle the scheduler on/off"""
-    from app.services.scheduler import start_scheduler, stop_scheduler, get_scheduler_status
-    from flask import current_app
+    """Legacy endpoint - scheduler is now cron-based"""
+    from app.services.scheduler import get_scheduler_status
+    return jsonify({
+        **get_scheduler_status(),
+        'note': 'Scheduler is now managed via cron. Use /api/scan/run to trigger a manual scan.'
+    })
 
-    status = get_scheduler_status()
-    if status['running']:
-        stop_scheduler()
-    else:
-        start_scheduler(current_app)
 
-    return jsonify(get_scheduler_status())
+@api_bp.route('/scan/run', methods=['POST'])
+@require_api_key
+def run_scan_now():
+    """Trigger a manual scan"""
+    from app.services.scheduler import run_once
+    result = run_once()
+    return jsonify(result)

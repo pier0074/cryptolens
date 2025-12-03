@@ -155,45 +155,30 @@ class TestAggregatorService:
 
 
 class TestSchedulerService:
-    """Tests for scheduler service"""
+    """Tests for scheduler service (now cron-based)"""
 
-    def test_get_scheduler_status_not_running(self, app):
-        """Test scheduler status when not running"""
+    def test_get_scheduler_status(self, app):
+        """Test scheduler status returns cron info"""
         with app.app_context():
-            from app.services.scheduler import get_scheduler_status, scheduler
-            # Ensure scheduler is not running
-            import app.services.scheduler as sched_module
-            sched_module.scheduler = None
+            from app.services.scheduler import get_scheduler_status
 
             status = get_scheduler_status()
             assert status['running'] is False
-            assert status['jobs'] == []
+            assert status['mode'] == 'cron'
+            assert 'scripts' in status
+            assert 'scan' in status['scripts']
+            assert 'cleanup' in status['scripts']
 
-    @patch('app.services.scheduler.BackgroundScheduler')
-    def test_start_scheduler(self, mock_scheduler_class, app):
-        """Test starting the scheduler"""
-        mock_scheduler = MagicMock()
-        mock_scheduler.running = True
-        mock_scheduler.get_jobs.return_value = []
-        mock_scheduler_class.return_value = mock_scheduler
-
+    def test_start_scheduler_logs_warning(self, app):
+        """Test start_scheduler returns None (cron-based now)"""
         with app.app_context():
-            import app.services.scheduler as sched_module
-            sched_module.scheduler = None
-
             from app.services.scheduler import start_scheduler
             result = start_scheduler(app)
+            assert result is None
 
-            assert result is not None
-            mock_scheduler.add_job.assert_called()
-            mock_scheduler.start.assert_called()
-
-    def test_stop_scheduler_when_not_running(self, app):
-        """Test stopping scheduler when not running"""
+    def test_stop_scheduler_no_op(self, app):
+        """Test stopping scheduler is a no-op (cron-based)"""
         with app.app_context():
-            import app.services.scheduler as sched_module
-            sched_module.scheduler = None
-
             from app.services.scheduler import stop_scheduler
             stop_scheduler()  # Should not raise
 

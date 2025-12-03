@@ -76,6 +76,20 @@ class Config:
         '1d': 24 * 60 * 60 * 1000
     }
 
+    # Pattern expiry: How long patterns stay valid before auto-expiring (in hours)
+    # Lower timeframes expire faster as they're less significant
+    PATTERN_EXPIRY_HOURS = {
+        '1m': 4,       # 4 hours
+        '5m': 12,      # 12 hours
+        '15m': 24,     # 1 day
+        '30m': 48,     # 2 days
+        '1h': 72,      # 3 days
+        '2h': 120,     # 5 days
+        '4h': 168,     # 7 days
+        '1d': 336,     # 14 days
+    }
+    DEFAULT_PATTERN_EXPIRY_HOURS = 72  # 3 days default
+
 
 class DevelopmentConfig(Config):
     """Development configuration"""

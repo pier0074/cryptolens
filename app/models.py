@@ -122,17 +122,61 @@ class Pattern(db.Model):
     zone_high = db.Column(db.Float, nullable=False)
     zone_low = db.Column(db.Float, nullable=False)
     detected_at = db.Column(db.Integer, nullable=False)  # Candle timestamp when detected
-    status = db.Column(db.String(15), default='active')  # 'active', 'filled', 'invalidated'
+    status = db.Column(db.String(15), default='active')  # 'active', 'filled', 'expired'
     filled_at = db.Column(db.Integer, nullable=True)
     fill_percentage = db.Column(db.Float, nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         db.Index('idx_pattern_active', 'symbol_id', 'timeframe', 'status'),
+        db.Index('idx_pattern_detected', 'detected_at'),
     )
 
     def __repr__(self):
         return f'<Pattern {self.pattern_type} {self.direction} {self.symbol_id}>'
+
+    @property
+    def detected_at_formatted(self):
+        """Return human-readable detected_at timestamp"""
+        if self.detected_at:
+            return datetime.fromtimestamp(self.detected_at / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')
+        return None
+
+    @property
+    def expires_at(self):
+        """Calculate expiry timestamp based on timeframe"""
+        from app.config import Config
+        expiry_hours = Config.PATTERN_EXPIRY_HOURS.get(self.timeframe, Config.DEFAULT_PATTERN_EXPIRY_HOURS)
+        expiry_ms = expiry_hours * 60 * 60 * 1000
+        return self.detected_at + expiry_ms
+
+    @property
+    def expires_at_formatted(self):
+        """Return human-readable expiry timestamp"""
+        expires = self.expires_at
+        if expires:
+            return datetime.fromtimestamp(expires / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')
+        return None
+
+    @property
+    def is_expired(self):
+        """Check if pattern has expired based on timeframe"""
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        return now_ms > self.expires_at
+
+    @property
+    def time_remaining(self):
+        """Return time remaining before expiry in human-readable format"""
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        remaining_ms = self.expires_at - now_ms
+        if remaining_ms <= 0:
+            return "Expired"
+        hours = remaining_ms // (60 * 60 * 1000)
+        minutes = (remaining_ms % (60 * 60 * 1000)) // (60 * 1000)
+        if hours > 24:
+            days = hours // 24
+            return f"{days}d {hours % 24}h"
+        return f"{hours}h {minutes}m"
 
     def to_dict(self):
         return {
@@ -144,6 +188,11 @@ class Pattern(db.Model):
             'zone_high': self.zone_high,
             'zone_low': self.zone_low,
             'detected_at': self.detected_at,
+            'detected_at_formatted': self.detected_at_formatted,
+            'expires_at': self.expires_at,
+            'expires_at_formatted': self.expires_at_formatted,
+            'is_expired': self.is_expired,
+            'time_remaining': self.time_remaining,
             'status': self.status,
             'fill_percentage': self.fill_percentage
         }

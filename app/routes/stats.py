@@ -1,74 +1,144 @@
 """
 Statistics Routes
-Database statistics and analytics per symbol
+Database statistics and analytics per symbol - Optimized with batch queries
 """
 from flask import Blueprint, render_template
 from app.models import Symbol, Candle, Pattern, Signal
 from app import db
-from sqlalchemy import func
-from datetime import datetime, timezone, timedelta
+from sqlalchemy import func, and_
+from datetime import datetime, timezone
+import os
 
 stats_bp = Blueprint('stats', __name__)
 
 
 @stats_bp.route('/')
 def index():
-    """Database statistics page"""
+    """Database statistics page - Optimized to use batch queries"""
     symbols = Symbol.query.filter_by(is_active=True).all()
+    symbol_ids = [s.id for s in symbols]
+    symbol_map = {s.id: s for s in symbols}
 
-    # Get stats per symbol
+    now_ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+    day_ago_ts = now_ts - (24 * 60 * 60 * 1000)
+
+    # Batch query 1: Get 1m candle stats for all symbols in one query
+    candle_stats_query = db.session.query(
+        Candle.symbol_id,
+        func.count(Candle.id).label('count'),
+        func.min(Candle.timestamp).label('oldest'),
+        func.max(Candle.timestamp).label('newest'),
+        func.min(Candle.low).label('atl'),
+        func.max(Candle.high).label('ath'),
+        func.avg(Candle.volume).label('avg_vol')
+    ).filter(
+        Candle.symbol_id.in_(symbol_ids),
+        Candle.timeframe == '1m'
+    ).group_by(Candle.symbol_id).all()
+
+    candle_stats_map = {row.symbol_id: row for row in candle_stats_query}
+
+    # Batch query 2: Get candle counts per timeframe for all symbols
+    tf_counts_query = db.session.query(
+        Candle.symbol_id,
+        Candle.timeframe,
+        func.count(Candle.id).label('count')
+    ).filter(
+        Candle.symbol_id.in_(symbol_ids)
+    ).group_by(Candle.symbol_id, Candle.timeframe).all()
+
+    tf_counts_map = {}
+    for row in tf_counts_query:
+        if row.symbol_id not in tf_counts_map:
+            tf_counts_map[row.symbol_id] = {}
+        tf_counts_map[row.symbol_id][row.timeframe] = row.count
+
+    # Batch query 3: Get pattern stats for all symbols
+    pattern_stats_query = db.session.query(
+        Pattern.symbol_id,
+        Pattern.status,
+        func.count(Pattern.id).label('count')
+    ).filter(
+        Pattern.symbol_id.in_(symbol_ids)
+    ).group_by(Pattern.symbol_id, Pattern.status).all()
+
+    pattern_stats_map = {}
+    for row in pattern_stats_query:
+        if row.symbol_id not in pattern_stats_map:
+            pattern_stats_map[row.symbol_id] = {'active': 0, 'filled': 0, 'expired': 0, 'total': 0}
+        pattern_stats_map[row.symbol_id][row.status] = row.count
+        pattern_stats_map[row.symbol_id]['total'] += row.count
+
+    # Batch query 4: Get signal counts for all symbols
+    signal_counts_query = db.session.query(
+        Signal.symbol_id,
+        func.count(Signal.id).label('count')
+    ).filter(
+        Signal.symbol_id.in_(symbol_ids)
+    ).group_by(Signal.symbol_id).all()
+
+    signal_counts_map = {row.symbol_id: row.count for row in signal_counts_query}
+
+    # Batch query 5: Get latest candle for each symbol (subquery approach)
+    latest_subq = db.session.query(
+        Candle.symbol_id,
+        func.max(Candle.timestamp).label('max_ts')
+    ).filter(
+        Candle.symbol_id.in_(symbol_ids),
+        Candle.timeframe == '1m'
+    ).group_by(Candle.symbol_id).subquery()
+
+    latest_candles = db.session.query(Candle).join(
+        latest_subq,
+        and_(
+            Candle.symbol_id == latest_subq.c.symbol_id,
+            Candle.timestamp == latest_subq.c.max_ts,
+            Candle.timeframe == '1m'
+        )
+    ).all()
+
+    latest_price_map = {c.symbol_id: c.close for c in latest_candles}
+
+    # Batch query 6: Get 24h ago candles for price change calculation
+    candles_24h_subq = db.session.query(
+        Candle.symbol_id,
+        func.max(Candle.timestamp).label('max_ts')
+    ).filter(
+        Candle.symbol_id.in_(symbol_ids),
+        Candle.timeframe == '1m',
+        Candle.timestamp <= day_ago_ts
+    ).group_by(Candle.symbol_id).subquery()
+
+    candles_24h = db.session.query(Candle).join(
+        candles_24h_subq,
+        and_(
+            Candle.symbol_id == candles_24h_subq.c.symbol_id,
+            Candle.timestamp == candles_24h_subq.c.max_ts,
+            Candle.timeframe == '1m'
+        )
+    ).all()
+
+    price_24h_map = {c.symbol_id: c.close for c in candles_24h}
+
+    # Build results
     symbol_stats = []
     for sym in symbols:
-        # 1m candle stats
-        candle_stats = db.session.query(
-            func.count(Candle.id),
-            func.min(Candle.timestamp),
-            func.max(Candle.timestamp),
-            func.min(Candle.low),
-            func.max(Candle.high),
-            func.avg(Candle.volume)
-        ).filter(
-            Candle.symbol_id == sym.id,
-            Candle.timeframe == '1m'
-        ).first()
+        sid = sym.id
+        stats = candle_stats_map.get(sid)
+        tf_counts = tf_counts_map.get(sid, {})
+        pattern_stats = pattern_stats_map.get(sid, {'active': 0, 'filled': 0, 'expired': 0, 'total': 0})
 
-        count_1m = candle_stats[0] or 0
-        oldest_ts = candle_stats[1]
-        newest_ts = candle_stats[2]
-        all_time_low = candle_stats[3]
-        all_time_high = candle_stats[4]
-        avg_volume = candle_stats[5] or 0
+        count_1m = stats.count if stats else 0
+        oldest_ts = stats.oldest if stats else None
+        newest_ts = stats.newest if stats else None
+        all_time_low = stats.atl if stats else None
+        all_time_high = stats.ath if stats else None
+        avg_volume = stats.avg_vol if stats else 0
 
-        # Get latest price
-        latest_candle = Candle.query.filter_by(
-            symbol_id=sym.id,
-            timeframe='1m'
-        ).order_by(Candle.timestamp.desc()).first()
-
-        current_price = latest_candle.close if latest_candle else None
-
-        # Candle counts per timeframe
-        tf_counts = {}
-        for tf in ['1m', '5m', '15m', '1h', '4h', '1d']:
-            tf_counts[tf] = Candle.query.filter_by(
-                symbol_id=sym.id,
-                timeframe=tf
-            ).count()
-
-        # Pattern stats
-        active_patterns = Pattern.query.filter_by(
-            symbol_id=sym.id,
-            status='active'
-        ).count()
-
-        total_patterns = Pattern.query.filter_by(symbol_id=sym.id).count()
-        filled_patterns = Pattern.query.filter_by(symbol_id=sym.id, status='filled').count()
-
-        # Signal stats
-        total_signals = Signal.query.filter_by(symbol_id=sym.id).count()
+        current_price = latest_price_map.get(sid)
+        price_24h_ago = price_24h_map.get(sid)
 
         # Calculate data freshness
-        now_ts = int(datetime.now(timezone.utc).timestamp() * 1000)
         if newest_ts:
             age_minutes = (now_ts - newest_ts) // 60000
             if age_minutes < 5:
@@ -85,16 +155,8 @@ def index():
 
         # Calculate price change (24h)
         price_change_24h = None
-        if current_price and oldest_ts:
-            day_ago_ts = now_ts - (24 * 60 * 60 * 1000)
-            candle_24h_ago = Candle.query.filter(
-                Candle.symbol_id == sym.id,
-                Candle.timeframe == '1m',
-                Candle.timestamp <= day_ago_ts
-            ).order_by(Candle.timestamp.desc()).first()
-
-            if candle_24h_ago:
-                price_change_24h = ((current_price - candle_24h_ago.close) / candle_24h_ago.close) * 100
+        if current_price and price_24h_ago:
+            price_change_24h = ((current_price - price_24h_ago) / price_24h_ago) * 100
 
         # Distance from ATH/ATL
         ath_distance = None
@@ -102,6 +164,11 @@ def index():
         if current_price and all_time_high and all_time_low:
             ath_distance = ((all_time_high - current_price) / all_time_high) * 100
             atl_distance = ((current_price - all_time_low) / all_time_low) * 100
+
+        # Ensure all timeframes have a count (even if 0)
+        for tf in ['1m', '5m', '15m', '1h', '4h', '1d']:
+            if tf not in tf_counts:
+                tf_counts[tf] = 0
 
         symbol_stats.append({
             'symbol': sym.symbol,
@@ -119,26 +186,28 @@ def index():
             'atl_distance': atl_distance,
             'avg_volume': avg_volume,
             'price_change_24h': price_change_24h,
-            'active_patterns': active_patterns,
-            'total_patterns': total_patterns,
-            'filled_patterns': filled_patterns,
-            'total_signals': total_signals,
+            'active_patterns': pattern_stats.get('active', 0),
+            'total_patterns': pattern_stats.get('total', 0),
+            'filled_patterns': pattern_stats.get('filled', 0),
+            'expired_patterns': pattern_stats.get('expired', 0),
+            'total_signals': signal_counts_map.get(sid, 0),
             'freshness': freshness,
             'age_minutes': age_minutes
         })
 
-    # Overall database stats
-    total_candles = Candle.query.count()
+    # Overall database stats (2 efficient queries)
+    overall_counts = db.session.query(
+        Candle.timeframe,
+        func.count(Candle.id).label('count')
+    ).group_by(Candle.timeframe).all()
+
+    overall_tf_counts = {row.timeframe: row.count for row in overall_counts}
+    total_candles = sum(overall_tf_counts.values())
+
     total_patterns_all = Pattern.query.count()
     total_signals_all = Signal.query.count()
 
-    # Candles by timeframe (overall)
-    overall_tf_counts = {}
-    for tf in ['1m', '5m', '15m', '1h', '4h', '1d']:
-        overall_tf_counts[tf] = Candle.query.filter_by(timeframe=tf).count()
-
-    # Database file size (approximate)
-    import os
+    # Database file size
     db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'cryptolens.db')
     db_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
 

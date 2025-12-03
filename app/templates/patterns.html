@@ -28,6 +28,7 @@
             <select name="status" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
                 <option value="active" {% if current_status == 'active' %}selected{% endif %}>Active</option>
                 <option value="filled" {% if current_status == 'filled' %}selected{% endif %}>Filled</option>
+                <option value="expired" {% if current_status == 'expired' %}selected{% endif %}>Expired</option>
                 <option value="" {% if not current_status %}selected{% endif %}>All</option>
             </select>
 
@@ -62,19 +63,19 @@
                 <tr class="border-b border-gray-700 bg-gray-800/50">
                     <th class="text-left p-3 text-muted font-medium">Symbol</th>
                     <th class="text-left p-3 text-muted font-medium">TF</th>
+                    <th class="text-left p-3 text-muted font-medium">Detected</th>
                     <th class="text-left p-3 text-muted font-medium">Type</th>
                     <th class="text-left p-3 text-muted font-medium">Direction</th>
                     <th class="text-left p-3 text-muted font-medium">Zone</th>
                     <th class="text-left p-3 text-muted font-medium">Entry</th>
-                    <th class="text-left p-3 text-muted font-medium">Stop Loss</th>
-                    <th class="text-left p-3 text-muted font-medium">Take Profit</th>
+                    <th class="text-left p-3 text-muted font-medium">SL / TP</th>
                     <th class="text-left p-3 text-muted font-medium">Status</th>
-                    <th class="text-left p-3 text-muted font-medium">Fill %</th>
+                    <th class="text-left p-3 text-muted font-medium">Expires</th>
                 </tr>
             </thead>
             <tbody>
                 {% for pattern in patterns %}
-                <tr class="border-b border-gray-800 hover:bg-gray-800/50">
+                <tr class="border-b border-gray-800 hover:bg-gray-800/50 {% if pattern.is_expired %}opacity-60{% endif %}">
                     <td class="p-3">
                         <a href="?symbol={{ pattern.symbol.symbol }}&timeframe={{ pattern.timeframe }}"
                            class="hover:text-blue-400 font-medium">
@@ -82,11 +83,14 @@
                         </a>
                     </td>
                     <td class="p-3 text-muted">{{ pattern.timeframe }}</td>
+                    <td class="p-3 text-xs text-muted">
+                        {{ pattern.detected_at_formatted }}
+                    </td>
                     <td class="p-3">
                         {% if pattern.pattern_type == 'imbalance' %}
                             <span class="px-2 py-1 rounded text-xs bg-purple-900 text-purple-200">FVG</span>
                         {% elif pattern.pattern_type == 'order_block' %}
-                            <span class="px-2 py-1 rounded text-xs bg-orange-900 text-orange-200">Order Block</span>
+                            <span class="px-2 py-1 rounded text-xs bg-orange-900 text-orange-200">OB</span>
                         {% elif pattern.pattern_type == 'liquidity_sweep' %}
                             <span class="px-2 py-1 rounded text-xs bg-cyan-900 text-cyan-200">Sweep</span>
                         {% else %}
@@ -94,68 +98,57 @@
                         {% endif %}
                     </td>
                     <td class="p-3">
-                        <span class="{% if pattern.direction == 'bullish' %}bullish{% else %}bearish{% endif %} font-medium">
-                            {% if pattern.direction == 'bullish' %}🟢 Bullish{% else %}🔴 Bearish{% endif %}
+                        <span class="{% if pattern.direction == 'bullish' %}bullish{% else %}bearish{% endif %} font-medium text-sm">
+                            {% if pattern.direction == 'bullish' %}🟢{% else %}🔴{% endif %}
                         </span>
                     </td>
-                    <td class="p-3 font-mono text-sm">
-                        {# Smart price formatting: more decimals for cheaper coins #}
+                    <td class="p-3 font-mono text-xs">
                         {% if pattern.zone_low < 0.01 %}
-                            ${{ '%.6f'|format(pattern.zone_low) }} - ${{ '%.6f'|format(pattern.zone_high) }}
+                            {{ '%.6f'|format(pattern.zone_low) }}-{{ '%.6f'|format(pattern.zone_high) }}
                         {% elif pattern.zone_low < 1 %}
-                            ${{ '%.4f'|format(pattern.zone_low) }} - ${{ '%.4f'|format(pattern.zone_high) }}
+                            {{ '%.4f'|format(pattern.zone_low) }}-{{ '%.4f'|format(pattern.zone_high) }}
                         {% elif pattern.zone_low < 100 %}
-                            ${{ '%.3f'|format(pattern.zone_low) }} - ${{ '%.3f'|format(pattern.zone_high) }}
+                            {{ '%.3f'|format(pattern.zone_low) }}-{{ '%.3f'|format(pattern.zone_high) }}
                         {% else %}
-                            ${{ '%.2f'|format(pattern.zone_low) }} - ${{ '%.2f'|format(pattern.zone_high) }}
+                            {{ '%.2f'|format(pattern.zone_low) }}-{{ '%.2f'|format(pattern.zone_high) }}
                         {% endif %}
                     </td>
-                    {# Entry Price - from trading service #}
-                    <td class="p-3 font-mono text-sm {% if pattern.direction == 'bullish' %}text-green-400{% else %}text-red-400{% endif %}">
+                    <td class="p-3 font-mono text-xs {% if pattern.direction == 'bullish' %}text-green-400{% else %}text-red-400{% endif %}">
                         {% set entry = pattern.trading_levels.entry %}
-                        {% if entry < 0.01 %}${{ '%.6f'|format(entry) }}
-                        {% elif entry < 1 %}${{ '%.4f'|format(entry) }}
-                        {% elif entry < 100 %}${{ '%.3f'|format(entry) }}
-                        {% else %}${{ '%.2f'|format(entry) }}{% endif %}
-                        {% if pattern.pattern_type == 'order_block' %}
-                        <span class="text-xs text-muted ml-1">(OTE)</span>
-                        {% endif %}
+                        {% if entry < 0.01 %}{{ '%.6f'|format(entry) }}
+                        {% elif entry < 1 %}{{ '%.4f'|format(entry) }}
+                        {% elif entry < 100 %}{{ '%.3f'|format(entry) }}
+                        {% else %}{{ '%.2f'|format(entry) }}{% endif %}
                     </td>
-                    {# Stop Loss - from trading service (ATR-based) #}
-                    <td class="p-3 font-mono text-sm text-red-500">
+                    <td class="p-3 font-mono text-xs">
                         {% set sl = pattern.trading_levels.stop_loss %}
-                        {% if sl < 0.01 %}${{ '%.6f'|format(sl) }}
-                        {% elif sl < 1 %}${{ '%.4f'|format(sl) }}
-                        {% elif sl < 100 %}${{ '%.3f'|format(sl) }}
-                        {% else %}${{ '%.2f'|format(sl) }}{% endif %}
-                    </td>
-                    {# Take Profit - from trading service (structure-based) #}
-                    <td class="p-3 font-mono text-sm text-green-500">
                         {% set tp = pattern.trading_levels.take_profit_2 %}
-                        {% if tp < 0.01 %}${{ '%.6f'|format(tp) }}
-                        {% elif tp < 1 %}${{ '%.4f'|format(tp) }}
-                        {% elif tp < 100 %}${{ '%.3f'|format(tp) }}
-                        {% else %}${{ '%.2f'|format(tp) }}{% endif %}
-                        <span class="text-xs text-muted ml-1">({{ pattern.trading_levels.risk_reward_2 }}R)</span>
+                        <span class="text-red-500">{% if sl < 1 %}{{ '%.4f'|format(sl) }}{% else %}{{ '%.2f'|format(sl) }}{% endif %}</span>
+                        <span class="text-muted">/</span>
+                        <span class="text-green-500">{% if tp < 1 %}{{ '%.4f'|format(tp) }}{% else %}{{ '%.2f'|format(tp) }}{% endif %}</span>
+                        <span class="text-muted">({{ pattern.trading_levels.risk_reward_2 }}R)</span>
                     </td>
                     <td class="p-3">
                         <span class="px-2 py-1 rounded text-xs
-                            {% if pattern.status == 'active' %}bg-blue-900 text-blue-200
+                            {% if pattern.status == 'active' and not pattern.is_expired %}bg-blue-900 text-blue-200
                             {% elif pattern.status == 'filled' %}bg-green-900 text-green-200
+                            {% elif pattern.status == 'expired' or pattern.is_expired %}bg-gray-700 text-gray-400
                             {% else %}bg-gray-700{% endif %}">
-                            {{ pattern.status }}
+                            {% if pattern.is_expired and pattern.status == 'active' %}expired{% else %}{{ pattern.status }}{% endif %}
                         </span>
+                        {% if pattern.fill_percentage and pattern.fill_percentage > 0 %}
+                        <span class="text-xs text-muted ml-1">{{ '%.0f'|format(pattern.fill_percentage) }}%</span>
+                        {% endif %}
                     </td>
-                    <td class="p-3">
-                        {% if pattern.fill_percentage %}
-                            <div class="flex items-center space-x-2">
-                                <span class="text-xs text-muted w-8">{{ '%.0f'|format(pattern.fill_percentage) }}%</span>
-                                <div class="w-12 bg-gray-700 rounded-full h-2">
-                                    <div class="{% if pattern.fill_percentage >= 80 %}bg-red-500{% elif pattern.fill_percentage >= 50 %}bg-yellow-500{% else %}bg-blue-500{% endif %} h-2 rounded-full" style="width: {{ pattern.fill_percentage }}%"></div>
-                                </div>
-                            </div>
+                    <td class="p-3 text-xs">
+                        {% if pattern.status == 'active' and not pattern.is_expired %}
+                            <span class="{% if pattern.time_remaining.startswith('0h') or pattern.time_remaining.startswith('1h') %}text-red-400{% elif 'h' in pattern.time_remaining and pattern.time_remaining.split('h')[0]|int < 6 %}text-yellow-400{% else %}text-muted{% endif %}">
+                                {{ pattern.time_remaining }}
+                            </span>
+                        {% elif pattern.is_expired %}
+                            <span class="text-gray-500">Expired</span>
                         {% else %}
-                            <span class="text-muted text-xs">0%</span>
+                            <span class="text-gray-500">-</span>
                         {% endif %}
                     </td>
                 </tr>
