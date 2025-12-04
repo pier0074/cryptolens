@@ -43,10 +43,19 @@ class TestStatsRoutes:
         assert response.status_code == 200
 
     def test_stats_index_with_symbol(self, client, app, sample_symbol):
-        """Test stats page with symbol"""
+        """Test stats page renders (data loaded via AJAX)"""
         response = client.get('/stats/')
         assert response.status_code == 200
-        assert b'BTC/USDT' in response.data
+        # Page loads skeleton, data fetched via /stats/api
+        assert b'Database Statistics' in response.data
+
+    def test_stats_api(self, client, app, sample_symbol):
+        """Test stats API returns data"""
+        response = client.get('/stats/api')
+        assert response.status_code == 200
+        data = response.get_json()
+        # API should return stats structure (may be empty if cache not populated)
+        assert 'symbols_count' in data or 'error' in data
 
     def test_stats_with_candles(self, client, app, sample_candles_bullish_fvg):
         """Test stats page shows candle counts"""

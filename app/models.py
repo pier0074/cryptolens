@@ -590,3 +590,16 @@ class JournalEntry(db.Model):
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }
+
+
+class StatsCache(db.Model):
+    """Pre-computed statistics cache for fast page loads"""
+    __tablename__ = 'stats_cache'
+
+    id = db.Column(db.Integer, primary_key=True)
+    key = db.Column(db.String(50), unique=True, nullable=False)  # 'global' or symbol name
+    data = db.Column(db.Text, nullable=False)  # JSON blob
+    computed_at = db.Column(db.Integer, nullable=False)  # Timestamp in ms
+
+    def __repr__(self):
+        return f'<StatsCache {self.key}>'

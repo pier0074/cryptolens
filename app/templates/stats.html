@@ -7,181 +7,261 @@
     <!-- Header -->
     <div class="flex items-center justify-between">
         <h1 class="text-2xl font-bold">Database Statistics</h1>
-        <button onclick="location.reload()" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-md text-sm">
-            Refresh
-        </button>
-    </div>
-
-    <!-- Overall Stats Cards -->
-    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
-        <div class="bg-card rounded-lg p-4">
-            <div class="text-muted text-sm">Symbols</div>
-            <div class="text-2xl font-bold">{{ symbols_count }}</div>
-        </div>
-        <div class="bg-card rounded-lg p-4">
-            <div class="text-muted text-sm">Total Candles</div>
-            <div class="text-2xl font-bold">{{ "{:,}".format(total_candles) }}</div>
-        </div>
-        <div class="bg-card rounded-lg p-4">
-            <div class="text-muted text-sm">Verified</div>
-            <div class="text-2xl font-bold {% if verification_pct >= 90 %}text-green-400{% elif verification_pct >= 50 %}text-yellow-400{% else %}text-orange-400{% endif %}">
-                {{ "%.1f"|format(verification_pct) }}%
-            </div>
-            <div class="text-xs text-muted">{{ "{:,}".format(verified_count) }} candles</div>
-        </div>
-        <div class="bg-card rounded-lg p-4">
-            <div class="text-muted text-sm">Patterns</div>
-            <div class="text-2xl font-bold">{{ "{:,}".format(total_patterns) }}</div>
-        </div>
-        <div class="bg-card rounded-lg p-4">
-            <div class="text-muted text-sm">Signals</div>
-            <div class="text-2xl font-bold">{{ "{:,}".format(total_signals) }}</div>
-        </div>
-        <div class="bg-card rounded-lg p-4">
-            <div class="text-muted text-sm">DB Size</div>
-            <div class="text-2xl font-bold">{{ "%.1f"|format(db_size / 1024 / 1024) }} MB</div>
-        </div>
-        <div class="bg-card rounded-lg p-4">
-            <div class="text-muted text-sm">Avg/Symbol</div>
-            <div class="text-2xl font-bold">{{ "{:,}".format((total_candles // symbols_count) if symbols_count > 0 else 0) }}</div>
+        <div class="flex items-center gap-4">
+            <span id="computed-at" class="text-sm text-muted"></span>
+            <button onclick="loadStats()" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-md text-sm">
+                Refresh
+            </button>
         </div>
     </div>
 
-    <!-- Candles by Timeframe -->
-    <div class="bg-card rounded-lg p-4">
-        <h2 class="text-lg font-semibold mb-4">Candles by Timeframe</h2>
-        <div class="grid grid-cols-6 gap-4">
-            {% for tf, count in overall_tf_counts.items() %}
-            <div class="text-center">
-                <div class="text-muted text-sm">{{ tf }}</div>
-                <div class="text-xl font-bold">{{ "{:,}".format(count) }}</div>
-            </div>
-            {% endfor %}
-        </div>
+    <!-- Loading indicator -->
+    <div id="loading" class="text-center py-8">
+        <div class="animate-pulse">Loading statistics...</div>
     </div>
 
-    <!-- Symbol Stats Table -->
-    <div class="bg-card rounded-lg overflow-hidden">
-        <div class="p-4 border-b border-gray-700">
-            <h2 class="text-lg font-semibold">Per-Symbol Statistics</h2>
-        </div>
-        <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead class="bg-darker">
-                    <tr>
-                        <th class="px-4 py-3 text-left">Symbol</th>
-                        <th class="px-4 py-3 text-right">Price</th>
-                        <th class="px-4 py-3 text-right">24h</th>
-                        <th class="px-4 py-3 text-center">1m</th>
-                        <th class="px-4 py-3 text-center">5m</th>
-                        <th class="px-4 py-3 text-center">15m</th>
-                        <th class="px-4 py-3 text-center">1h</th>
-                        <th class="px-4 py-3 text-center">4h</th>
-                        <th class="px-4 py-3 text-center">1d</th>
-                        <th class="px-4 py-3 text-left">Date Range</th>
-                        <th class="px-4 py-3 text-left">Verified Until</th>
-                        <th class="px-4 py-3 text-center">Patterns</th>
-                        <th class="px-4 py-3 text-center">Status</th>
-                    </tr>
-                </thead>
-                <tbody class="divide-y divide-gray-700">
-                    {% for stat in symbol_stats %}
-                    <tr class="hover:bg-gray-800">
-                        <td class="px-4 py-3 font-medium">{{ stat.symbol }}</td>
-                        <td class="px-4 py-3 text-right font-mono">
-                            {% if stat.current_price %}
-                                ${{ "{:,.4f}".format(stat.current_price) if stat.current_price < 1 else "{:,.2f}".format(stat.current_price) }}
-                            {% else %}
-                                -
-                            {% endif %}
-                        </td>
-                        <td class="px-4 py-3 text-right">
-                            {% if stat.price_change_24h is not none %}
-                                <span class="{{ 'bullish' if stat.price_change_24h >= 0 else 'bearish' }}">
-                                    {{ "+%.2f"|format(stat.price_change_24h) if stat.price_change_24h >= 0 else "%.2f"|format(stat.price_change_24h) }}%
-                                </span>
-                            {% else %}
-                                -
-                            {% endif %}
-                        </td>
-                        <td class="px-4 py-3 text-center text-muted">{{ "{:,}".format(stat.candles_by_tf['1m']) }}</td>
-                        <td class="px-4 py-3 text-center text-muted">{{ "{:,}".format(stat.candles_by_tf['5m']) }}</td>
-                        <td class="px-4 py-3 text-center text-muted">{{ "{:,}".format(stat.candles_by_tf['15m']) }}</td>
-                        <td class="px-4 py-3 text-center text-muted">{{ "{:,}".format(stat.candles_by_tf['1h']) }}</td>
-                        <td class="px-4 py-3 text-center text-muted">{{ "{:,}".format(stat.candles_by_tf['4h']) }}</td>
-                        <td class="px-4 py-3 text-center text-muted">{{ "{:,}".format(stat.candles_by_tf['1d']) }}</td>
-                        <td class="px-4 py-3 text-muted text-xs">
-                            {% if stat.oldest_date and stat.newest_date %}
-                                {{ stat.oldest_date }} - {{ stat.newest_date }}
-                            {% else %}
-                                No data
-                            {% endif %}
-                        </td>
-                        <td class="px-4 py-3 text-xs">
-                            {% if stat.last_verified_date %}
-                                <span class="text-green-400">{{ stat.last_verified_date }}</span>
-                            {% else %}
-                                <span class="text-orange-400">Not verified</span>
-                            {% endif %}
-                        </td>
-                        <td class="px-4 py-3 text-center">
-                            <span class="text-blue-400">{{ stat.active_patterns }}</span>
-                            <span class="text-muted">/{{ stat.total_patterns }}</span>
-                        </td>
-                        <td class="px-4 py-3 text-center">
-                            {% if stat.freshness == 'live' %}
-                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-green-900 text-green-300">
-                                    Live
-                                </span>
-                            {% elif stat.freshness == 'recent' %}
-                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-yellow-900 text-yellow-300">
-                                    {{ stat.age_minutes }}m ago
-                                </span>
-                            {% elif stat.freshness == 'stale' %}
-                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-orange-900 text-orange-300">
-                                    {{ (stat.age_minutes // 60) }}h ago
-                                </span>
-                            {% elif stat.freshness == 'old' %}
-                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-red-900 text-red-300">
-                                    Old
-                                </span>
-                            {% else %}
-                                <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-700 text-gray-400">
-                                    No data
-                                </span>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
+    <!-- Error message -->
+    <div id="error" class="hidden bg-red-900/50 border border-red-500 rounded-lg p-4 text-red-200">
+        <span id="error-message"></span>
     </div>
 
-    <!-- Legend -->
-    <div class="bg-card rounded-lg p-4">
-        <h3 class="font-semibold mb-2">Legend</h3>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-muted">
-            <div>
-                <span class="inline-block w-3 h-3 rounded-full bg-green-500 mr-2"></span>
-                <strong>Live:</strong> Updated < 5 min ago
+    <!-- Stats content (hidden until loaded) -->
+    <div id="stats-content" class="hidden space-y-6">
+        <!-- Overall Stats Cards -->
+        <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
+            <div class="bg-card rounded-lg p-4">
+                <div class="text-muted text-sm">Symbols</div>
+                <div class="text-2xl font-bold" id="symbols-count">-</div>
             </div>
-            <div>
-                <span class="inline-block w-3 h-3 rounded-full bg-yellow-500 mr-2"></span>
-                <strong>Recent:</strong> Updated < 1 hour ago
+            <div class="bg-card rounded-lg p-4">
+                <div class="text-muted text-sm">Total Candles</div>
+                <div class="text-2xl font-bold" id="total-candles">-</div>
             </div>
-            <div>
-                <span class="inline-block w-3 h-3 rounded-full bg-orange-500 mr-2"></span>
-                <strong>Stale:</strong> Updated < 24 hours ago
+            <div class="bg-card rounded-lg p-4">
+                <div class="text-muted text-sm">Verified</div>
+                <div class="text-2xl font-bold" id="verification-pct">-</div>
+                <div class="text-xs text-muted" id="verified-count">-</div>
             </div>
-            <div>
-                <span class="inline-block w-3 h-3 rounded-full bg-red-500 mr-2"></span>
-                <strong>Old:</strong> Updated > 24 hours ago
+            <div class="bg-card rounded-lg p-4">
+                <div class="text-muted text-sm">Patterns</div>
+                <div class="text-2xl font-bold" id="total-patterns">-</div>
+            </div>
+            <div class="bg-card rounded-lg p-4">
+                <div class="text-muted text-sm">Signals</div>
+                <div class="text-2xl font-bold" id="total-signals">-</div>
+            </div>
+            <div class="bg-card rounded-lg p-4">
+                <div class="text-muted text-sm">DB Size</div>
+                <div class="text-2xl font-bold" id="db-size">-</div>
+            </div>
+            <div class="bg-card rounded-lg p-4">
+                <div class="text-muted text-sm">Avg/Symbol</div>
+                <div class="text-2xl font-bold" id="avg-per-symbol">-</div>
             </div>
         </div>
-        <div class="mt-4 text-sm text-muted">
-            <p><strong>Patterns:</strong> Active patterns / Total patterns detected</p>
+
+        <!-- Candles by Timeframe -->
+        <div class="bg-card rounded-lg p-4">
+            <h2 class="text-lg font-semibold mb-4">Candles by Timeframe</h2>
+            <div class="grid grid-cols-6 gap-4" id="tf-counts">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+
+        <!-- Symbol Stats Table -->
+        <div class="bg-card rounded-lg overflow-hidden">
+            <div class="p-4 border-b border-gray-700">
+                <h2 class="text-lg font-semibold">Per-Symbol Statistics</h2>
+            </div>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="bg-darker">
+                        <tr>
+                            <th class="px-4 py-3 text-left">Symbol</th>
+                            <th class="px-4 py-3 text-right">Price</th>
+                            <th class="px-4 py-3 text-right">24h</th>
+                            <th class="px-4 py-3 text-center">1m</th>
+                            <th class="px-4 py-3 text-center">5m</th>
+                            <th class="px-4 py-3 text-center">15m</th>
+                            <th class="px-4 py-3 text-center">1h</th>
+                            <th class="px-4 py-3 text-center">4h</th>
+                            <th class="px-4 py-3 text-center">1d</th>
+                            <th class="px-4 py-3 text-left">Date Range</th>
+                            <th class="px-4 py-3 text-left">Verified Until</th>
+                            <th class="px-4 py-3 text-center">Patterns</th>
+                            <th class="px-4 py-3 text-center">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-700" id="symbol-stats-body">
+                        <!-- Populated by JS -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Legend -->
+        <div class="bg-card rounded-lg p-4">
+            <h3 class="font-semibold mb-2">Legend</h3>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm text-muted">
+                <div>
+                    <span class="inline-block w-3 h-3 rounded-full bg-green-500 mr-2"></span>
+                    <strong>Live:</strong> Updated < 5 min ago
+                </div>
+                <div>
+                    <span class="inline-block w-3 h-3 rounded-full bg-yellow-500 mr-2"></span>
+                    <strong>Recent:</strong> Updated < 1 hour ago
+                </div>
+                <div>
+                    <span class="inline-block w-3 h-3 rounded-full bg-orange-500 mr-2"></span>
+                    <strong>Stale:</strong> Updated < 24 hours ago
+                </div>
+                <div>
+                    <span class="inline-block w-3 h-3 rounded-full bg-red-500 mr-2"></span>
+                    <strong>Old:</strong> Updated > 24 hours ago
+                </div>
+            </div>
+            <div class="mt-4 text-sm text-muted">
+                <p><strong>Patterns:</strong> Active patterns / Total patterns detected</p>
+            </div>
         </div>
     </div>
 </div>
+
+<script>
+function formatNumber(num) {
+    return num.toLocaleString();
+}
+
+function formatPrice(price) {
+    if (!price) return '-';
+    if (price < 1) return '$' + price.toFixed(4);
+    return '$' + price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+}
+
+function formatPriceChange(change) {
+    if (change === null || change === undefined) return '-';
+    const sign = change >= 0 ? '+' : '';
+    const cls = change >= 0 ? 'bullish' : 'bearish';
+    return `<span class="${cls}">${sign}${change.toFixed(2)}%</span>`;
+}
+
+function getStatusBadge(freshness, ageMinutes) {
+    const badges = {
+        'live': '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-green-900 text-green-300">Live</span>',
+        'recent': `<span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-yellow-900 text-yellow-300">${ageMinutes}m ago</span>`,
+        'stale': `<span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-orange-900 text-orange-300">${Math.floor(ageMinutes / 60)}h ago</span>`,
+        'old': '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-red-900 text-red-300">Old</span>',
+        'none': '<span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-700 text-gray-400">No data</span>'
+    };
+    return badges[freshness] || badges['none'];
+}
+
+function getVerificationPctClass(pct) {
+    if (pct >= 90) return 'text-green-400';
+    if (pct >= 50) return 'text-yellow-400';
+    return 'text-orange-400';
+}
+
+async function loadStats() {
+    const loading = document.getElementById('loading');
+    const error = document.getElementById('error');
+    const content = document.getElementById('stats-content');
+
+    loading.classList.remove('hidden');
+    error.classList.add('hidden');
+    content.classList.add('hidden');
+
+    try {
+        const response = await fetch('/stats/api');
+        const data = await response.json();
+
+        if (data.error) {
+            document.getElementById('error-message').textContent = data.error;
+            error.classList.remove('hidden');
+            loading.classList.add('hidden');
+            return;
+        }
+
+        // Update overall stats
+        document.getElementById('symbols-count').textContent = data.symbols_count;
+        document.getElementById('total-candles').textContent = formatNumber(data.total_candles);
+
+        const verPct = document.getElementById('verification-pct');
+        verPct.textContent = data.verification_pct.toFixed(1) + '%';
+        verPct.className = 'text-2xl font-bold ' + getVerificationPctClass(data.verification_pct);
+        document.getElementById('verified-count').textContent = formatNumber(data.verified_count) + ' candles';
+
+        document.getElementById('total-patterns').textContent = formatNumber(data.total_patterns);
+        document.getElementById('total-signals').textContent = formatNumber(data.total_signals);
+        document.getElementById('db-size').textContent = (data.db_size / 1024 / 1024).toFixed(1) + ' MB';
+        document.getElementById('avg-per-symbol').textContent = data.symbols_count > 0
+            ? formatNumber(Math.floor(data.total_candles / data.symbols_count))
+            : '0';
+
+        // Update computed_at
+        if (data.computed_at_formatted) {
+            document.getElementById('computed-at').textContent = 'Updated: ' + data.computed_at_formatted;
+        }
+
+        // Update timeframe counts
+        const tfContainer = document.getElementById('tf-counts');
+        tfContainer.innerHTML = '';
+        const timeframes = ['1m', '5m', '15m', '1h', '4h', '1d'];
+        for (const tf of timeframes) {
+            const count = data.overall_tf_counts[tf] || 0;
+            tfContainer.innerHTML += `
+                <div class="text-center">
+                    <div class="text-muted text-sm">${tf}</div>
+                    <div class="text-xl font-bold">${formatNumber(count)}</div>
+                </div>
+            `;
+        }
+
+        // Update symbol stats table
+        const tbody = document.getElementById('symbol-stats-body');
+        tbody.innerHTML = '';
+        for (const stat of data.symbol_stats) {
+            const dateRange = (stat.oldest_date && stat.newest_date)
+                ? `${stat.oldest_date} - ${stat.newest_date}`
+                : 'No data';
+
+            const verifiedUntil = stat.last_verified_date
+                ? `<span class="text-green-400">${stat.last_verified_date}</span>`
+                : '<span class="text-orange-400">Not verified</span>';
+
+            tbody.innerHTML += `
+                <tr class="hover:bg-gray-800">
+                    <td class="px-4 py-3 font-medium">${stat.symbol}</td>
+                    <td class="px-4 py-3 text-right font-mono">${formatPrice(stat.current_price)}</td>
+                    <td class="px-4 py-3 text-right">${formatPriceChange(stat.price_change_24h)}</td>
+                    <td class="px-4 py-3 text-center text-muted">${formatNumber(stat.candles_by_tf['1m'] || 0)}</td>
+                    <td class="px-4 py-3 text-center text-muted">${formatNumber(stat.candles_by_tf['5m'] || 0)}</td>
+                    <td class="px-4 py-3 text-center text-muted">${formatNumber(stat.candles_by_tf['15m'] || 0)}</td>
+                    <td class="px-4 py-3 text-center text-muted">${formatNumber(stat.candles_by_tf['1h'] || 0)}</td>
+                    <td class="px-4 py-3 text-center text-muted">${formatNumber(stat.candles_by_tf['4h'] || 0)}</td>
+                    <td class="px-4 py-3 text-center text-muted">${formatNumber(stat.candles_by_tf['1d'] || 0)}</td>
+                    <td class="px-4 py-3 text-muted text-xs">${dateRange}</td>
+                    <td class="px-4 py-3 text-xs">${verifiedUntil}</td>
+                    <td class="px-4 py-3 text-center">
+                        <span class="text-blue-400">${stat.active_patterns}</span>
+                        <span class="text-muted">/${stat.total_patterns}</span>
+                    </td>
+                    <td class="px-4 py-3 text-center">${getStatusBadge(stat.freshness, stat.age_minutes)}</td>
+                </tr>
+            `;
+        }
+
+        loading.classList.add('hidden');
+        content.classList.remove('hidden');
+
+    } catch (err) {
+        document.getElementById('error-message').textContent = 'Failed to load stats: ' + err.message;
+        error.classList.remove('hidden');
+        loading.classList.add('hidden');
+    }
+}
+
+// Load stats on page load
+document.addEventListener('DOMContentLoaded', loadStats);
+</script>
 {% endblock %}
