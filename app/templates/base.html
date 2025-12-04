@@ -82,19 +82,14 @@
                         </a>
                     </div>
                 </div>
-                <div class="flex items-center space-x-4" x-data="schedulerToggle()" x-init="init()">
-                    <!-- Scanner Toggle -->
-                    <div class="flex items-center space-x-2">
-                        <span class="text-sm text-gray-400">Scanner:</span>
-                        <button @click="toggle()"
-                                :class="running ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-600 hover:bg-gray-700'"
-                                class="px-3 py-2 rounded-md text-sm font-medium flex items-center space-x-2 transition-colors">
-                            <span :class="running ? 'bg-green-300' : 'bg-gray-400'" class="w-2 h-2 rounded-full" :style="running && 'animation: pulse 2s infinite'"></span>
-                            <span x-text="running ? 'ON' : 'OFF'"></span>
-                        </button>
+                <div class="flex items-center space-x-4" x-data="cronStatus()">
+                    <!-- Cron Status -->
+                    <div class="flex items-center space-x-2 text-sm">
+                        <span :class="statusColor" class="w-2 h-2 rounded-full" :style="isLive && 'animation: pulse 2s infinite'"></span>
+                        <span class="text-gray-400" x-text="statusText"></span>
                     </div>
-                    <!-- Scan Now only visible when scanner is OFF -->
-                    <button x-show="!running" x-cloak onclick="triggerScan()" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-md text-sm font-medium">
+                    <!-- Manual Scan -->
+                    <button onclick="triggerScan()" class="bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded text-sm font-medium">
                         Scan Now
                     </button>
                 </div>
@@ -144,34 +139,28 @@
             }
         }
 
-        function schedulerToggle() {
+        function cronStatus() {
+            // Server-injected value - no API call needed
+            const lastUpdate = {{ last_data_update|default('null') }};
             return {
-                running: false,
-                initialized: false,
-                async init() {
-                    if (this.initialized) return;
-                    this.initialized = true;
-                    await this.fetchStatus();
-                    // Poll every 30 seconds (not 5) - just to sync state
-                    setInterval(() => this.fetchStatus(), 30000);
+                lastUpdate: lastUpdate,
+                get isLive() {
+                    return this.lastUpdate && (Date.now() - this.lastUpdate) < 120000;
                 },
-                async fetchStatus() {
-                    try {
-                        const response = await fetch('/api/scheduler/status');
-                        const data = await response.json();
-                        this.running = data.running;
-                    } catch (e) {
-                        console.error('Failed to get scheduler status:', e);
-                    }
+                get statusText() {
+                    if (!this.lastUpdate) return 'No data';
+                    const mins = Math.floor((Date.now() - this.lastUpdate) / 60000);
+                    if (mins < 2) return 'Live';
+                    if (mins < 60) return `${mins}m ago`;
+                    const hours = Math.floor(mins / 60);
+                    return `${hours}h ago`;
                 },
-                async toggle() {
-                    try {
-                        const response = await fetch('/api/scheduler/toggle', { method: 'POST' });
-                        const data = await response.json();
-                        this.running = data.running;
-                    } catch (e) {
-                        alert('Failed to toggle scheduler: ' + e.message);
-                    }
+                get statusColor() {
+                    if (!this.lastUpdate) return 'bg-gray-400';
+                    const mins = Math.floor((Date.now() - this.lastUpdate) / 60000);
+                    if (mins < 5) return 'bg-green-400';
+                    if (mins < 60) return 'bg-yellow-400';
+                    return 'bg-red-400';
                 }
             }
         }

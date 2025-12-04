@@ -1,5 +1,5 @@
 from flask import Blueprint, render_template, request, jsonify, abort
-from app.models import Symbol, Signal
+from app.models import Symbol, Signal, Pattern
 from app import db
 
 signals_bp = Blueprint('signals', __name__)
@@ -8,26 +8,44 @@ signals_bp = Blueprint('signals', __name__)
 @signals_bp.route('/')
 def index():
     """Signal list"""
-    status_filter = request.args.get('status', None)
+    symbol_filter = request.args.get('symbol', '').strip()
     direction_filter = request.args.get('direction', None)
 
     query = Signal.query
 
-    if status_filter:
-        query = query.filter_by(status=status_filter)
+    # Symbol filter (search by symbol name)
+    if symbol_filter:
+        matching_symbols = Symbol.query.filter(
+            Symbol.symbol.ilike(f'%{symbol_filter}%')
+        ).all()
+        symbol_ids = [s.id for s in matching_symbols]
+        if symbol_ids:
+            query = query.filter(Signal.symbol_id.in_(symbol_ids))
+        else:
+            query = query.filter(Signal.symbol_id == -1)  # No matches
 
     if direction_filter:
-        query = query.filter_by(direction=direction_filter)
+        # Convert 'long' to 'bullish', 'short' to 'bearish'
+        db_direction = 'bullish' if direction_filter == 'long' else 'bearish'
+        query = query.filter_by(direction=db_direction)
 
     signals = query.order_by(Signal.created_at.desc()).limit(50).all()
 
-    # Enrich with symbol data
+    # Get all symbols for dropdown
+    symbols = Symbol.query.filter_by(is_active=True).order_by(Symbol.symbol).all()
+
+    # Enrich with symbol and pattern data
     for signal in signals:
         signal.symbol_obj = db.session.get(Symbol, signal.symbol_id)
+        if signal.pattern_id:
+            signal.pattern_obj = db.session.get(Pattern, signal.pattern_id)
+        else:
+            signal.pattern_obj = None
 
     return render_template('signals.html',
                            signals=signals,
-                           current_status=status_filter,
+                           symbols=symbols,
+                           current_symbol=symbol_filter,
                            current_direction=direction_filter)
 
 

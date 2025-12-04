@@ -3,7 +3,7 @@
 {% block title %}Patterns - CryptoLens{% endblock %}
 
 {% block content %}
-<div class="space-y-6">
+<div x-data="patternChart()" class="space-y-6">
     <!-- Header & Filters -->
     <div class="flex items-center justify-between flex-wrap gap-4">
         <h1 class="text-2xl font-bold">Detected Patterns</h1>
@@ -42,7 +42,17 @@
     {% if current_symbol %}
     <div class="bg-card rounded-lg p-4">
         <div class="flex items-center justify-between mb-4">
-            <h2 class="text-lg font-bold">{{ current_symbol }} - {{ current_timeframe or '1h' }}</h2>
+            <div class="flex items-center space-x-4">
+                <h2 class="text-lg font-bold">{{ current_symbol }} - {{ current_timeframe or '1h' }}</h2>
+                <button @click="showAllPatterns()"
+                        :class="selectedPatternId === null ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'"
+                        class="px-3 py-1 rounded text-sm transition-colors">
+                    Show All
+                </button>
+                <span x-show="selectedPatternId !== null" class="text-sm text-muted">
+                    Click a pattern below to highlight it
+                </span>
+            </div>
             <div class="flex space-x-2">
                 {% for tf in timeframes %}
                 <a href="?symbol={{ current_symbol }}&timeframe={{ tf }}&status={{ current_status }}"
@@ -62,8 +72,8 @@
             <thead>
                 <tr class="border-b border-gray-700 bg-gray-800/50">
                     <th class="text-left p-3 text-muted font-medium">Symbol</th>
+                    <th class="text-left p-3 text-muted font-medium">Price</th>
                     <th class="text-left p-3 text-muted font-medium">TF</th>
-                    <th class="text-left p-3 text-muted font-medium">Detected</th>
                     <th class="text-left p-3 text-muted font-medium">Type</th>
                     <th class="text-left p-3 text-muted font-medium">Direction</th>
                     <th class="text-left p-3 text-muted font-medium">Zone</th>
@@ -71,21 +81,29 @@
                     <th class="text-left p-3 text-muted font-medium">SL / TP</th>
                     <th class="text-left p-3 text-muted font-medium">Status</th>
                     <th class="text-left p-3 text-muted font-medium">Expires</th>
+                    <th class="text-left p-3 text-muted font-medium"></th>
                 </tr>
             </thead>
             <tbody>
                 {% for pattern in patterns %}
-                <tr class="border-b border-gray-800 hover:bg-gray-800/50 {% if pattern.is_expired %}opacity-60{% endif %}">
+                <tr class="border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer {% if pattern.is_expired %}opacity-60{% endif %}"
+                    :class="{ 'ring-2 ring-blue-500 bg-gray-800': selectedPatternId === {{ pattern.id }} }"
+                    @click="selectPattern({{ pattern.id }}, {{ pattern.zone_low }}, {{ pattern.zone_high }}, '{{ pattern.direction }}', {{ pattern.trading_levels.entry }}, {{ pattern.trading_levels.stop_loss }}, {{ pattern.trading_levels.take_profit_1 }}, {{ pattern.trading_levels.take_profit_2 }}, {{ pattern.detected_at }})"
+                >
                     <td class="p-3">
                         <a href="?symbol={{ pattern.symbol.symbol }}&timeframe={{ pattern.timeframe }}"
                            class="hover:text-blue-400 font-medium">
                             {{ pattern.symbol.symbol }}
                         </a>
                     </td>
-                    <td class="p-3 text-muted">{{ pattern.timeframe }}</td>
-                    <td class="p-3 text-xs text-muted">
-                        {{ pattern.detected_at_formatted }}
+                    <td class="p-3 font-mono text-xs">
+                        {% if pattern.current_price %}
+                            ${{ pattern.current_price|price }}
+                        {% else %}
+                            <span class="text-muted">-</span>
+                        {% endif %}
                     </td>
+                    <td class="p-3 text-muted">{{ pattern.timeframe }}</td>
                     <td class="p-3">
                         {% if pattern.pattern_type == 'imbalance' %}
                             <span class="px-2 py-1 rounded text-xs bg-purple-900 text-purple-200">FVG</span>
@@ -103,29 +121,15 @@
                         </span>
                     </td>
                     <td class="p-3 font-mono text-xs">
-                        {% if pattern.zone_low < 0.01 %}
-                            {{ '%.6f'|format(pattern.zone_low) }}-{{ '%.6f'|format(pattern.zone_high) }}
-                        {% elif pattern.zone_low < 1 %}
-                            {{ '%.4f'|format(pattern.zone_low) }}-{{ '%.4f'|format(pattern.zone_high) }}
-                        {% elif pattern.zone_low < 100 %}
-                            {{ '%.3f'|format(pattern.zone_low) }}-{{ '%.3f'|format(pattern.zone_high) }}
-                        {% else %}
-                            {{ '%.2f'|format(pattern.zone_low) }}-{{ '%.2f'|format(pattern.zone_high) }}
-                        {% endif %}
+                        {{ pattern.zone_low|price }}-{{ pattern.zone_high|price }}
                     </td>
                     <td class="p-3 font-mono text-xs {% if pattern.direction == 'bullish' %}text-green-400{% else %}text-red-400{% endif %}">
-                        {% set entry = pattern.trading_levels.entry %}
-                        {% if entry < 0.01 %}{{ '%.6f'|format(entry) }}
-                        {% elif entry < 1 %}{{ '%.4f'|format(entry) }}
-                        {% elif entry < 100 %}{{ '%.3f'|format(entry) }}
-                        {% else %}{{ '%.2f'|format(entry) }}{% endif %}
+                        {{ pattern.trading_levels.entry|price }}
                     </td>
                     <td class="p-3 font-mono text-xs">
-                        {% set sl = pattern.trading_levels.stop_loss %}
-                        {% set tp = pattern.trading_levels.take_profit_2 %}
-                        <span class="text-red-500">{% if sl < 1 %}{{ '%.4f'|format(sl) }}{% else %}{{ '%.2f'|format(sl) }}{% endif %}</span>
+                        <span class="text-red-500">{{ pattern.trading_levels.stop_loss|price }}</span>
                         <span class="text-muted">/</span>
-                        <span class="text-green-500">{% if tp < 1 %}{{ '%.4f'|format(tp) }}{% else %}{{ '%.2f'|format(tp) }}{% endif %}</span>
+                        <span class="text-green-500">{{ pattern.trading_levels.take_profit_2|price }}</span>
                         <span class="text-muted">({{ pattern.trading_levels.risk_reward_2 }}R)</span>
                     </td>
                     <td class="p-3">
@@ -151,10 +155,18 @@
                             <span class="text-gray-500">-</span>
                         {% endif %}
                     </td>
+                    <td class="p-3">
+                        {% if pattern.status == 'active' and not pattern.is_expired %}
+                        <button onclick="createTradeFromPattern({{ pattern.id }})"
+                                class="px-2 py-1 text-xs bg-green-700 hover:bg-green-600 rounded">
+                            Trade
+                        </button>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="10" class="p-8 text-center text-muted">
+                    <td colspan="11" class="p-8 text-center text-muted">
                         No patterns found. Run a scan to detect patterns.
                     </td>
                 </tr>
@@ -166,10 +178,272 @@
 {% endblock %}
 
 {% block extra_js %}
+<script>
+async function createTradeFromPattern(patternId) {
+    try {
+        const response = await fetch('/portfolio/api/trade-from-pattern', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken()
+            },
+            body: JSON.stringify({ pattern_id: patternId })
+        });
+        const data = await response.json();
+        if (data.success) {
+            window.location.href = data.redirect_url;
+        } else {
+            alert('Error: ' + (data.error || 'Failed to create trade'));
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+
+function patternChart() {
+    return {
+        selectedPatternId: null,
+        chart: null,
+        candlestickSeries: null,
+        patternSeries: [],
+        chartData: null,
+        precision: 2,
+
+        selectPattern(id, zoneLow, zoneHigh, direction, entry, sl, tp1, tp2, detectedAt) {
+            this.selectedPatternId = id;
+            this.drawSinglePattern({ zoneLow, zoneHigh, direction, entry, sl, tp1, tp2, detectedAt });
+        },
+
+        showAllPatterns() {
+            this.selectedPatternId = null;
+            this.drawAllPatterns();
+        },
+
+        clearPatternSeries() {
+            this.patternSeries.forEach(series => {
+                try { this.chart.removeSeries(series); } catch(e) {}
+            });
+            this.patternSeries = [];
+            this.candlestickSeries.setMarkers([]);
+        },
+
+        drawSinglePattern(pattern) {
+            if (!this.chart || !this.chartData) return;
+            this.clearPatternSeries();
+
+            const { zoneLow, zoneHigh, direction, entry, sl, tp1, tp2, detectedAt } = pattern;
+            const lineColor = direction === 'bullish' ? '#22c55e' : '#ef4444';
+            const candles = this.chartData.candles;
+            const firstTime = candles[0].timestamp / 1000;
+            const lastTime = candles[candles.length - 1].timestamp / 1000;
+            const patternStartTime = detectedAt / 1000;
+            const visibleStartTime = Math.max(patternStartTime, firstTime);
+
+            const priceFormat = {
+                type: 'price',
+                precision: this.precision,
+                minMove: Math.pow(10, -this.precision),
+            };
+
+            // Zone high line
+            const highLine = this.chart.addLineSeries({
+                color: lineColor,
+                lineWidth: 2,
+                priceLineVisible: false,
+                lastValueVisible: true,
+                crosshairMarkerVisible: false,
+                priceFormat
+            });
+            highLine.setData([
+                { time: visibleStartTime, value: zoneHigh },
+                { time: lastTime, value: zoneHigh }
+            ]);
+            this.patternSeries.push(highLine);
+
+            // Zone low line
+            const lowLine = this.chart.addLineSeries({
+                color: lineColor,
+                lineWidth: 2,
+                priceLineVisible: false,
+                lastValueVisible: true,
+                crosshairMarkerVisible: false,
+                priceFormat
+            });
+            lowLine.setData([
+                { time: visibleStartTime, value: zoneLow },
+                { time: lastTime, value: zoneLow }
+            ]);
+            this.patternSeries.push(lowLine);
+
+            // Entry line (dashed)
+            const entryLine = this.chart.addLineSeries({
+                color: '#3b82f6',
+                lineWidth: 1,
+                lineStyle: 2, // Dashed
+                priceLineVisible: false,
+                lastValueVisible: true,
+                crosshairMarkerVisible: false,
+                priceFormat
+            });
+            entryLine.setData([
+                { time: visibleStartTime, value: entry },
+                { time: lastTime, value: entry }
+            ]);
+            this.patternSeries.push(entryLine);
+
+            // Stop Loss area (red transparent)
+            const slArea = this.chart.addAreaSeries({
+                topColor: 'rgba(239, 68, 68, 0.3)',
+                bottomColor: 'rgba(239, 68, 68, 0.1)',
+                lineColor: 'rgba(239, 68, 68, 0.8)',
+                lineWidth: 1,
+                priceLineVisible: false,
+                lastValueVisible: true,
+                crosshairMarkerVisible: false,
+                priceFormat
+            });
+            slArea.setData([
+                { time: visibleStartTime, value: sl },
+                { time: lastTime, value: sl }
+            ]);
+            this.patternSeries.push(slArea);
+
+            // Take Profit 1 area (light green transparent)
+            const tp1Area = this.chart.addAreaSeries({
+                topColor: 'rgba(34, 197, 94, 0.2)',
+                bottomColor: 'rgba(34, 197, 94, 0.05)',
+                lineColor: 'rgba(34, 197, 94, 0.6)',
+                lineWidth: 1,
+                lineStyle: 2,
+                priceLineVisible: false,
+                lastValueVisible: true,
+                crosshairMarkerVisible: false,
+                priceFormat
+            });
+            tp1Area.setData([
+                { time: visibleStartTime, value: tp1 },
+                { time: lastTime, value: tp1 }
+            ]);
+            this.patternSeries.push(tp1Area);
+
+            // Take Profit 2 area (green transparent)
+            const tp2Area = this.chart.addAreaSeries({
+                topColor: 'rgba(34, 197, 94, 0.3)',
+                bottomColor: 'rgba(34, 197, 94, 0.1)',
+                lineColor: 'rgba(34, 197, 94, 0.8)',
+                lineWidth: 1,
+                priceLineVisible: false,
+                lastValueVisible: true,
+                crosshairMarkerVisible: false,
+                priceFormat
+            });
+            tp2Area.setData([
+                { time: visibleStartTime, value: tp2 },
+                { time: lastTime, value: tp2 }
+            ]);
+            this.patternSeries.push(tp2Area);
+
+            // Add marker
+            if (patternStartTime >= firstTime && patternStartTime <= lastTime) {
+                this.candlestickSeries.setMarkers([{
+                    time: patternStartTime,
+                    position: direction === 'bullish' ? 'belowBar' : 'aboveBar',
+                    color: lineColor,
+                    shape: direction === 'bullish' ? 'arrowUp' : 'arrowDown',
+                    text: 'Pattern'
+                }]);
+            }
+        },
+
+        drawAllPatterns() {
+            if (!this.chart || !this.chartData) return;
+            this.clearPatternSeries();
+
+            const candles = this.chartData.candles;
+            const firstTime = candles[0].timestamp / 1000;
+            const lastTime = candles[candles.length - 1].timestamp / 1000;
+            const markers = [];
+
+            const priceFormat = {
+                type: 'price',
+                precision: this.precision,
+                minMove: Math.pow(10, -this.precision),
+            };
+
+            this.chartData.patterns.forEach(pattern => {
+                const lineColor = pattern.direction === 'bullish' ? '#22c55e' : '#ef4444';
+                const patternStartTime = pattern.detected_at / 1000;
+                const visibleStartTime = Math.max(patternStartTime, firstTime);
+
+                if (patternStartTime <= lastTime) {
+                    // Zone high
+                    const highLine = this.chart.addLineSeries({
+                        color: lineColor,
+                        lineWidth: 2,
+                        priceLineVisible: false,
+                        lastValueVisible: true,
+                        crosshairMarkerVisible: false,
+                        priceFormat
+                    });
+                    highLine.setData([
+                        { time: visibleStartTime, value: pattern.zone_high },
+                        { time: lastTime, value: pattern.zone_high }
+                    ]);
+                    this.patternSeries.push(highLine);
+
+                    // Zone low
+                    const lowLine = this.chart.addLineSeries({
+                        color: lineColor,
+                        lineWidth: 2,
+                        priceLineVisible: false,
+                        lastValueVisible: true,
+                        crosshairMarkerVisible: false,
+                        priceFormat
+                    });
+                    lowLine.setData([
+                        { time: visibleStartTime, value: pattern.zone_low },
+                        { time: lastTime, value: pattern.zone_low }
+                    ]);
+                    this.patternSeries.push(lowLine);
+
+                    // Marker
+                    if (patternStartTime >= firstTime && patternStartTime <= lastTime) {
+                        const label = pattern.pattern_type === 'imbalance' ? 'FVG' :
+                                     pattern.pattern_type === 'order_block' ? 'OB' : 'Sweep';
+                        markers.push({
+                            time: patternStartTime,
+                            position: pattern.direction === 'bullish' ? 'belowBar' : 'aboveBar',
+                            color: lineColor,
+                            shape: pattern.direction === 'bullish' ? 'arrowUp' : 'arrowDown',
+                            text: label
+                        });
+                    }
+                }
+            });
+
+            if (markers.length > 0) {
+                markers.sort((a, b) => a.time - b.time);
+                this.candlestickSeries.setMarkers(markers);
+            }
+        }
+    };
+}
+</script>
 {% if current_symbol %}
 <script>
 document.addEventListener('DOMContentLoaded', async function() {
     const chartContainer = document.getElementById('chart');
+    const timeframe = '{{ current_timeframe or "1h" }}';
+
+    function getPricePrecision(price) {
+        if (price < 0.0001) return 8;
+        if (price < 0.01) return 6;
+        if (price < 1) return 4;
+        if (price < 100) return 3;
+        if (price < 10000) return 2;
+        return 0;
+    }
+
     const chart = LightweightCharts.createChart(chartContainer, {
         layout: {
             background: { color: '#242424' },
@@ -181,6 +455,24 @@ document.addEventListener('DOMContentLoaded', async function() {
         },
         width: chartContainer.clientWidth,
         height: 400,
+        timeScale: {
+            timeVisible: true,
+            secondsVisible: timeframe === '1m',
+            borderColor: '#555',
+            tickMarkFormatter: (time) => {
+                const date = new Date(time * 1000);
+                if (['1d', '1w'].includes(timeframe)) {
+                    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                } else if (['4h', '1h'].includes(timeframe)) {
+                    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) +
+                           ' ' + date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+                } else {
+                    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+                }
+            }
+        },
+        rightPriceScale: { borderColor: '#555' },
+        crosshair: { mode: 0 },
     });
 
     const candlestickSeries = chart.addCandlestickSeries({
@@ -192,15 +484,13 @@ document.addEventListener('DOMContentLoaded', async function() {
         wickDownColor: '#ef4444',
     });
 
-    // Fetch chart data
     const symbol = '{{ current_symbol }}'.replace('/', '-');
-    const timeframe = '{{ current_timeframe or "1h" }}';
 
     try {
         const response = await fetch(`/patterns/chart/${symbol}/${timeframe}`);
         const data = await response.json();
 
-        if (data.candles) {
+        if (data.candles && data.candles.length > 0) {
             const candles = data.candles.map(c => ({
                 time: c.timestamp / 1000,
                 open: c.open,
@@ -210,30 +500,25 @@ document.addEventListener('DOMContentLoaded', async function() {
             }));
             candlestickSeries.setData(candles);
 
-            // Draw pattern zones
-            data.patterns.forEach(pattern => {
-                const color = pattern.direction === 'bullish'
-                    ? 'rgba(34, 197, 94, 0.3)'
-                    : 'rgba(239, 68, 68, 0.3)';
-
-                // Add horizontal lines for zone
-                candlestickSeries.createPriceLine({
-                    price: pattern.zone_high,
-                    color: pattern.direction === 'bullish' ? '#22c55e' : '#ef4444',
-                    lineWidth: 1,
-                    lineStyle: 2,
-                    axisLabelVisible: true,
-                    title: pattern.direction === 'bullish' ? 'FVG High' : 'FVG High',
-                });
-                candlestickSeries.createPriceLine({
-                    price: pattern.zone_low,
-                    color: pattern.direction === 'bullish' ? '#22c55e' : '#ef4444',
-                    lineWidth: 1,
-                    lineStyle: 2,
-                    axisLabelVisible: true,
-                    title: pattern.direction === 'bullish' ? 'FVG Low' : 'FVG Low',
-                });
+            const lastPrice = data.candles[data.candles.length - 1].close;
+            const precision = getPricePrecision(lastPrice);
+            candlestickSeries.applyOptions({
+                priceFormat: {
+                    type: 'price',
+                    precision: precision,
+                    minMove: Math.pow(10, -precision),
+                }
             });
+
+            // Store in Alpine component
+            const alpineComponent = Alpine.$data(document.querySelector('[x-data]'));
+            alpineComponent.chart = chart;
+            alpineComponent.candlestickSeries = candlestickSeries;
+            alpineComponent.chartData = data;
+            alpineComponent.precision = precision;
+
+            // Draw all patterns initially
+            alpineComponent.drawAllPatterns();
         }
 
         chart.timeScale().fitContent();
@@ -241,7 +526,6 @@ document.addEventListener('DOMContentLoaded', async function() {
         console.error('Failed to load chart data:', e);
     }
 
-    // Resize handler
     window.addEventListener('resize', () => {
         chart.applyOptions({ width: chartContainer.clientWidth });
     });

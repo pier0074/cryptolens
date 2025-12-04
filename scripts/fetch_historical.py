@@ -95,6 +95,8 @@ async def fetch_range_async(exchange, symbol: str, start_ts: int, end_ts: int,
     all_candles = []
     current_ts = start_ts
     batch_size = 1000
+    total_range = end_ts - start_ts
+    last_progress = -1
 
     while current_ts < end_ts:
         try:
@@ -110,7 +112,13 @@ async def fetch_range_async(exchange, symbol: str, start_ts: int, end_ts: int,
                 break
             current_ts = last_ts + 60000
 
-            if verbose and len(all_candles) % 10000 == 0:
+            # Show progress every 10%
+            if not verbose:
+                progress = int((current_ts - start_ts) / total_range * 10)
+                if progress > last_progress:
+                    print(".", end='', flush=True)
+                    last_progress = progress
+            elif len(all_candles) % 10000 == 0:
                 print(f"    Fetched {len(all_candles):,} candles...", end='\r')
 
         except Exception as e:
@@ -196,7 +204,8 @@ async def fill_gaps_for_symbol(exchange, symbol_name: str, symbol_id: int,
 
 
 async def fetch_symbol_full(exchange, symbol_name: str, symbol_id: int,
-                           days: int, verbose: bool = False) -> dict:
+                           days: int, verbose: bool = False, index: int = 0,
+                           total: int = 1) -> dict:
     """Fetch full history for a symbol."""
     from app import create_app
 
@@ -204,9 +213,11 @@ async def fetch_symbol_full(exchange, symbol_name: str, symbol_id: int,
     start_ts = int((now - timedelta(days=days)).timestamp() * 1000)
     end_ts = int(now.timestamp() * 1000)
 
+    # Always show progress (symbol name with index)
+    print(f"  [{index+1}/{total}] {symbol_name} ", end='', flush=True)
+
     if verbose:
-        print(f"\n  {symbol_name}:")
-        print(f"    Range: {days} days ({(end_ts - start_ts) // (60*60*1000*24)} days)")
+        print(f"\n    Range: {days} days")
 
     candles = await fetch_range_async(exchange, symbol_name, start_ts, end_ts, verbose)
 
@@ -217,7 +228,10 @@ async def fetch_symbol_full(exchange, symbol_name: str, symbol_id: int,
     with app.app_context():
         new_count = save_candles_batch(symbol_id, candles, verbose)
 
-    if verbose:
+    # Show result on same line (after dots)
+    if not verbose:
+        print(f" {len(candles):,} candles, {new_count:,} new", flush=True)
+    else:
         print(f"    Saved {new_count:,} new candles")
 
     return {'symbol': symbol_name, 'fetched': len(candles), 'new': new_count}
@@ -248,11 +262,10 @@ async def run_full_fetch(symbols: List[Tuple[str, int]], days: int, verbose: boo
 
     try:
         results = []
+        total = len(symbols)
         for i, (name, sid) in enumerate(symbols):
-            if verbose:
-                print(f"\n[{i+1}/{len(symbols)}] {name}")
-
-            result = await fetch_symbol_full(exchange, name, sid, days, verbose)
+            result = await fetch_symbol_full(exchange, name, sid, days, verbose,
+                                            index=i, total=total)
             results.append(result)
 
         return results
@@ -270,20 +283,24 @@ def aggregate_all_symbols(verbose: bool = False):
     with app.app_context():
         symbols = Symbol.query.filter_by(is_active=True).all()
 
-        if verbose:
-            print("\nAggregating to higher timeframes...")
+        print("\nAggregating to higher timeframes...", flush=True)
 
-        for sym in symbols:
+        total_candles = 0
+        for i, sym in enumerate(symbols):
             if verbose:
-                print(f"  {sym.symbol}...", end=' ')
+                print(f"  [{i+1}/{len(symbols)}] {sym.symbol}...", end=' ', flush=True)
             try:
                 results = aggregate_all_timeframes(sym.symbol)
+                totals = sum(results.values())
+                total_candles += totals
                 if verbose:
-                    totals = sum(results.values())
                     print(f"{totals:,} candles")
             except Exception as e:
                 if verbose:
                     print(f"ERROR: {e}")
+
+        if not verbose:
+            print(f"  {total_candles:,} candles aggregated", flush=True)
 
 
 def show_status():
@@ -359,6 +376,12 @@ def main():
     parser.add_argument('--no-aggregate', action='store_true', help='Skip aggregation')
     args = parser.parse_args()
 
+    # Immediate feedback
+    print(f"\n{'═'*60}")
+    print(f"  CryptoLens Historical Data Fetcher")
+    print(f"{'═'*60}")
+    print(f"  Loading...", flush=True)
+
     if args.status:
         show_status()
         return
@@ -371,7 +394,7 @@ def main():
             return
 
     # Get symbols
-    from app import create_app
+    from app import create_app, db
     from app.models import Symbol
     from app.config import Config
 
@@ -380,7 +403,7 @@ def main():
         symbols = Symbol.query.filter_by(is_active=True).all()
 
         if not symbols:
-            print("Initializing default symbols...")
+            print("  Initializing default symbols...", flush=True)
             for name in Config.SYMBOLS:
                 db.session.add(Symbol(symbol=name, exchange='binance'))
             db.session.commit()
@@ -390,13 +413,10 @@ def main():
 
     start_time = time.time()
 
-    print(f"\n{'═'*60}")
-    print(f"  CryptoLens Historical Data Fetcher")
-    print(f"{'═'*60}")
     print(f"  Mode: {'Gap fill' if args.gaps else 'Full fetch'}")
     print(f"  Symbols: {len(symbol_list)}")
     print(f"  Days: {args.days}")
-    print(f"{'═'*60}")
+    print(f"{'═'*60}", flush=True)
 
     if args.gaps:
         # Gap fill mode (for hourly cron)

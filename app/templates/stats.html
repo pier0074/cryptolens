@@ -65,9 +65,6 @@
                         <th class="px-4 py-3 text-left">Symbol</th>
                         <th class="px-4 py-3 text-right">Price</th>
                         <th class="px-4 py-3 text-right">24h</th>
-                        <th class="px-4 py-3 text-right">ATH</th>
-                        <th class="px-4 py-3 text-right">ATL</th>
-                        <th class="px-4 py-3 text-right">From ATH</th>
                         <th class="px-4 py-3 text-center">1m</th>
                         <th class="px-4 py-3 text-center">5m</th>
                         <th class="px-4 py-3 text-center">15m</th>
@@ -95,27 +92,6 @@
                                 <span class="{{ 'bullish' if stat.price_change_24h >= 0 else 'bearish' }}">
                                     {{ "+%.2f"|format(stat.price_change_24h) if stat.price_change_24h >= 0 else "%.2f"|format(stat.price_change_24h) }}%
                                 </span>
-                            {% else %}
-                                -
-                            {% endif %}
-                        </td>
-                        <td class="px-4 py-3 text-right font-mono text-green-400">
-                            {% if stat.all_time_high %}
-                                ${{ "{:,.4f}".format(stat.all_time_high) if stat.all_time_high < 1 else "{:,.2f}".format(stat.all_time_high) }}
-                            {% else %}
-                                -
-                            {% endif %}
-                        </td>
-                        <td class="px-4 py-3 text-right font-mono text-red-400">
-                            {% if stat.all_time_low %}
-                                ${{ "{:,.4f}".format(stat.all_time_low) if stat.all_time_low < 1 else "{:,.2f}".format(stat.all_time_low) }}
-                            {% else %}
-                                -
-                            {% endif %}
-                        </td>
-                        <td class="px-4 py-3 text-right">
-                            {% if stat.ath_distance is not none %}
-                                <span class="text-yellow-400">-{{ "%.1f"|format(stat.ath_distance) }}%</span>
                             {% else %}
                                 -
                             {% endif %}
@@ -189,8 +165,6 @@
             </div>
         </div>
         <div class="mt-4 text-sm text-muted">
-            <p><strong>ATH/ATL:</strong> All-Time High/Low within the data range in the database</p>
-            <p><strong>From ATH:</strong> Current price distance from All-Time High</p>
             <p><strong>Patterns:</strong> Active patterns / Total patterns detected</p>
         </div>
     </div>

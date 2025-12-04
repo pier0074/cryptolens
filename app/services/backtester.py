@@ -128,8 +128,9 @@ def simulate_single_trade(df: pd.DataFrame, entry_idx: int, pattern: Dict,
     Returns:
         Trade result or None
     """
-    zone_high = pattern['zone_high']
-    zone_low = pattern['zone_low']
+    # Convert numpy types to native Python types
+    zone_high = float(pattern['zone_high'])
+    zone_low = float(pattern['zone_low'])
     zone_size = zone_high - zone_low
     buffer = zone_size * 0.1
 
@@ -170,55 +171,55 @@ def simulate_single_trade(df: pd.DataFrame, entry_idx: int, pattern: Dict,
                 if candle['low'] <= stop_loss:
                     # Stop loss hit
                     return {
-                        'entry_price': entry,
-                        'exit_price': stop_loss,
+                        'entry_price': float(entry),
+                        'exit_price': float(stop_loss),
                         'direction': direction,
                         'result': 'loss',
-                        'rr_achieved': -1,
-                        'profit_pct': -abs((stop_loss - entry) / entry * 100),
+                        'rr_achieved': -1.0,
+                        'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
                         'entry_time': int(df.iloc[entry_candle]['timestamp']),
                         'exit_time': int(candle['timestamp']),
-                        'duration_candles': j - entry_candle
+                        'duration_candles': int(j - entry_candle)
                     }
                 elif candle['high'] >= take_profit:
                     # Take profit hit
                     return {
-                        'entry_price': entry,
-                        'exit_price': take_profit,
+                        'entry_price': float(entry),
+                        'exit_price': float(take_profit),
                         'direction': direction,
                         'result': 'win',
-                        'rr_achieved': rr_target,
-                        'profit_pct': abs((take_profit - entry) / entry * 100),
+                        'rr_achieved': float(rr_target),
+                        'profit_pct': float(abs((take_profit - entry) / entry * 100)),
                         'entry_time': int(df.iloc[entry_candle]['timestamp']),
                         'exit_time': int(candle['timestamp']),
-                        'duration_candles': j - entry_candle
+                        'duration_candles': int(j - entry_candle)
                     }
             else:  # short
                 if candle['high'] >= stop_loss:
                     # Stop loss hit
                     return {
-                        'entry_price': entry,
-                        'exit_price': stop_loss,
+                        'entry_price': float(entry),
+                        'exit_price': float(stop_loss),
                         'direction': direction,
                         'result': 'loss',
-                        'rr_achieved': -1,
-                        'profit_pct': -abs((stop_loss - entry) / entry * 100),
+                        'rr_achieved': -1.0,
+                        'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
                         'entry_time': int(df.iloc[entry_candle]['timestamp']),
                         'exit_time': int(candle['timestamp']),
-                        'duration_candles': j - entry_candle
+                        'duration_candles': int(j - entry_candle)
                     }
                 elif candle['low'] <= take_profit:
                     # Take profit hit
                     return {
-                        'entry_price': entry,
-                        'exit_price': take_profit,
+                        'entry_price': float(entry),
+                        'exit_price': float(take_profit),
                         'direction': direction,
                         'result': 'win',
-                        'rr_achieved': rr_target,
-                        'profit_pct': abs((take_profit - entry) / entry * 100),
+                        'rr_achieved': float(rr_target),
+                        'profit_pct': float(abs((take_profit - entry) / entry * 100)),
                         'entry_time': int(df.iloc[entry_candle]['timestamp']),
                         'exit_time': int(candle['timestamp']),
-                        'duration_candles': j - entry_candle
+                        'duration_candles': int(j - entry_candle)
                     }
 
     return None  # Trade didn't complete in the lookback period

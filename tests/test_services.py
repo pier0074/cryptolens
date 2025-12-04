@@ -163,11 +163,9 @@ class TestSchedulerService:
             from app.services.scheduler import get_scheduler_status
 
             status = get_scheduler_status()
-            assert status['running'] is False
             assert status['mode'] == 'cron'
-            assert 'scripts' in status
-            assert 'scan' in status['scripts']
-            assert 'cleanup' in status['scripts']
+            assert 'cron_setup' in status
+            assert 'operations' in status
 
     def test_start_scheduler_logs_warning(self, app):
         """Test start_scheduler returns None (cron-based now)"""

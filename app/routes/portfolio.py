@@ -52,6 +52,9 @@ def create():
 @portfolio_bp.route('/<int:portfolio_id>')
 def detail(portfolio_id):
     """Portfolio detail view with trades"""
+    from app.models import Candle
+    from sqlalchemy import func, and_
+
     portfolio = db.session.get(Portfolio, portfolio_id)
     if not portfolio:
         abort(404)
@@ -64,6 +67,43 @@ def detail(portfolio_id):
         trades_query = trades_query.filter_by(status=status_filter)
 
     trades = trades_query.order_by(Trade.created_at.desc()).limit(50).all()
+
+    # Get current prices for symbols in trades
+    trade_symbols = list(set(t.symbol for t in trades))
+    current_prices = {}
+
+    if trade_symbols:
+        # Get symbol IDs
+        symbols = Symbol.query.filter(Symbol.symbol.in_(trade_symbols)).all()
+        symbol_map = {s.symbol: s.id for s in symbols}
+        symbol_ids = list(symbol_map.values())
+
+        if symbol_ids:
+            # Get latest 1m candle for each symbol
+            latest_subq = db.session.query(
+                Candle.symbol_id,
+                func.max(Candle.timestamp).label('max_ts')
+            ).filter(
+                Candle.symbol_id.in_(symbol_ids),
+                Candle.timeframe == '1m'
+            ).group_by(Candle.symbol_id).subquery()
+
+            latest_candles = db.session.query(Candle).join(
+                latest_subq,
+                and_(
+                    Candle.symbol_id == latest_subq.c.symbol_id,
+                    Candle.timestamp == latest_subq.c.max_ts,
+                    Candle.timeframe == '1m'
+                )
+            ).all()
+
+            # Map symbol name to price
+            id_to_symbol = {v: k for k, v in symbol_map.items()}
+            current_prices = {id_to_symbol[c.symbol_id]: c.close for c in latest_candles}
+
+    # Attach current price to each trade
+    for trade in trades:
+        trade.current_price = current_prices.get(trade.symbol)
 
     # Calculate stats
     closed_trades = portfolio.trades.filter_by(status='closed').all()
@@ -124,6 +164,38 @@ def delete(portfolio_id):
 
 # ==================== TRADE CRUD ====================
 
+def _get_current_prices():
+    """Get current prices for all active symbols"""
+    from app.models import Candle
+    from sqlalchemy import func, and_
+
+    symbols = Symbol.query.filter_by(is_active=True).all()
+    symbol_ids = [s.id for s in symbols]
+
+    if not symbol_ids:
+        return {}
+
+    # Get latest 1m candle for each symbol
+    latest_subq = db.session.query(
+        Candle.symbol_id,
+        func.max(Candle.timestamp).label('max_ts')
+    ).filter(
+        Candle.symbol_id.in_(symbol_ids),
+        Candle.timeframe == '1m'
+    ).group_by(Candle.symbol_id).subquery()
+
+    latest_candles = db.session.query(Candle).join(
+        latest_subq,
+        and_(
+            Candle.symbol_id == latest_subq.c.symbol_id,
+            Candle.timestamp == latest_subq.c.max_ts,
+            Candle.timeframe == '1m'
+        )
+    ).all()
+
+    return {c.symbol_id: c.close for c in latest_candles}
+
+
 @portfolio_bp.route('/<int:portfolio_id>/trades/new', methods=['GET', 'POST'])
 def new_trade(portfolio_id):
     """Create a new trade"""
@@ -151,36 +223,50 @@ def new_trade(portfolio_id):
             take_profit=float(data.get('take_profit')) if data.get('take_profit') else None,
             risk_amount=risk_amount,
             risk_percent=risk_percent,
-            setup_notes=data.get('setup_notes')
+            setup_notes=data.get('setup_notes'),
+            lessons_learned=data.get('lessons_learned')
         )
         db.session.add(trade)
         db.session.commit()
 
         return redirect(url_for('portfolio.trade_detail', portfolio_id=portfolio_id, trade_id=trade.id))
 
-    # Get symbols for dropdown
+    # Get symbols and current prices
     symbols = Symbol.query.filter_by(is_active=True).all()
-    # Get available signals
-    signals = Signal.query.filter_by(status='pending').order_by(Signal.created_at.desc()).limit(20).all()
-    tags = TradeTag.query.all()
+    current_prices = _get_current_prices()
 
     return render_template('portfolio/trade_form.html',
                           portfolio=portfolio,
                           symbols=symbols,
-                          signals=signals,
-                          tags=tags,
-                          trade_moods=TRADE_MOODS,
+                          current_prices=current_prices,
+                          trade=None,
                           is_edit=False)
 
 
 @portfolio_bp.route('/<int:portfolio_id>/trades/<int:trade_id>')
 def trade_detail(portfolio_id, trade_id):
     """Trade detail view with journal entries"""
+    from app.models import Candle
+    from sqlalchemy import func, and_
+
     portfolio = db.session.get(Portfolio, portfolio_id)
     trade = db.session.get(Trade, trade_id)
 
     if not portfolio or not trade or trade.portfolio_id != portfolio_id:
         abort(404)
+
+    # Get current price for this symbol
+    current_price = None
+    symbol = Symbol.query.filter_by(symbol=trade.symbol).first()
+    if symbol:
+        latest_candle = Candle.query.filter_by(
+            symbol_id=symbol.id,
+            timeframe='1m'
+        ).order_by(Candle.timestamp.desc()).first()
+        if latest_candle:
+            current_price = latest_candle.close
+
+    trade.current_price = current_price
 
     journal_entries = trade.journal_entries.order_by(JournalEntry.created_at.desc()).all()
 
@@ -191,26 +277,99 @@ def trade_detail(portfolio_id, trade_id):
                           trade_moods=TRADE_MOODS)
 
 
-@portfolio_bp.route('/<int:portfolio_id>/trades/<int:trade_id>/close', methods=['POST'])
-def close_trade(portfolio_id, trade_id):
-    """Close an open trade"""
+@portfolio_bp.route('/<int:portfolio_id>/trades/<int:trade_id>/open', methods=['POST'])
+def open_trade(portfolio_id, trade_id):
+    """Open a pending trade"""
     portfolio = db.session.get(Portfolio, portfolio_id)
     trade = db.session.get(Trade, trade_id)
 
     if not portfolio or not trade or trade.portfolio_id != portfolio_id:
         abort(404)
 
+    if trade.status != 'pending':
+        abort(400)
+
     data = request.form
-    exit_price = float(data.get('exit_price'))
-    exit_notes = data.get('exit_notes')
-
-    trade.close(exit_price, exit_notes)
-
-    if data.get('lessons_learned'):
-        trade.lessons_learned = data.get('lessons_learned')
+    trade.entry_price = float(data.get('entry_price'))
+    trade.entry_quantity = float(data.get('entry_quantity'))
+    trade.status = 'open'
+    trade.entry_time = datetime.now(timezone.utc)
 
     db.session.commit()
 
+    return redirect(url_for('portfolio.trade_detail', portfolio_id=portfolio_id, trade_id=trade_id))
+
+
+@portfolio_bp.route('/<int:portfolio_id>/trades/<int:trade_id>/cancel', methods=['POST'])
+def cancel_trade(portfolio_id, trade_id):
+    """Cancel a pending trade"""
+    portfolio = db.session.get(Portfolio, portfolio_id)
+    trade = db.session.get(Trade, trade_id)
+
+    if not portfolio or not trade or trade.portfolio_id != portfolio_id:
+        abort(404)
+
+    if trade.status != 'pending':
+        abort(400)
+
+    trade.status = 'cancelled'
+    db.session.commit()
+
+    return redirect(url_for('portfolio.detail', portfolio_id=portfolio_id))
+
+
+@portfolio_bp.route('/<int:portfolio_id>/trades/<int:trade_id>/close', methods=['POST'])
+def close_trade(portfolio_id, trade_id):
+    """Close an open trade at specified price"""
+    portfolio = db.session.get(Portfolio, portfolio_id)
+    trade = db.session.get(Trade, trade_id)
+
+    if not portfolio or not trade or trade.portfolio_id != portfolio_id:
+        abort(404)
+
+    if trade.status != 'open':
+        abort(400)
+
+    data = request.form
+    exit_price = float(data.get('exit_price'))
+    reason = data.get('reason', 'Manual')
+
+    trade.close(exit_price, f"Closed: {reason}")
+
+    db.session.commit()
+
+    return redirect(url_for('portfolio.trade_detail', portfolio_id=portfolio_id, trade_id=trade_id))
+
+
+@portfolio_bp.route('/<int:portfolio_id>/trades/<int:trade_id>/close-market', methods=['POST'])
+def close_trade_market(portfolio_id, trade_id):
+    """Close an open trade at current market price"""
+    from app.models import Candle
+
+    portfolio = db.session.get(Portfolio, portfolio_id)
+    trade = db.session.get(Trade, trade_id)
+
+    if not portfolio or not trade or trade.portfolio_id != portfolio_id:
+        abort(404)
+
+    if trade.status != 'open':
+        abort(400)
+
+    # Get current market price
+    symbol = Symbol.query.filter_by(symbol=trade.symbol).first()
+    if symbol:
+        latest_candle = Candle.query.filter_by(
+            symbol_id=symbol.id,
+            timeframe='1m'
+        ).order_by(Candle.timestamp.desc()).first()
+
+        if latest_candle:
+            exit_price = latest_candle.close
+            trade.close(exit_price, "Closed at market price")
+            db.session.commit()
+            return redirect(url_for('portfolio.trade_detail', portfolio_id=portfolio_id, trade_id=trade_id))
+
+    # If we can't get market price, redirect back with error
     return redirect(url_for('portfolio.trade_detail', portfolio_id=portfolio_id, trade_id=trade_id))
 
 
@@ -235,18 +394,26 @@ def edit_trade(portfolio_id, trade_id):
         trade.setup_notes = data.get('setup_notes')
         trade.lessons_learned = data.get('lessons_learned')
 
+        # Update entry details if provided
+        if data.get('entry_price'):
+            trade.entry_price = float(data.get('entry_price'))
+        if data.get('entry_quantity'):
+            trade.entry_quantity = float(data.get('entry_quantity'))
+        if data.get('risk_percent'):
+            trade.risk_percent = float(data.get('risk_percent'))
+            trade.risk_amount = portfolio.current_balance * (trade.risk_percent / 100)
+
         db.session.commit()
         return redirect(url_for('portfolio.trade_detail', portfolio_id=portfolio_id, trade_id=trade_id))
 
     symbols = Symbol.query.filter_by(is_active=True).all()
-    tags = TradeTag.query.all()
+    current_prices = _get_current_prices()
 
     return render_template('portfolio/trade_form.html',
                           portfolio=portfolio,
                           trade=trade,
                           symbols=symbols,
-                          tags=tags,
-                          trade_moods=TRADE_MOODS,
+                          current_prices=current_prices,
                           is_edit=True)
 
 
@@ -367,6 +534,126 @@ def api_portfolio_trades(portfolio_id):
 
     trades = portfolio.trades.order_by(Trade.created_at.desc()).limit(100).all()
     return jsonify([t.to_dict() for t in trades])
+
+
+@portfolio_bp.route('/api/trade-from-pattern', methods=['POST'])
+def api_trade_from_pattern():
+    """Create a trade from a pattern with pre-filled data"""
+    from app.models import Pattern
+    from app.services.trading import get_trading_levels_for_pattern
+    from app.routes.patterns import get_candles_df
+
+    data = request.get_json()
+    pattern_id = data.get('pattern_id')
+    portfolio_id = data.get('portfolio_id')
+
+    if not pattern_id:
+        return jsonify({'error': 'pattern_id is required'}), 400
+
+    pattern = db.session.get(Pattern, pattern_id)
+    if not pattern:
+        return jsonify({'error': 'Pattern not found'}), 404
+
+    # Get or create default portfolio
+    if portfolio_id:
+        portfolio = db.session.get(Portfolio, portfolio_id)
+    else:
+        portfolio = Portfolio.query.filter_by(is_active=True).first()
+
+    if not portfolio:
+        # Create a default portfolio if none exists
+        portfolio = Portfolio(
+            name='Default Portfolio',
+            initial_balance=10000,
+            current_balance=10000,
+            currency='USDT'
+        )
+        db.session.add(portfolio)
+        db.session.commit()
+
+    # Get trading levels for this pattern
+    df = get_candles_df(pattern.symbol_id, pattern.timeframe)
+    levels = get_trading_levels_for_pattern(pattern, df)
+
+    # Create the trade with status 'pending' (user needs to confirm)
+    trade = Trade(
+        portfolio_id=portfolio.id,
+        symbol=pattern.symbol.symbol,
+        direction='long' if pattern.direction == 'bullish' else 'short',
+        timeframe=pattern.timeframe,
+        pattern_type=pattern.pattern_type,
+        entry_price=levels['entry'],
+        entry_quantity=0,  # User must set this
+        stop_loss=levels['stop_loss'],
+        take_profit=levels['take_profit_2'],  # Use TP2 as default
+        status='pending',
+        setup_notes=f"Auto-created from {pattern.pattern_type} pattern on {pattern.timeframe}"
+    )
+    db.session.add(trade)
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'trade_id': trade.id,
+        'portfolio_id': portfolio.id,
+        'redirect_url': f'/portfolio/{portfolio.id}/trades/{trade.id}/edit'
+    })
+
+
+@portfolio_bp.route('/api/trade-from-signal', methods=['POST'])
+def api_trade_from_signal():
+    """Create a trade from a signal with pre-filled data"""
+    data = request.get_json()
+    signal_id = data.get('signal_id')
+    portfolio_id = data.get('portfolio_id')
+
+    if not signal_id:
+        return jsonify({'error': 'signal_id is required'}), 400
+
+    signal = db.session.get(Signal, signal_id)
+    if not signal:
+        return jsonify({'error': 'Signal not found'}), 404
+
+    # Get or create default portfolio
+    if portfolio_id:
+        portfolio = db.session.get(Portfolio, portfolio_id)
+    else:
+        portfolio = Portfolio.query.filter_by(is_active=True).first()
+
+    if not portfolio:
+        portfolio = Portfolio(
+            name='Default Portfolio',
+            initial_balance=10000,
+            current_balance=10000,
+            currency='USDT'
+        )
+        db.session.add(portfolio)
+        db.session.commit()
+
+    # Create the trade with status 'pending'
+    trade = Trade(
+        portfolio_id=portfolio.id,
+        signal_id=signal.id,
+        symbol=signal.symbol.symbol,
+        direction=signal.direction,
+        timeframe=signal.pattern.timeframe if signal.pattern else None,
+        pattern_type=signal.pattern.pattern_type if signal.pattern else None,
+        entry_price=signal.entry_price,
+        entry_quantity=0,  # User must set this
+        stop_loss=signal.stop_loss,
+        take_profit=signal.take_profit_2,  # Use TP2 as default
+        status='pending',
+        setup_notes=f"Auto-created from {signal.direction} signal (confluence: {signal.confluence_score})"
+    )
+    db.session.add(trade)
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'trade_id': trade.id,
+        'portfolio_id': portfolio.id,
+        'redirect_url': f'/portfolio/{portfolio.id}/trades/{trade.id}/edit'
+    })
 
 
 @portfolio_bp.route('/api/portfolios/<int:portfolio_id>/stats')

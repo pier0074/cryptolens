@@ -9,75 +9,123 @@
         <h1 class="text-2xl font-bold">Trade Signals</h1>
 
         <div class="flex items-center space-x-4">
-            <a href="?status=pending" class="px-4 py-2 rounded text-sm {% if current_status == 'pending' %}bg-blue-600{% else %}bg-gray-700 hover:bg-gray-600{% endif %}">
-                Pending
-            </a>
-            <a href="?status=notified" class="px-4 py-2 rounded text-sm {% if current_status == 'notified' %}bg-blue-600{% else %}bg-gray-700 hover:bg-gray-600{% endif %}">
-                Notified
-            </a>
-            <a href="?status=" class="px-4 py-2 rounded text-sm {% if not current_status %}bg-blue-600{% else %}bg-gray-700 hover:bg-gray-600{% endif %}">
-                All
-            </a>
+            <!-- Symbol Search -->
+            <form method="GET" class="flex items-center space-x-2">
+                <input type="text" name="symbol" value="{{ current_symbol }}"
+                       placeholder="Search symbol..."
+                       class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm w-32"
+                       list="symbol-list">
+                <datalist id="symbol-list">
+                    {% for s in symbols %}
+                    <option value="{{ s.symbol }}">
+                    {% endfor %}
+                </datalist>
+                {% if current_direction %}
+                <input type="hidden" name="direction" value="{{ current_direction }}">
+                {% endif %}
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-3 py-2 rounded text-sm">
+                    Filter
+                </button>
+            </form>
+
+            <!-- Direction Filter -->
+            <div class="flex items-center space-x-2">
+                <a href="?{% if current_symbol %}symbol={{ current_symbol }}&{% endif %}direction=long"
+                   class="px-4 py-2 rounded text-sm {% if current_direction == 'long' %}bg-green-600{% else %}bg-gray-700 hover:bg-gray-600{% endif %}">
+                    Long
+                </a>
+                <a href="?{% if current_symbol %}symbol={{ current_symbol }}&{% endif %}direction=short"
+                   class="px-4 py-2 rounded text-sm {% if current_direction == 'short' %}bg-red-600{% else %}bg-gray-700 hover:bg-gray-600{% endif %}">
+                    Short
+                </a>
+                <a href="?{% if current_symbol %}symbol={{ current_symbol }}{% endif %}"
+                   class="px-4 py-2 rounded text-sm {% if not current_direction %}bg-blue-600{% else %}bg-gray-700 hover:bg-gray-600{% endif %}">
+                    All
+                </a>
+            </div>
         </div>
     </div>
 
     <!-- Signals Grid -->
     <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {% for signal in signals %}
-        <div class="bg-card rounded-lg p-4 border-l-4 {% if signal.direction == 'long' %}border-green-500{% else %}border-red-500{% endif %}">
+        <div class="bg-card rounded-lg p-4 border-l-4 {% if signal.direction == 'bullish' %}border-green-500{% else %}border-red-500{% endif %}">
             <div class="flex items-center justify-between mb-3">
-                <span class="font-bold text-lg">{{ signal.symbol_obj.symbol if signal.symbol_obj else 'Unknown' }}</span>
-                <span class="{% if signal.direction == 'long' %}bullish{% else %}bearish{% endif %} font-bold text-lg">
-                    {% if signal.direction == 'long' %}🟢 LONG{% else %}🔴 SHORT{% endif %}
+                <div>
+                    <span class="font-bold text-lg">{{ signal.symbol_obj.symbol if signal.symbol_obj else 'Unknown' }}</span>
+                    {% if signal.pattern_obj %}
+                    <span class="ml-2 px-2 py-0.5 rounded text-xs bg-gray-700">
+                        {{ signal.pattern_obj.pattern_type|replace('_', ' ')|title }}
+                    </span>
+                    {% endif %}
+                </div>
+                <span class="{% if signal.direction == 'bullish' %}bullish{% else %}bearish{% endif %} font-bold text-lg">
+                    {% if signal.direction == 'bullish' %}LONG{% else %}SHORT{% endif %}
                 </span>
             </div>
 
             <div class="space-y-2 text-sm">
                 <div class="flex justify-between">
                     <span class="text-muted">Entry:</span>
-                    <span class="font-mono">${{ '%.4f'|format(signal.entry_price) }}</span>
+                    <span class="font-mono">${{ signal.entry_price|price }}</span>
                 </div>
                 <div class="flex justify-between">
                     <span class="text-muted">Stop Loss:</span>
-                    <span class="font-mono text-red-400">${{ '%.4f'|format(signal.stop_loss) }}</span>
+                    <span class="font-mono text-red-400">${{ signal.stop_loss|price }}</span>
                 </div>
                 <div class="flex justify-between">
                     <span class="text-muted">TP1 (1:1):</span>
-                    <span class="font-mono text-green-400">${{ '%.4f'|format(signal.take_profit_1) }}</span>
+                    <span class="font-mono text-green-400">${{ signal.take_profit_1|price }}</span>
                 </div>
                 {% if signal.take_profit_2 %}
                 <div class="flex justify-between">
                     <span class="text-muted">TP2 (1:2):</span>
-                    <span class="font-mono text-green-400">${{ '%.4f'|format(signal.take_profit_2) }}</span>
+                    <span class="font-mono text-green-400">${{ signal.take_profit_2|price }}</span>
                 </div>
                 {% endif %}
                 {% if signal.take_profit_3 %}
                 <div class="flex justify-between">
                     <span class="text-muted">TP3 (1:{{ '%.0f'|format(signal.risk_reward) }}):</span>
-                    <span class="font-mono text-green-400">${{ '%.4f'|format(signal.take_profit_3) }}</span>
+                    <span class="font-mono text-green-400">${{ signal.take_profit_3|price }}</span>
                 </div>
                 {% endif %}
             </div>
 
-            <div class="mt-4 pt-3 border-t border-gray-700 flex items-center justify-between">
-                <div class="flex items-center space-x-2">
-                    <span class="text-muted text-xs">Confluence:</span>
-                    <span class="font-bold">{{ signal.confluence_score }}/6</span>
+            <div class="mt-4 pt-3 border-t border-gray-700">
+                <!-- Confluence Info -->
+                <div class="flex items-center justify-between mb-2">
+                    <div class="flex items-center space-x-2">
+                        <span class="text-muted text-xs">TFs aligned:</span>
+                        <span class="font-bold text-sm">{{ signal.confluence_score }}</span>
+                        {% if signal.timeframes_aligned %}
+                        <span class="text-xs text-gray-500">
+                            ({{ signal.timeframes_aligned|replace('[', '')|replace(']', '')|replace('"', '') }})
+                        </span>
+                        {% endif %}
+                    </div>
                 </div>
-                <div class="flex items-center space-x-2">
-                    <span class="px-2 py-1 rounded text-xs
-                        {% if signal.status == 'notified' %}bg-green-900 text-green-200
-                        {% elif signal.status == 'filled' %}bg-blue-900 text-blue-200
-                        {% elif signal.status == 'stopped' %}bg-red-900 text-red-200
-                        {% elif signal.status == 'tp_hit' %}bg-yellow-900 text-yellow-200
-                        {% else %}bg-gray-700{% endif %}">
-                        {{ signal.status }}
-                    </span>
-                </div>
-            </div>
 
-            <div class="mt-3 text-xs text-muted">
-                {{ signal.created_at.strftime('%Y-%m-%d %H:%M') if signal.created_at else '' }}
+                <div class="flex items-center justify-between">
+                    <span class="text-xs text-muted">
+                        {{ signal.created_at.strftime('%Y-%m-%d %H:%M') if signal.created_at else '' }}
+                    </span>
+                    <div class="flex items-center space-x-2">
+                        {% if signal.status in ['pending', 'notified'] %}
+                        <button onclick="createTradeFromSignal({{ signal.id }})"
+                                class="px-2 py-1 text-xs bg-green-700 hover:bg-green-600 rounded">
+                            Trade
+                        </button>
+                        {% endif %}
+                        <span class="px-2 py-1 rounded text-xs
+                            {% if signal.status == 'notified' %}bg-green-900 text-green-200
+                            {% elif signal.status == 'filled' %}bg-blue-900 text-blue-200
+                            {% elif signal.status == 'stopped' %}bg-red-900 text-red-200
+                            {% elif signal.status == 'tp_hit' %}bg-yellow-900 text-yellow-200
+                            {% else %}bg-gray-700{% endif %}">
+                            {{ signal.status }}
+                        </span>
+                    </div>
+                </div>
             </div>
         </div>
         {% else %}
@@ -88,4 +136,29 @@
         {% endfor %}
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+async function createTradeFromSignal(signalId) {
+    try {
+        const response = await fetch('/portfolio/api/trade-from-signal', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken()
+            },
+            body: JSON.stringify({ signal_id: signalId })
+        });
+        const data = await response.json();
+        if (data.success) {
+            window.location.href = data.redirect_url;
+        } else {
+            alert('Error: ' + (data.error || 'Failed to create trade'));
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
+    }
+}
+</script>
 {% endblock %}

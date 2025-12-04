@@ -64,13 +64,14 @@ def send_notification(topic: str, title: str, message: str, priority: int = 3,
     return False
 
 
-def notify_signal(signal: Signal, test_mode: bool = False) -> bool:
+def notify_signal(signal: Signal, test_mode: bool = False, current_price: float = None) -> bool:
     """
     Send notification for a trading signal
 
     Args:
         signal: The signal to notify about
         test_mode: If True, adds 'Test' to tags and title
+        current_price: Current market price for % calculation
 
     Returns:
         True if successful
@@ -95,17 +96,12 @@ def notify_signal(signal: Signal, test_mode: bool = False) -> bool:
     pattern_tf = ''
     if pattern:
         pattern_types = {
-            'imbalance': 'FVG (Fair Value Gap)',
-            'order_block': 'Order Block',
-            'liquidity_sweep': 'Liquidity Sweep'
-        }
-        pattern_abbrevs = {
             'imbalance': 'FVG',
             'order_block': 'OB',
             'liquidity_sweep': 'LS'
         }
         pattern_type = pattern_types.get(pattern.pattern_type, pattern.pattern_type)
-        pattern_abbrev = pattern_abbrevs.get(pattern.pattern_type, 'SIG')
+        pattern_abbrev = pattern_type
         pattern_tf = pattern.timeframe
 
     # Get aligned timeframes
@@ -121,9 +117,9 @@ def notify_signal(signal: Signal, test_mode: bool = False) -> bool:
     direction_emoji = "🟢" if signal.direction == 'long' else "🔴"
     direction_text = "LONG" if signal.direction == 'long' else "SHORT"
 
-    # Title: emoji + symbol (with Test prefix if test_mode)
+    # Title: emoji + direction + symbol + pattern + TF
     test_prefix = "[TEST] " if test_mode else ""
-    title = f"{test_prefix}{direction_emoji} {direction_text}: {symbol_name}"
+    title = f"{test_prefix}{direction_emoji} {direction_text}: {symbol_name} | {pattern_type} [{pattern_tf}]"
 
     # Extract base symbol (e.g., BTC from BTC/USDT)
     base_symbol = symbol_name.split('/')[0] if '/' in symbol_name else symbol_name
@@ -145,22 +141,28 @@ def notify_signal(signal: Signal, test_mode: bool = False) -> bool:
     sl = signal.stop_loss
     tp1 = signal.take_profit_1
 
-    sl_pct = abs((sl - entry) / entry * 100) if entry > 0 else 0
-    tp1_pct = abs((tp1 - entry) / entry * 100) if entry > 0 else 0
+    # Entry % from current price
+    entry_pct = ""
+    if current_price and current_price > 0:
+        pct_diff = ((entry - current_price) / current_price) * 100
+        entry_pct = f" ({pct_diff:+.2f}%)"
 
-    # R:R in European betting format (percentage return)
-    # R:R of 3.0 means 300% return on risk
-    rr_percent = signal.risk_reward * 100
+    # Calculate % from entry (with correct signs for long/short)
+    # SL: For long it's negative (price down), for short it's positive (price up)
+    # TP: For long it's positive (price up), for short it's negative (price down)
+    sl_pct = ((sl - entry) / entry * 100) if entry > 0 else 0
+    tp1_pct = ((tp1 - entry) / entry * 100) if entry > 0 else 0
+
+    # Build message
+    current_price_line = f"Current: ${current_price:,.4f}\n" if current_price else ""
 
     message = (
         f"{timestamp_str}\n"
-        f"Symbol: {symbol_name}\n"
-        f"Direction: {direction_text}\n"
-        f"Pattern: {pattern_type}\n"
-        f"Limit Entry: ${entry:,.4f}\n"
-        f"Stop Loss: ${sl:,.4f} ({sl_pct:.2f}%)\n"
-        f"TP1: ${tp1:,.4f} ({tp1_pct:.2f}%)\n"
-        f"R:R: {signal.risk_reward:.1f} ({rr_percent:.0f}%)\n"
+        f"{current_price_line}"
+        f"Limit Entry: ${entry:,.4f}{entry_pct}\n"
+        f"Stop Loss: ${sl:,.4f} ({sl_pct:+.2f}%)\n"
+        f"TP1: ${tp1:,.4f} ({tp1_pct:+.2f}%)\n"
+        f"R:R: {signal.risk_reward:.1f}\n"
         f"Confluence: {signal.confluence_score}/6 {tfs_bracketed}"
     )
 
@@ -187,9 +189,9 @@ def notify_signal(signal: Signal, test_mode: bool = False) -> bool:
         signal.status = 'notified'
         signal.notified_at = datetime.now(timezone.utc)
         log_notify(
-            f"Sent {direction_text} signal notification: Entry ${entry:,.4f}, SL ${sl:,.4f}",
+            f"Sent {direction_text} signal: {pattern_type} [{pattern_tf}] Entry ${entry:,.4f}{entry_pct}",
             symbol=symbol_name,
-            details={'direction': direction_text, 'entry': entry, 'stop_loss': sl, 'confluence': signal.confluence_score}
+            details={'direction': direction_text, 'pattern': pattern_type, 'tf': pattern_tf, 'entry': entry, 'confluence': signal.confluence_score}
         )
     else:
         log_notify(f"Failed to send notification", symbol=symbol_name, level='ERROR')

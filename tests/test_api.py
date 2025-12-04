@@ -416,7 +416,8 @@ class TestSchedulerEndpoint:
             response = client.get('/api/scheduler/status')
             assert response.status_code == 200
             data = response.json
-            assert 'running' in data
+            assert data['mode'] == 'cron'
+            assert 'cron_setup' in data
 
 
 class TestJSONResponses:

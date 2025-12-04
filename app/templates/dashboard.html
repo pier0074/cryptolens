@@ -73,14 +73,21 @@
             </thead>
             <tbody>
                 {% for symbol in symbols %}
+                {# Pre-compute all pattern counts for this symbol #}
+                {% set all_bullish = namespace(value=0) %}
+                {% set all_bearish = namespace(value=0) %}
+                {% set fvg_bullish = namespace(value=0) %}
+                {% set fvg_bearish = namespace(value=0) %}
+                {% set ob_bullish = namespace(value=0) %}
+                {% set ob_bearish = namespace(value=0) %}
+                {% set sweep_bullish = namespace(value=0) %}
+                {% set sweep_bearish = namespace(value=0) %}
                 <tr class="border-b border-gray-800 hover:bg-gray-800/50">
                     <td class="p-3 font-medium">
                         <a href="/patterns?symbol={{ symbol.symbol }}" class="hover:text-blue-400">
                             {{ symbol.symbol }}
                         </a>
                     </td>
-                    {% set bullish_count = namespace(value=0) %}
-                    {% set bearish_count = namespace(value=0) %}
                     {% for tf in timeframes %}
                     {% set cell_data = matrix.get(symbol.symbol, {}).get(tf) %}
                     <td class="text-center p-3">
@@ -92,10 +99,17 @@
                                  class="pattern-cell inline-block w-8 h-8 rounded cursor-pointer {% if pattern.direction == 'bullish' %}bg-green-500/80{% else %}bg-red-500/80{% endif %} {% if cell_data.count > 1 %}border-2 border-yellow-500{% endif %}"
                                  title="{{ pattern.direction|capitalize }} {{ ptype.replace('_', ' ')|title }}&#10;Zone: ${{ '%.2f'|format(pattern.zone_low) }} - ${{ '%.2f'|format(pattern.zone_high) }}">
                             </div>
+                            {# Count patterns by type and direction #}
                             {% if pattern.direction == 'bullish' %}
-                                {% set bullish_count.value = bullish_count.value + 1 %}
+                                {% set all_bullish.value = all_bullish.value + 1 %}
+                                {% if ptype == 'imbalance' %}{% set fvg_bullish.value = fvg_bullish.value + 1 %}{% endif %}
+                                {% if ptype == 'order_block' %}{% set ob_bullish.value = ob_bullish.value + 1 %}{% endif %}
+                                {% if ptype == 'liquidity_sweep' %}{% set sweep_bullish.value = sweep_bullish.value + 1 %}{% endif %}
                             {% else %}
-                                {% set bearish_count.value = bearish_count.value + 1 %}
+                                {% set all_bearish.value = all_bearish.value + 1 %}
+                                {% if ptype == 'imbalance' %}{% set fvg_bearish.value = fvg_bearish.value + 1 %}{% endif %}
+                                {% if ptype == 'order_block' %}{% set ob_bearish.value = ob_bearish.value + 1 %}{% endif %}
+                                {% if ptype == 'liquidity_sweep' %}{% set sweep_bearish.value = sweep_bearish.value + 1 %}{% endif %}
                             {% endif %}
                             {% endfor %}
                             {# Show empty when filtered pattern not present #}
@@ -112,14 +126,46 @@
                     </td>
                     {% endfor %}
                     <td class="text-center p-3">
-                        {% set total = bullish_count.value + bearish_count.value %}
-                        {% if bullish_count.value > bearish_count.value and bullish_count.value >= 2 %}
-                            <span class="bullish font-bold">🟢 {{ bullish_count.value }}/{{ timeframes|length }}</span>
-                        {% elif bearish_count.value > bullish_count.value and bearish_count.value >= 2 %}
-                            <span class="bearish font-bold">🔴 {{ bearish_count.value }}/{{ timeframes|length }}</span>
-                        {% else %}
-                            <span class="neutral">-</span>
-                        {% endif %}
+                        {# All patterns: X/18 (3 types × 6 TF) #}
+                        <span x-show="selectedPattern === 'all'" x-cloak>
+                            {% if all_bullish.value > all_bearish.value and all_bullish.value >= 2 %}
+                                <span class="bullish font-bold">🟢 {{ all_bullish.value }}/{{ timeframes|length * 3 }}</span>
+                            {% elif all_bearish.value > all_bullish.value and all_bearish.value >= 2 %}
+                                <span class="bearish font-bold">🔴 {{ all_bearish.value }}/{{ timeframes|length * 3 }}</span>
+                            {% else %}
+                                <span class="neutral">-</span>
+                            {% endif %}
+                        </span>
+                        {# FVG only: X/6 #}
+                        <span x-show="selectedPattern === 'imbalance'" x-cloak>
+                            {% if fvg_bullish.value > fvg_bearish.value and fvg_bullish.value >= 2 %}
+                                <span class="bullish font-bold">🟢 {{ fvg_bullish.value }}/{{ timeframes|length }}</span>
+                            {% elif fvg_bearish.value > fvg_bullish.value and fvg_bearish.value >= 2 %}
+                                <span class="bearish font-bold">🔴 {{ fvg_bearish.value }}/{{ timeframes|length }}</span>
+                            {% else %}
+                                <span class="neutral">-</span>
+                            {% endif %}
+                        </span>
+                        {# Order Block only: X/6 #}
+                        <span x-show="selectedPattern === 'order_block'" x-cloak>
+                            {% if ob_bullish.value > ob_bearish.value and ob_bullish.value >= 2 %}
+                                <span class="bullish font-bold">🟢 {{ ob_bullish.value }}/{{ timeframes|length }}</span>
+                            {% elif ob_bearish.value > ob_bullish.value and ob_bearish.value >= 2 %}
+                                <span class="bearish font-bold">🔴 {{ ob_bearish.value }}/{{ timeframes|length }}</span>
+                            {% else %}
+                                <span class="neutral">-</span>
+                            {% endif %}
+                        </span>
+                        {# Liquidity Sweep only: X/6 #}
+                        <span x-show="selectedPattern === 'liquidity_sweep'" x-cloak>
+                            {% if sweep_bullish.value > sweep_bearish.value and sweep_bullish.value >= 2 %}
+                                <span class="bullish font-bold">🟢 {{ sweep_bullish.value }}/{{ timeframes|length }}</span>
+                            {% elif sweep_bearish.value > sweep_bullish.value and sweep_bearish.value >= 2 %}
+                                <span class="bearish font-bold">🔴 {{ sweep_bearish.value }}/{{ timeframes|length }}</span>
+                            {% else %}
+                                <span class="neutral">-</span>
+                            {% endif %}
+                        </span>
                     </td>
                 </tr>
                 {% endfor %}

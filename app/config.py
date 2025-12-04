@@ -44,7 +44,8 @@ class Config:
     ]
 
     # Timeframes
-    TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
+    TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']  # All timeframes (for UI)
+    PATTERN_TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d']  # For pattern detection (1m too noisy)
 
     # Exchange (binance has better rate limits and 1000 candles/request)
     EXCHANGE = 'binance'

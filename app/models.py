@@ -90,10 +90,12 @@ class Candle(db.Model):
     low = db.Column(db.Float, nullable=False)
     close = db.Column(db.Float, nullable=False)
     volume = db.Column(db.Float, nullable=False)
+    verified_at = db.Column(db.Integer, nullable=True)  # Timestamp when health check passed (ms)
 
     __table_args__ = (
         db.UniqueConstraint('symbol_id', 'timeframe', 'timestamp', name='uix_candle'),
         db.Index('idx_candle_lookup', 'symbol_id', 'timeframe', 'timestamp'),
+        db.Index('idx_candle_unverified', 'symbol_id', 'timeframe', 'verified_at'),
     )
 
     def __repr__(self):
@@ -106,7 +108,8 @@ class Candle(db.Model):
             'high': self.high,
             'low': self.low,
             'close': self.close,
-            'volume': self.volume
+            'volume': self.volume,
+            'verified_at': self.verified_at
         }
 
 
@@ -336,7 +339,7 @@ class Backtest(db.Model):
 TRADE_MOODS = ['confident', 'neutral', 'fearful', 'greedy', 'fomo', 'revenge']
 
 # Trade status options
-TRADE_STATUSES = ['open', 'closed', 'cancelled']
+TRADE_STATUSES = ['pending', 'open', 'closed', 'cancelled']
 
 
 class Portfolio(db.Model):

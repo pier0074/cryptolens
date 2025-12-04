@@ -1,13 +1,20 @@
 #!/usr/bin/env python
 """
-Real-time Candle Fetcher with Immediate Pattern Detection
+Real-time Candle Fetcher with Pattern Detection
 
-Event-driven architecture:
-1. Fetch all symbols in parallel (async)
-2. As each symbol completes → immediately aggregate → detect patterns → notify
-3. First symbol to complete gets scanned first (no waiting for others)
+Simple, consistent flow:
+1. Check last candle timestamp in DB
+2. Fetch all candles from there to now
+3. Save new candles
+4. Aggregate ALL higher timeframes
+5. Detect patterns on all fetched candles
+6. Update pattern status
+7. Generate signals
+8. Expire old patterns
+9. Notify
 
-Run via cron: * * * * * (every minute)
+Cron setup:
+  * * * * * cd /path && venv/bin/python scripts/fetch.py
 """
 import sys
 import os
@@ -18,48 +25,40 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import ccxt.async_support as ccxt_async
 from datetime import datetime, timezone
 
+# All timeframes to aggregate (always, regardless of current time)
+ALL_TIMEFRAMES = ['5m', '15m', '30m', '1h', '2h', '4h', '1d']
 
-def get_timeframes_to_aggregate():
-    """Determine which timeframes need aggregation based on current time."""
-    now = datetime.now(timezone.utc)
-    minute = now.minute
-    hour = now.hour
 
-    timeframes = []  # 1m doesn't need aggregation
+def get_last_candle_timestamp(app, symbol_name):
+    """Get the timestamp of the last 1m candle for a symbol."""
+    from app.models import Symbol, Candle
+    from sqlalchemy import func
 
-    if minute % 5 == 0:
-        timeframes.append('5m')
-    if minute % 15 == 0:
-        timeframes.append('15m')
-    if minute % 30 == 0:
-        timeframes.append('30m')
-    if minute == 0:
-        timeframes.append('1h')
-        if hour % 2 == 0:
-            timeframes.append('2h')
-        if hour % 4 == 0:
-            timeframes.append('4h')
-    if hour == 0 and minute == 0:
-        timeframes.append('1d')
-
-    return timeframes
+    with app.app_context():
+        sym = Symbol.query.filter_by(symbol=symbol_name).first()
+        if not sym:
+            return None
+        return Candle.query.filter_by(
+            symbol_id=sym.id,
+            timeframe='1m'
+        ).with_entities(func.max(Candle.timestamp)).scalar()
 
 
 def process_symbol(symbol_name, ohlcv, app, verbose=False):
     """
     Process a single symbol after fetch:
     1. Save candles to DB
-    2. Aggregate to higher timeframes
-    3. Detect patterns
-    4. Generate signals if needed
-
-    This runs synchronously per symbol for SQLite safety.
+    2. Aggregate ALL higher timeframes
+    3. Detect patterns on all fetched candles
+    4. Update pattern status
     """
+    import time as _time
     from app.models import Symbol, Candle
-    from app.services.aggregator import aggregate_candles
+    from app.services.aggregator import aggregate_candles_realtime
     from app.services.patterns import get_all_detectors
     from app import db
 
+    _t0 = _time.time()
     with app.app_context():
         # Get symbol
         sym = Symbol.query.filter_by(symbol=symbol_name).first()
@@ -93,24 +92,31 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
         if new_count > 0:
             db.session.commit()
 
-        # 2. Aggregate to higher timeframes
-        timeframes_to_agg = get_timeframes_to_aggregate()
-        for tf in timeframes_to_agg:
+        # 2. Aggregate ALL higher timeframes (always)
+        for tf in ALL_TIMEFRAMES:
             try:
-                aggregate_candles(symbol_name, '1m', tf)
+                aggregate_candles_realtime(symbol_name, '1m', tf)
             except Exception:
                 pass
 
-        # 3. Detect patterns (only if we have new data)
+        # 3. Detect patterns on all timeframes
+        # Scan limit = number of candles fetched + context buffer
         patterns_found = 0
         if new_count > 0:
             detectors = get_all_detectors()
-            timeframes_to_scan = ['1m'] + timeframes_to_agg
+            scan_limit = len(ohlcv) + 50  # Fetched candles + context
 
-            for tf in timeframes_to_scan:
+            for tf in ['1m'] + ALL_TIMEFRAMES:
+                # Scale limit for higher timeframes
+                tf_multiplier = {
+                    '1m': 1, '5m': 5, '15m': 15, '30m': 30,
+                    '1h': 60, '2h': 120, '4h': 240, '1d': 1440
+                }.get(tf, 1)
+                tf_limit = max(50, scan_limit // tf_multiplier + 10)
+
                 for detector in detectors:
                     try:
-                        patterns = detector.detect(symbol_name, tf)
+                        patterns = detector.detect(symbol_name, tf, limit=tf_limit)
                         if patterns:
                             patterns_found += len(patterns)
                     except Exception:
@@ -119,34 +125,63 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
         # 4. Update pattern status with current price
         if ohlcv:
             current_price = ohlcv[-1][4]  # close price
-            for detector in get_all_detectors():
+            detectors = get_all_detectors()
+            for detector in detectors:
                 if hasattr(detector, 'update_pattern_status'):
-                    for tf in ['1m'] + timeframes_to_agg:
+                    for tf in ['1m'] + ALL_TIMEFRAMES:
                         try:
                             detector.update_pattern_status(symbol_name, tf, current_price)
                         except Exception:
                             pass
 
+        _elapsed = _time.time() - _t0
         if verbose and (new_count > 0 or patterns_found > 0):
-            print(f"  {symbol_name}: {new_count} candles, {patterns_found} patterns")
+            print(f"  {symbol_name}: {new_count} candles, {patterns_found} patterns ({_elapsed:.1f}s)")
 
         return {
             'symbol': symbol_name,
             'new': new_count,
-            'patterns': patterns_found
+            'patterns': patterns_found,
+            'time': _elapsed
         }
 
 
 async def fetch_and_process(exchange, symbol, app, verbose=False):
-    """Fetch a symbol and immediately process it."""
+    """Fetch candles from last timestamp to now, then process."""
     try:
-        # Fetch latest candles
-        ohlcv = await exchange.fetch_ohlcv(symbol, '1m', limit=5)
+        # Get last candle timestamp
+        last_ts = get_last_candle_timestamp(app, symbol)
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+        if last_ts:
+            gap_minutes = (now_ms - last_ts) // 60000
+            if verbose and gap_minutes > 10:
+                print(f"  {symbol}: Fetching {gap_minutes} min gap...")
+
+            # Fetch in batches of 1000 (Binance max) until caught up
+            all_ohlcv = []
+            since = last_ts + 60000  # Start from next minute
+
+            while since < now_ms:
+                batch = await exchange.fetch_ohlcv(symbol, '1m', since=since, limit=1000)
+                if not batch:
+                    break
+                all_ohlcv.extend(batch)
+                # Move to next batch (last candle timestamp + 1 min)
+                since = batch[-1][0] + 60000
+                # Small delay to respect rate limits on large gaps
+                if len(batch) == 1000:
+                    await asyncio.sleep(0.1)
+
+            ohlcv = all_ohlcv
+        else:
+            # No data yet - fetch initial history
+            ohlcv = await exchange.fetch_ohlcv(symbol, '1m', limit=500)
+            if verbose:
+                print(f"  {symbol}: Initial fetch (500 candles)...")
 
         if ohlcv:
-            # Process immediately (sync, but per-symbol)
-            result = process_symbol(symbol, ohlcv, app, verbose)
-            return result
+            return process_symbol(symbol, ohlcv, app, verbose)
         return {'symbol': symbol, 'new': 0, 'patterns': 0}
 
     except Exception as e:
@@ -163,15 +198,11 @@ async def run_fetch_cycle(symbols, app, verbose=False):
     })
 
     try:
-        # Create tasks for all symbols
         tasks = [fetch_and_process(exchange, s, app, verbose) for s in symbols]
-
-        # Process as each completes (not waiting for all)
         results = []
         for coro in asyncio.as_completed(tasks):
             result = await coro
             results.append(result)
-
         return results
     finally:
         await exchange.close()
@@ -193,15 +224,48 @@ def generate_signals_batch(app, verbose=False):
             return {'signals_generated': 0}
 
 
+def expire_old_patterns(app, verbose=False):
+    """Mark expired patterns based on timeframe-specific expiry."""
+    from app.models import Pattern
+    from app.config import Config
+    from app import db
+
+    with app.app_context():
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        active_patterns = Pattern.query.filter_by(status='active').all()
+
+        expired_count = 0
+        for pattern in active_patterns:
+            expiry_hours = Config.PATTERN_EXPIRY_HOURS.get(
+                pattern.timeframe,
+                Config.DEFAULT_PATTERN_EXPIRY_HOURS
+            )
+            expiry_ms = expiry_hours * 60 * 60 * 1000
+            expires_at = pattern.detected_at + expiry_ms
+
+            if now_ms > expires_at:
+                pattern.status = 'expired'
+                expired_count += 1
+
+        if expired_count > 0:
+            db.session.commit()
+            if verbose:
+                print(f"  Expired {expired_count} old patterns")
+
+        return expired_count
+
+
 def main():
     import argparse
-    parser = argparse.ArgumentParser(description='Real-time candle fetcher with pattern detection')
+    parser = argparse.ArgumentParser(description='Candle fetcher with pattern detection')
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
     args = parser.parse_args()
 
+    ts = datetime.now(timezone.utc).strftime('%H:%M:%S')
+    print(f"[{ts}] Fetching...", end=' ', flush=True)
+
     start_time = time.time()
 
-    # Get active symbols
     from app import create_app
     from app.models import Symbol
 
@@ -214,14 +278,16 @@ def main():
         return
 
     if args.verbose:
-        print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Fetching {len(symbols)} symbols...")
-        print(f"  Timeframes to aggregate: {get_timeframes_to_aggregate() or ['none (not on boundary)']}")
+        print(f"\n  {len(symbols)} symbols")
 
-    # Run async fetch cycle
+    # 1. Fetch and process all symbols (parallel)
     results = asyncio.run(run_fetch_cycle(symbols, app, args.verbose))
 
-    # Generate signals (batch, once per cycle)
+    # 2. Generate signals
     signal_result = generate_signals_batch(app, args.verbose)
+
+    # 3. Expire old patterns
+    expired = expire_old_patterns(app, args.verbose)
 
     elapsed = time.time() - start_time
 
@@ -230,10 +296,12 @@ def main():
     total_patterns = sum(r.get('patterns', 0) for r in results)
     total_signals = signal_result.get('signals_generated', 0)
 
-    if args.verbose or total_new > 0 or total_patterns > 0 or total_signals > 0:
+    if args.verbose:
         print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] "
               f"new={total_new} patterns={total_patterns} signals={total_signals} "
               f"time={elapsed:.1f}s")
+    else:
+        print(f"done. {total_new} candles, {total_patterns} patterns, {total_signals} signals ({elapsed:.1f}s)")
 
 
 if __name__ == '__main__':

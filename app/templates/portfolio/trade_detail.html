@@ -12,12 +12,17 @@
                     &larr;
                 </a>
                 <h1 class="text-2xl font-bold">{{ trade.symbol }}</h1>
+                {% if trade.current_price %}
+                <span class="text-lg font-mono text-blue-400">${{ trade.current_price|price }}</span>
+                {% endif %}
                 <span class="px-3 py-1 rounded text-sm {% if trade.direction == 'long' %}bg-green-900 text-green-200{% else %}bg-red-900 text-red-200{% endif %}">
                     {{ trade.direction|upper }}
                 </span>
                 <span class="px-3 py-1 rounded text-sm
-                    {% if trade.status == 'open' %}bg-blue-900 text-blue-200
+                    {% if trade.status == 'pending' %}bg-yellow-900 text-yellow-200
+                    {% elif trade.status == 'open' %}bg-blue-900 text-blue-200
                     {% elif trade.status == 'closed' %}bg-green-900 text-green-200
+                    {% elif trade.status == 'cancelled' %}bg-gray-700 text-gray-400
                     {% else %}bg-gray-700{% endif %}">
                     {{ trade.status|upper }}
                 </span>
@@ -47,9 +52,7 @@
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div>
                         <div class="text-muted text-xs uppercase">Entry Price</div>
-                        <div class="text-lg font-medium mt-1 font-mono">
-                            ${{ '%.6f'|format(trade.entry_price) if trade.entry_price < 0.01 else '%.4f'|format(trade.entry_price) if trade.entry_price < 1 else '%.2f'|format(trade.entry_price) }}
-                        </div>
+                        <div class="text-lg font-medium mt-1 font-mono">${{ trade.entry_price|price }}</div>
                     </div>
                     <div>
                         <div class="text-muted text-xs uppercase">Quantity</div>
@@ -73,17 +76,13 @@
                     <div>
                         <div class="text-muted text-xs uppercase">Stop Loss</div>
                         <div class="text-lg font-medium mt-1 font-mono text-red-400">
-                            {% if trade.stop_loss %}
-                            ${{ '%.6f'|format(trade.stop_loss) if trade.stop_loss < 0.01 else '%.4f'|format(trade.stop_loss) if trade.stop_loss < 1 else '%.2f'|format(trade.stop_loss) }}
-                            {% else %}-{% endif %}
+                            {% if trade.stop_loss %}${{ trade.stop_loss|price }}{% else %}-{% endif %}
                         </div>
                     </div>
                     <div>
                         <div class="text-muted text-xs uppercase">Take Profit</div>
                         <div class="text-lg font-medium mt-1 font-mono text-green-400">
-                            {% if trade.take_profit %}
-                            ${{ '%.6f'|format(trade.take_profit) if trade.take_profit < 0.01 else '%.4f'|format(trade.take_profit) if trade.take_profit < 1 else '%.2f'|format(trade.take_profit) }}
-                            {% else %}-{% endif %}
+                            {% if trade.take_profit %}${{ trade.take_profit|price }}{% else %}-{% endif %}
                         </div>
                     </div>
                     <div>
@@ -104,9 +103,7 @@
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4 pt-4 border-t border-gray-700">
                     <div>
                         <div class="text-muted text-xs uppercase">Exit Price</div>
-                        <div class="text-lg font-medium mt-1 font-mono">
-                            ${{ '%.6f'|format(trade.exit_price) if trade.exit_price < 0.01 else '%.4f'|format(trade.exit_price) if trade.exit_price < 1 else '%.2f'|format(trade.exit_price) }}
-                        </div>
+                        <div class="text-lg font-medium mt-1 font-mono">${{ trade.exit_price|price }}</div>
                     </div>
                     <div>
                         <div class="text-muted text-xs uppercase">Exit Time</div>
@@ -133,50 +130,111 @@
                 {% endif %}
             </div>
 
-            <!-- Close Trade Form (only for open trades) -->
-            {% if trade.status == 'open' %}
-            <div class="bg-card rounded-lg p-6">
-                <h2 class="text-lg font-medium mb-4">Close Trade</h2>
-                <form method="POST" action="{{ url_for('portfolio.close_trade', portfolio_id=portfolio.id, trade_id=trade.id) }}" class="space-y-4">
+            <!-- Open Trade Form (only for pending trades) -->
+            {% if trade.status == 'pending' %}
+            <div class="bg-card rounded-lg p-6 border-2 border-yellow-600">
+                <h2 class="text-lg font-medium mb-4 text-yellow-400">Open This Trade</h2>
+                <form method="POST" action="{{ url_for('portfolio.open_trade', portfolio_id=portfolio.id, trade_id=trade.id) }}" class="space-y-4">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
                     <div class="grid grid-cols-2 gap-4">
                         <div>
-                            <label class="block text-sm font-medium mb-2">Exit Price *</label>
-                            <input type="number" name="exit_price" step="any" required
-                                   class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
-                                   placeholder="0.00">
+                            <label class="block text-sm font-medium mb-2">Entry Price *</label>
+                            <input type="number" name="entry_price" step="any" required
+                                   value="{{ trade.entry_price }}"
+                                   class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
                         </div>
                         <div>
-                            <label class="block text-sm font-medium mb-2">Reason</label>
-                            <select name="reason" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
-                                <option value="">Select...</option>
-                                <option value="TP Hit">Take Profit Hit</option>
-                                <option value="SL Hit">Stop Loss Hit</option>
-                                <option value="Manual">Manual Close</option>
-                                <option value="Partial">Partial Close</option>
-                            </select>
+                            <label class="block text-sm font-medium mb-2">Quantity *</label>
+                            <input type="number" name="entry_quantity" step="any" required
+                                   value="{{ trade.entry_quantity if trade.entry_quantity else '' }}"
+                                   class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                                   placeholder="Amount to buy/sell">
                         </div>
                     </div>
 
-                    <div>
-                        <label class="block text-sm font-medium mb-2">Exit Notes</label>
-                        <textarea name="exit_notes" rows="2"
-                                  class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
-                                  placeholder="What happened? Why did you close?"></textarea>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium mb-2">Lessons Learned</label>
-                        <textarea name="lessons_learned" rows="2"
-                                  class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
-                                  placeholder="What can you learn from this trade?"></textarea>
-                    </div>
-
-                    <button type="submit" class="w-full bg-orange-600 hover:bg-orange-700 px-4 py-2 rounded">
-                        Close Trade
+                    <button type="submit" class="w-full bg-green-600 hover:bg-green-700 px-4 py-2 rounded font-medium">
+                        Open Trade
                     </button>
                 </form>
+                <form method="POST" action="{{ url_for('portfolio.cancel_trade', portfolio_id=portfolio.id, trade_id=trade.id) }}" class="mt-3">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="w-full bg-gray-600 hover:bg-gray-700 px-4 py-2 rounded">
+                        Cancel Trade
+                    </button>
+                </form>
+            </div>
+            {% endif %}
+
+            <!-- Close Trade Actions (only for open trades) -->
+            {% if trade.status == 'open' %}
+            <div class="bg-card rounded-lg p-6">
+                <h2 class="text-lg font-medium mb-4">Close Trade</h2>
+
+                <!-- Quick close buttons -->
+                <div class="grid grid-cols-3 gap-3 mb-4">
+                    {% if trade.take_profit %}
+                    <form method="POST" action="{{ url_for('portfolio.close_trade', portfolio_id=portfolio.id, trade_id=trade.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="exit_price" value="{{ trade.take_profit }}">
+                        <input type="hidden" name="reason" value="TP Hit">
+                        <button type="submit" class="w-full bg-green-600 hover:bg-green-700 px-4 py-3 rounded font-medium">
+                            TP Hit
+                            <div class="text-xs opacity-75 mt-1">@ {{ trade.take_profit|price }}</div>
+                        </button>
+                    </form>
+                    {% else %}
+                    <button disabled class="w-full bg-gray-700 px-4 py-3 rounded font-medium opacity-50 cursor-not-allowed">
+                        TP Hit
+                        <div class="text-xs opacity-75 mt-1">No TP set</div>
+                    </button>
+                    {% endif %}
+
+                    {% if trade.stop_loss %}
+                    <form method="POST" action="{{ url_for('portfolio.close_trade', portfolio_id=portfolio.id, trade_id=trade.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="exit_price" value="{{ trade.stop_loss }}">
+                        <input type="hidden" name="reason" value="SL Hit">
+                        <button type="submit" class="w-full bg-red-600 hover:bg-red-700 px-4 py-3 rounded font-medium">
+                            SL Hit
+                            <div class="text-xs opacity-75 mt-1">@ {{ trade.stop_loss|price }}</div>
+                        </button>
+                    </form>
+                    {% else %}
+                    <button disabled class="w-full bg-gray-700 px-4 py-3 rounded font-medium opacity-50 cursor-not-allowed">
+                        SL Hit
+                        <div class="text-xs opacity-75 mt-1">No SL set</div>
+                    </button>
+                    {% endif %}
+
+                    <form method="POST" action="{{ url_for('portfolio.close_trade_market', portfolio_id=portfolio.id, trade_id=trade.id) }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="w-full bg-gray-600 hover:bg-gray-700 px-4 py-3 rounded font-medium">
+                            Close @ Market
+                            {% if trade.current_price %}
+                            <div class="text-xs opacity-75 mt-1">@ {{ trade.current_price|price }}</div>
+                            {% endif %}
+                        </button>
+                    </form>
+                </div>
+
+                <!-- Manual close with custom price -->
+                <details class="mt-4">
+                    <summary class="text-sm text-muted cursor-pointer hover:text-white">Manual close with custom price...</summary>
+                    <form method="POST" action="{{ url_for('portfolio.close_trade', portfolio_id=portfolio.id, trade_id=trade.id) }}" class="mt-3 space-y-3">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <input type="hidden" name="reason" value="Manual">
+                        <div>
+                            <label class="block text-sm font-medium mb-2">Exit Price</label>
+                            <input type="number" name="exit_price" step="any" required
+                                   value="{{ trade.current_price if trade.current_price else '' }}"
+                                   class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
+                        </div>
+                        <button type="submit" class="w-full bg-orange-600 hover:bg-orange-700 px-4 py-2 rounded text-sm">
+                            Close at Custom Price
+                        </button>
+                    </form>
+                </details>
             </div>
             {% endif %}
 
@@ -246,23 +304,15 @@
 
                     <select name="entry_type" required
                             class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
+                        <option value="note" selected>Note</option>
                         <option value="pre_trade">Pre-Trade Analysis</option>
-                        <option value="during" selected>During Trade</option>
                         <option value="post_trade">Post-Trade Review</option>
                         <option value="lesson">Key Lesson</option>
                     </select>
 
-                    <select name="mood"
-                            class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
-                        <option value="">Current Mood...</option>
-                        {% for mood in trade_moods %}
-                        <option value="{{ mood }}">{{ mood|capitalize }}</option>
-                        {% endfor %}
-                    </select>
-
-                    <textarea name="content" rows="3" required
+                    <textarea name="content" rows="3"
                               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
-                              placeholder="What's on your mind?"></textarea>
+                              placeholder="Add a note..."></textarea>
 
                     <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm">
                         Add Entry
@@ -277,21 +327,16 @@
                     {% for entry in journal_entries %}
                     <div class="border-l-2 pl-3 py-2
                         {% if entry.entry_type == 'pre_trade' %}border-blue-500
-                        {% elif entry.entry_type == 'during' %}border-yellow-500
+                        {% elif entry.entry_type == 'note' %}border-gray-500
                         {% elif entry.entry_type == 'post_trade' %}border-green-500
                         {% else %}border-purple-500{% endif %}">
                         <div class="flex items-center justify-between text-xs text-muted mb-1">
                             <span>{{ entry.entry_type|replace('_', ' ')|title }}</span>
-                            <div class="flex items-center space-x-2">
-                                {% if entry.mood %}
-                                <span class="px-2 py-0.5 rounded bg-gray-700">{{ entry.mood }}</span>
-                                {% endif %}
-                                <form method="POST" action="{{ url_for('portfolio.delete_journal_entry', portfolio_id=portfolio.id, trade_id=trade.id, entry_id=entry.id) }}"
-                                      class="inline">
-                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                    <button type="submit" class="text-red-400 hover:text-red-300">&times;</button>
-                                </form>
-                            </div>
+                            <form method="POST" action="{{ url_for('portfolio.delete_journal_entry', portfolio_id=portfolio.id, trade_id=trade.id, entry_id=entry.id) }}"
+                                  class="inline">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="text-red-400 hover:text-red-300">&times;</button>
+                            </form>
                         </div>
                         <p class="text-sm">{{ entry.content }}</p>
                         <div class="text-xs text-muted mt-1">

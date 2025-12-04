@@ -21,15 +21,19 @@
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
                     <div>
                         <label class="block text-sm font-medium mb-2">Symbol *</label>
-                        <select name="symbol" required
-                                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
+                        <select name="symbol" id="symbol_select" required
+                                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
+                                onchange="updateCurrentPrice()">
                             <option value="">Select...</option>
                             {% for s in symbols %}
-                            <option value="{{ s.symbol }}" {% if trade and trade.symbol == s.symbol %}selected{% endif %}>
+                            <option value="{{ s.symbol }}"
+                                    data-price="{{ current_prices.get(s.id, '') }}"
+                                    {% if trade and trade.symbol == s.symbol %}selected{% endif %}>
                                 {{ s.symbol }}
                             </option>
                             {% endfor %}
                         </select>
+                        <div id="current_price_display" class="text-xs text-muted mt-1"></div>
                     </div>
 
                     <div>
@@ -65,44 +69,31 @@
                         </select>
                     </div>
                 </div>
-
-                {% if signals and not is_edit %}
-                <div class="mt-4">
-                    <label class="block text-sm font-medium mb-2">Link to Signal (optional)</label>
-                    <select name="signal_id"
-                            class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
-                        <option value="">No linked signal</option>
-                        {% for signal in signals %}
-                        <option value="{{ signal.id }}">
-                            Signal #{{ signal.id }} - {{ signal.direction|upper }} @ ${{ signal.entry_price }}
-                        </option>
-                        {% endfor %}
-                    </select>
-                </div>
-                {% endif %}
             </div>
 
-            <!-- Entry Details (only for new trades) -->
-            {% if not is_edit %}
+            <!-- Entry Details -->
             <div class="border-b border-gray-700 pb-6">
                 <h2 class="text-lg font-medium mb-4">Entry Details</h2>
                 <div class="grid grid-cols-2 gap-4">
                     <div>
-                        <label class="block text-sm font-medium mb-2">Entry Price *</label>
-                        <input type="number" name="entry_price" step="any" min="0" required
+                        <label class="block text-sm font-medium mb-2">Entry Price {% if not is_edit %}*{% endif %}</label>
+                        <input type="number" name="entry_price" id="entry_price" step="any" min="0"
+                               {% if not is_edit %}required{% endif %}
+                               value="{{ trade.entry_price if trade and trade.entry_price else '' }}"
                                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
-                               placeholder="0.00">
+                               placeholder="0.00" onblur="smartRound(this)">
                     </div>
 
                     <div>
-                        <label class="block text-sm font-medium mb-2">Quantity *</label>
-                        <input type="number" name="entry_quantity" step="any" min="0" required
+                        <label class="block text-sm font-medium mb-2">Quantity {% if not is_edit %}*{% endif %}</label>
+                        <input type="number" name="entry_quantity" step="any" min="0"
+                               {% if not is_edit %}required{% endif %}
+                               value="{{ trade.entry_quantity if trade and trade.entry_quantity else '' }}"
                                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
                                placeholder="0.00">
                     </div>
                 </div>
             </div>
-            {% endif %}
 
             <!-- Risk Management -->
             <div class="border-b border-gray-700 pb-6">
@@ -110,29 +101,28 @@
                 <div class="grid grid-cols-3 gap-4">
                     <div>
                         <label class="block text-sm font-medium mb-2">Stop Loss</label>
-                        <input type="number" name="stop_loss" step="any" min="0"
+                        <input type="number" name="stop_loss" id="stop_loss" step="any" min="0"
                                value="{{ trade.stop_loss if trade and trade.stop_loss else '' }}"
                                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
-                               placeholder="0.00">
+                               placeholder="0.00" onblur="smartRound(this)">
                     </div>
 
                     <div>
                         <label class="block text-sm font-medium mb-2">Take Profit</label>
-                        <input type="number" name="take_profit" step="any" min="0"
+                        <input type="number" name="take_profit" id="take_profit" step="any" min="0"
                                value="{{ trade.take_profit if trade and trade.take_profit else '' }}"
                                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
-                               placeholder="0.00">
+                               placeholder="0.00" onblur="smartRound(this)">
                     </div>
 
-                    {% if not is_edit %}
                     <div>
                         <label class="block text-sm font-medium mb-2">Risk % of Portfolio</label>
                         <input type="number" name="risk_percent" step="0.1" min="0" max="100"
+                               value="{{ trade.risk_percent if trade and trade.risk_percent else '' }}"
                                class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
                                placeholder="e.g., 2">
-                        <p class="text-xs text-muted mt-1">Max: ${{ '%.2f'|format(portfolio.current_balance) }}</p>
+                        <p class="text-xs text-muted mt-1">Balance: ${{ '%.2f'|format(portfolio.current_balance) }}</p>
                     </div>
-                    {% endif %}
                 </div>
             </div>
 
@@ -147,14 +137,12 @@
                                   placeholder="Why are you taking this trade? What's the setup?">{{ trade.setup_notes if trade else '' }}</textarea>
                     </div>
 
-                    {% if is_edit %}
                     <div>
                         <label class="block text-sm font-medium mb-2">Lessons Learned</label>
                         <textarea name="lessons_learned" rows="3"
                                   class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm"
                                   placeholder="What did you learn from this trade?">{{ trade.lessons_learned if trade else '' }}</textarea>
                     </div>
-                    {% endif %}
                 </div>
             </div>
 
@@ -166,10 +154,69 @@
                 </a>
                 <button type="submit"
                         class="px-6 py-2 rounded bg-green-600 hover:bg-green-700">
-                    {% if is_edit %}Save Changes{% else %}Open Trade{% endif %}
+                    {% if is_edit %}Save Changes{% else %}Create Trade{% endif %}
                 </button>
             </div>
         </form>
     </div>
 </div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function smartRound(input) {
+    const val = parseFloat(input.value);
+    if (isNaN(val) || val === 0) return;
+
+    let rounded;
+    if (val < 0.0001) {
+        rounded = Math.round(val * 100000000) / 100000000;
+    } else if (val < 0.01) {
+        rounded = Math.round(val * 1000000) / 1000000;
+    } else if (val < 1) {
+        rounded = Math.round(val * 10000) / 10000;
+    } else if (val < 100) {
+        rounded = Math.round(val * 1000) / 1000;
+    } else if (val < 10000) {
+        rounded = Math.round(val * 100) / 100;
+    } else {
+        rounded = Math.round(val);
+    }
+
+    input.value = rounded;
+}
+
+function formatPrice(price) {
+    if (price < 0.0001) return price.toFixed(8);
+    if (price < 0.01) return price.toFixed(6);
+    if (price < 1) return price.toFixed(4);
+    if (price < 100) return price.toFixed(3);
+    if (price < 10000) return price.toFixed(2);
+    return price.toFixed(0);
+}
+
+function updateCurrentPrice() {
+    const select = document.getElementById('symbol_select');
+    const display = document.getElementById('current_price_display');
+    const selected = select.options[select.selectedIndex];
+    const price = selected.dataset.price;
+
+    if (price && price !== '') {
+        display.innerHTML = `Current: <span class="text-blue-400 font-mono">$${formatPrice(parseFloat(price))}</span>`;
+    } else {
+        display.innerHTML = '';
+    }
+}
+
+// Auto-round on page load if values are pre-filled
+document.addEventListener('DOMContentLoaded', function() {
+    const sl = document.getElementById('stop_loss');
+    const tp = document.getElementById('take_profit');
+    const entry = document.getElementById('entry_price');
+    if (sl && sl.value) smartRound(sl);
+    if (tp && tp.value) smartRound(tp);
+    if (entry && entry.value) smartRound(entry);
+    updateCurrentPrice();
+});
+</script>
 {% endblock %}

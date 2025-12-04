@@ -19,6 +19,97 @@ TIMEFRAME_MINUTES = {
 }
 
 
+def aggregate_candles_realtime(symbol: str, from_tf: str = '1m', to_tf: str = '5m') -> int:
+    """
+    Lightweight aggregation for real-time updates.
+    Only processes the last few source candles to create the most recent target candle.
+
+    This is ~100x faster than full aggregate_candles for real-time use.
+    """
+    sym = Symbol.query.filter_by(symbol=symbol).first()
+    if not sym:
+        return 0
+
+    # Minutes per target timeframe
+    tf_minutes = TIMEFRAME_MINUTES.get(to_tf, 5)
+
+    # Only need enough source candles to create ONE target candle
+    # Plus a small buffer for alignment
+    limit = tf_minutes + 5
+
+    # Get recent source candles
+    query = """
+        SELECT timestamp, open, high, low, close, volume
+        FROM candles
+        WHERE symbol_id = :symbol_id AND timeframe = :timeframe
+        ORDER BY timestamp DESC
+        LIMIT :limit
+    """
+    df = pd.read_sql(
+        query,
+        db.engine,
+        params={'symbol_id': sym.id, 'timeframe': from_tf, 'limit': limit}
+    )
+
+    if df.empty or len(df) < tf_minutes:
+        return 0
+
+    # Reverse to chronological order
+    df = df.iloc[::-1].reset_index(drop=True)
+    df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
+    df.set_index('datetime', inplace=True)
+
+    # Resample rules
+    resample_rules = {'5m': '5min', '15m': '15min', '30m': '30min',
+                      '1h': '1h', '2h': '2h', '4h': '4h', '1d': '1D'}
+    rule = resample_rules.get(to_tf)
+    if not rule:
+        return 0
+
+    # Aggregate - use OHLCV only, timestamp comes from resample index
+    agg_df = df.resample(rule).agg({
+        'open': 'first',
+        'high': 'max',
+        'low': 'min',
+        'close': 'last',
+        'volume': 'sum'
+    }).dropna()
+
+    if agg_df.empty:
+        return 0
+
+    # Only take the most recent complete candle
+    # Use the resample INDEX (period start) as timestamp, not the first candle's timestamp
+    last_row = agg_df.iloc[-1]
+    timestamp = int(agg_df.index[-1].timestamp() * 1000)  # Convert period start to ms
+
+    # Check if it already exists
+    existing = Candle.query.filter_by(
+        symbol_id=sym.id,
+        timeframe=to_tf,
+        timestamp=timestamp
+    ).first()
+
+    if existing:
+        return 0
+
+    # Create the new candle
+    candle = Candle(
+        symbol_id=sym.id,
+        timeframe=to_tf,
+        timestamp=timestamp,
+        open=last_row['open'],
+        high=last_row['high'],
+        low=last_row['low'],
+        close=last_row['close'],
+        volume=last_row['volume']
+    )
+    db.session.add(candle)
+    db.session.commit()
+
+    return 1
+
+
 def aggregate_candles(symbol: str, from_tf: str = '1m', to_tf: str = '5m',
                       progress_callback=None) -> int:
     """
@@ -90,9 +181,8 @@ def aggregate_candles(symbol: str, from_tf: str = '1m', to_tf: str = '5m',
     if not rule:
         return 0
 
-    # Aggregate
+    # Aggregate - use OHLCV only, timestamp comes from resample index
     agg_df = df.resample(rule).agg({
-        'timestamp': 'first',
         'open': 'first',
         'high': 'max',
         'low': 'min',
@@ -126,8 +216,9 @@ def aggregate_candles(symbol: str, from_tf: str = '1m', to_tf: str = '5m',
     batch_count = 0
     COMMIT_BATCH = 1000
 
-    for idx, (_, row) in enumerate(agg_df.iterrows()):
-        timestamp = int(row['timestamp'])
+    for idx, (period_start, row) in enumerate(agg_df.iterrows()):
+        # Use the resample INDEX (period start) as timestamp
+        timestamp = int(period_start.timestamp() * 1000)
 
         # Skip if already exists
         if timestamp in existing_timestamps:

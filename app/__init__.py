@@ -7,6 +7,38 @@ db = SQLAlchemy()
 csrf = CSRFProtect()
 
 
+def format_price(value):
+    """Smart price formatting based on magnitude.
+
+    Returns formatted price string with appropriate decimal places:
+    - < 0.0001: 8 decimals (micro-cap meme coins)
+    - < 0.01: 6 decimals (small meme coins)
+    - < 1: 4 decimals (altcoins)
+    - < 100: 3 decimals (mid-range)
+    - < 10000: 2 decimals (BTC, ETH)
+    - >= 10000: 0 decimals (large values)
+    """
+    if value is None:
+        return '-'
+    try:
+        val = float(value)
+        if val == 0:
+            return '0'
+        if val < 0.0001:
+            return f'{val:.8f}'
+        if val < 0.01:
+            return f'{val:.6f}'
+        if val < 1:
+            return f'{val:.4f}'
+        if val < 100:
+            return f'{val:.3f}'
+        if val < 10000:
+            return f'{val:.2f}'
+        return f'{val:.0f}'
+    except (ValueError, TypeError):
+        return '-'
+
+
 def create_app(config_name=None):
     """Flask application factory"""
     app = Flask(__name__)
@@ -30,6 +62,22 @@ def create_app(config_name=None):
     # Initialize extensions
     db.init_app(app)
     csrf.init_app(app)
+
+    # Register custom Jinja2 filters
+    app.jinja_env.filters['price'] = format_price
+
+    # Context processor - inject last_update into all templates
+    @app.context_processor
+    def inject_last_update():
+        from app.models import Candle
+        from sqlalchemy import func
+        try:
+            latest = Candle.query.with_entities(func.max(Candle.timestamp)).filter(
+                Candle.timeframe == '1m'
+            ).scalar()
+            return {'last_data_update': latest}
+        except Exception:
+            return {'last_data_update': None}
 
     # Register blueprints
     from app.routes.dashboard import dashboard_bp

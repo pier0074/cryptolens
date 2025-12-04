@@ -1,5 +1,6 @@
 from flask import Blueprint, render_template, request, jsonify
 import pandas as pd
+from sqlalchemy import func, and_
 from app.models import Symbol, Pattern, Candle
 from app.config import Config
 from app import db
@@ -53,6 +54,30 @@ def index():
     patterns = query.order_by(Pattern.detected_at.desc()).limit(100).all()
     symbols = Symbol.query.filter_by(is_active=True).all()
 
+    # Get current prices for all symbols with patterns (batch query)
+    symbol_ids = list(set(p.symbol_id for p in patterns))
+    current_prices = {}
+    if symbol_ids:
+        # Get latest 1m candle for each symbol
+        latest_subq = db.session.query(
+            Candle.symbol_id,
+            func.max(Candle.timestamp).label('max_ts')
+        ).filter(
+            Candle.symbol_id.in_(symbol_ids),
+            Candle.timeframe == '1m'
+        ).group_by(Candle.symbol_id).subquery()
+
+        latest_candles = db.session.query(Candle).join(
+            latest_subq,
+            and_(
+                Candle.symbol_id == latest_subq.c.symbol_id,
+                Candle.timestamp == latest_subq.c.max_ts,
+                Candle.timeframe == '1m'
+            )
+        ).all()
+
+        current_prices = {c.symbol_id: c.close for c in latest_candles}
+
     # Calculate trading levels for each pattern
     patterns_with_levels = []
     candle_cache = {}  # Cache candles by (symbol_id, timeframe)
@@ -69,8 +94,9 @@ def index():
         # Calculate trading levels
         levels = get_trading_levels_for_pattern(pattern, df)
 
-        # Attach levels to pattern object
+        # Attach levels and current price to pattern object
         pattern.trading_levels = levels
+        pattern.current_price = current_prices.get(pattern.symbol_id)
         patterns_with_levels.append(pattern)
 
     return render_template('patterns.html',
@@ -89,11 +115,23 @@ def chart(symbol, timeframe):
     if not sym:
         return jsonify({'error': 'Symbol not found'}), 404
 
+    # Adjust candle limit based on timeframe
+    limits = {
+        '1m': 500,
+        '5m': 400,
+        '15m': 300,
+        '1h': 250,
+        '4h': 200,
+        '1d': 150,
+        '1w': 100
+    }
+    limit = limits.get(timeframe, 200)
+
     # Get candles
     candles = Candle.query.filter_by(
         symbol_id=sym.id,
         timeframe=timeframe
-    ).order_by(Candle.timestamp.desc()).limit(200).all()
+    ).order_by(Candle.timestamp.desc()).limit(limit).all()
 
     # Get active patterns
     patterns = Pattern.query.filter_by(

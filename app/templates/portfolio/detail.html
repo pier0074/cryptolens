@@ -91,12 +91,12 @@
                 <tr class="border-b border-gray-700 bg-gray-800/50">
                     <th class="text-left p-3 text-muted font-medium text-sm">Symbol</th>
                     <th class="text-left p-3 text-muted font-medium text-sm">Direction</th>
+                    <th class="text-left p-3 text-muted font-medium text-sm">Current</th>
                     <th class="text-left p-3 text-muted font-medium text-sm">Entry</th>
-                    <th class="text-left p-3 text-muted font-medium text-sm">Exit</th>
+                    <th class="text-left p-3 text-muted font-medium text-sm">Exit/SL/TP</th>
                     <th class="text-left p-3 text-muted font-medium text-sm">PnL</th>
                     <th class="text-left p-3 text-muted font-medium text-sm">Status</th>
-                    <th class="text-left p-3 text-muted font-medium text-sm">Date</th>
-                    <th class="text-left p-3 text-muted font-medium text-sm">Actions</th>
+                    <th class="text-left p-3 text-muted font-medium text-sm"></th>
                 </tr>
             </thead>
             <tbody>
@@ -116,14 +116,19 @@
                             {{ trade.direction|upper }}
                         </span>
                     </td>
-                    <td class="p-3 font-mono text-sm">
-                        ${{ '%.4f'|format(trade.entry_price) if trade.entry_price < 1 else '%.2f'|format(trade.entry_price) }}
+                    <td class="p-3 font-mono text-sm text-blue-400">
+                        {% if trade.current_price %}${{ trade.current_price|price }}{% else %}<span class="text-muted">-</span>{% endif %}
                     </td>
                     <td class="p-3 font-mono text-sm">
+                        {% if trade.entry_price %}${{ trade.entry_price|price }}{% else %}<span class="text-muted">-</span>{% endif %}
+                    </td>
+                    <td class="p-3 font-mono text-xs">
                         {% if trade.exit_price %}
-                        ${{ '%.4f'|format(trade.exit_price) if trade.exit_price < 1 else '%.2f'|format(trade.exit_price) }}
+                            <span class="{% if trade.pnl_amount and trade.pnl_amount >= 0 %}text-green-400{% else %}text-red-400{% endif %}">${{ trade.exit_price|price }}</span>
                         {% else %}
-                        <span class="text-muted">-</span>
+                            {% if trade.stop_loss %}<span class="text-red-400">SL: {{ trade.stop_loss|price }}</span>{% endif %}
+                            {% if trade.take_profit %}<span class="text-green-400 ml-1">TP: {{ trade.take_profit|price }}</span>{% endif %}
+                            {% if not trade.stop_loss and not trade.take_profit %}<span class="text-muted">-</span>{% endif %}
                         {% endif %}
                     </td>
                     <td class="p-3 font-mono text-sm">
@@ -138,14 +143,13 @@
                     </td>
                     <td class="p-3">
                         <span class="px-2 py-1 rounded text-xs
-                            {% if trade.status == 'open' %}bg-blue-900 text-blue-200
+                            {% if trade.status == 'pending' %}bg-yellow-900 text-yellow-200
+                            {% elif trade.status == 'open' %}bg-blue-900 text-blue-200
                             {% elif trade.status == 'closed' %}bg-green-900 text-green-200
+                            {% elif trade.status == 'cancelled' %}bg-gray-700 text-gray-400
                             {% else %}bg-gray-700{% endif %}">
                             {{ trade.status }}
                         </span>
-                    </td>
-                    <td class="p-3 text-sm text-muted">
-                        {{ trade.entry_time.strftime('%Y-%m-%d') if trade.entry_time else '-' }}
                     </td>
                     <td class="p-3">
                         <a href="{{ url_for('portfolio.trade_detail', portfolio_id=portfolio.id, trade_id=trade.id) }}"
