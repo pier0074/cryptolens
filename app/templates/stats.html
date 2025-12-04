@@ -13,7 +13,7 @@
     </div>
 
     <!-- Overall Stats Cards -->
-    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+    <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-7 gap-4">
         <div class="bg-card rounded-lg p-4">
             <div class="text-muted text-sm">Symbols</div>
             <div class="text-2xl font-bold">{{ symbols_count }}</div>
@@ -21,6 +21,13 @@
         <div class="bg-card rounded-lg p-4">
             <div class="text-muted text-sm">Total Candles</div>
             <div class="text-2xl font-bold">{{ "{:,}".format(total_candles) }}</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-muted text-sm">Verified</div>
+            <div class="text-2xl font-bold {% if verification_pct >= 90 %}text-green-400{% elif verification_pct >= 50 %}text-yellow-400{% else %}text-orange-400{% endif %}">
+                {{ "%.1f"|format(verification_pct) }}%
+            </div>
+            <div class="text-xs text-muted">{{ "{:,}".format(verified_count) }} candles</div>
         </div>
         <div class="bg-card rounded-lg p-4">
             <div class="text-muted text-sm">Patterns</div>
@@ -72,6 +79,7 @@
                         <th class="px-4 py-3 text-center">4h</th>
                         <th class="px-4 py-3 text-center">1d</th>
                         <th class="px-4 py-3 text-left">Date Range</th>
+                        <th class="px-4 py-3 text-left">Verified Until</th>
                         <th class="px-4 py-3 text-center">Patterns</th>
                         <th class="px-4 py-3 text-center">Status</th>
                     </tr>
@@ -107,6 +115,13 @@
                                 {{ stat.oldest_date[:10] }} - {{ stat.newest_date[:10] }}
                             {% else %}
                                 No data
+                            {% endif %}
+                        </td>
+                        <td class="px-4 py-3 text-xs">
+                            {% if stat.last_verified_date %}
+                                <span class="text-green-400">{{ stat.last_verified_date }}</span>
+                            {% else %}
+                                <span class="text-orange-400">Not verified</span>
                             {% endif %}
                         </td>
                         <td class="px-4 py-3 text-center">

@@ -197,6 +197,38 @@ def _build_stats():
     db_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), 'data', 'cryptolens.db')
     db_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
 
+    # Verification stats - get overall counts
+    verified_count = db.session.query(func.count(Candle.id)).filter(
+        Candle.verified_at.isnot(None)
+    ).scalar() or 0
+
+    # Get last verified timestamp per timeframe for 1m (most important)
+    last_verified_query = db.session.query(
+        Candle.symbol_id,
+        func.max(Candle.timestamp).label('last_verified_ts')
+    ).filter(
+        Candle.timeframe == '1m',
+        Candle.verified_at.isnot(None)
+    ).group_by(Candle.symbol_id).all()
+
+    last_verified_map = {row.symbol_id: row.last_verified_ts for row in last_verified_query}
+
+    # Add verification info to symbol_stats
+    for stat in symbol_stats:
+        sym = next((s for s in symbols if s.symbol == stat['symbol']), None)
+        if sym:
+            last_verified_ts = last_verified_map.get(sym.id)
+            stat['last_verified_ts'] = last_verified_ts
+            stat['last_verified_date'] = datetime.fromtimestamp(
+                last_verified_ts / 1000, tz=timezone.utc
+            ).strftime('%Y-%m-%d %H:%M') if last_verified_ts else None
+        else:
+            stat['last_verified_ts'] = None
+            stat['last_verified_date'] = None
+
+    # Calculate verification percentage
+    verification_pct = (verified_count / total_candles * 100) if total_candles > 0 else 0
+
     return {
         'symbol_stats': symbol_stats,
         'total_candles': total_candles,
@@ -204,7 +236,9 @@ def _build_stats():
         'total_signals': total_signals_all,
         'overall_tf_counts': overall_tf_counts,
         'db_size': db_size,
-        'symbols_count': len(symbols)
+        'symbols_count': len(symbols),
+        'verified_count': verified_count,
+        'verification_pct': verification_pct
     }
 
 
