@@ -1,5 +1,6 @@
 import os
-from flask import Flask
+import time
+from flask import Flask, g, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
 
@@ -78,6 +79,28 @@ def create_app(config_name=None):
             return {'last_data_update': latest}
         except Exception:
             return {'last_data_update': None}
+
+    # Request timing middleware
+    @app.before_request
+    def before_request():
+        g.start_time = time.time()
+
+    @app.after_request
+    def after_request(response):
+        if hasattr(g, 'start_time'):
+            import sys
+            elapsed_ms = (time.time() - g.start_time) * 1000
+            # Color code based on response time
+            if elapsed_ms < 100:
+                color = '\033[92m'  # Green
+            elif elapsed_ms < 500:
+                color = '\033[93m'  # Yellow
+            else:
+                color = '\033[91m'  # Red
+            reset = '\033[0m'
+            # Log with timing (to stderr for immediate display)
+            print(f"{color}[{elapsed_ms:7.1f}ms]{reset} {request.method} {request.path}", file=sys.stderr, flush=True)
+        return response
 
     # Register blueprints
     from app.routes.dashboard import dashboard_bp
