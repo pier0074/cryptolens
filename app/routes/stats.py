@@ -14,7 +14,7 @@ stats_bp = Blueprint('stats', __name__)
 
 # Simple in-memory cache
 _stats_cache = {'data': None, 'timestamp': 0}
-CACHE_TTL = 60  # Cache for 60 seconds
+CACHE_TTL = 300  # Cache for 5 minutes (stats don't need real-time updates)
 
 
 def _build_stats():
@@ -213,11 +213,14 @@ def _build_stats():
 
     last_verified_map = {row.symbol_id: row.last_verified_ts for row in last_verified_query}
 
+    # Build reverse lookup: symbol name -> id
+    symbol_name_to_id = {s.symbol: s.id for s in symbols}
+
     # Add verification info to symbol_stats
     for stat in symbol_stats:
-        sym = next((s for s in symbols if s.symbol == stat['symbol']), None)
-        if sym:
-            last_verified_ts = last_verified_map.get(sym.id)
+        sym_id = symbol_name_to_id.get(stat['symbol'])
+        if sym_id:
+            last_verified_ts = last_verified_map.get(sym_id)
             stat['last_verified_ts'] = last_verified_ts
             stat['last_verified_date'] = datetime.fromtimestamp(
                 last_verified_ts / 1000, tz=timezone.utc

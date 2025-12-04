@@ -112,7 +112,7 @@
                         <td class="px-4 py-3 text-center text-muted">{{ "{:,}".format(stat.candles_by_tf['1d']) }}</td>
                         <td class="px-4 py-3 text-muted text-xs">
                             {% if stat.oldest_date and stat.newest_date %}
-                                {{ stat.oldest_date[:10] }} - {{ stat.newest_date[:10] }}
+                                {{ stat.oldest_date }} - {{ stat.newest_date }}
                             {% else %}
                                 No data
                             {% endif %}

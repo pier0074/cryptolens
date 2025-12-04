@@ -96,6 +96,7 @@ class Candle(db.Model):
         db.UniqueConstraint('symbol_id', 'timeframe', 'timestamp', name='uix_candle'),
         db.Index('idx_candle_lookup', 'symbol_id', 'timeframe', 'timestamp'),
         db.Index('idx_candle_unverified', 'symbol_id', 'timeframe', 'verified_at'),
+        db.Index('idx_candle_timeframe', 'timeframe'),  # For GROUP BY timeframe queries
     )
 
     def __repr__(self):
@@ -223,6 +224,10 @@ class Signal(db.Model):
 
     # Relationship
     pattern = db.relationship('Pattern', backref='signals')
+
+    __table_args__ = (
+        db.Index('idx_signal_symbol', 'symbol_id'),
+    )
 
     def __repr__(self):
         return f'<Signal {self.direction} {self.symbol_id}>'
