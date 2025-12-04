@@ -1,10 +1,21 @@
 from flask import Blueprint, render_template, request, jsonify
+import json
 import pandas as pd
 from sqlalchemy import func, and_
-from app.models import Symbol, Pattern, Candle
+from app.models import Symbol, Pattern, Candle, StatsCache
 from app.config import Config
 from app import db
 from app.services.trading import get_trading_levels_for_pattern, calculate_atr
+
+
+def _get_cached_prices():
+    """Get current prices from stats cache (fast)."""
+    cache = StatsCache.query.filter_by(key='global').first()
+    if cache:
+        data = json.loads(cache.data)
+        # Build symbol -> price map
+        return {stat['symbol']: stat['current_price'] for stat in data.get('symbol_stats', [])}
+    return {}
 
 patterns_bp = Blueprint('patterns', __name__)
 
@@ -54,33 +65,21 @@ def index():
     patterns = query.order_by(Pattern.detected_at.desc()).limit(100).all()
     symbols = Symbol.query.filter_by(is_active=True).all()
 
-    # Get current prices for all symbols with patterns (batch query)
-    symbol_ids = list(set(p.symbol_id for p in patterns))
+    # Get current prices from cache (fast - ~1ms instead of ~3s)
+    cached_prices = _get_cached_prices()
+
+    # Build symbol_id -> price map
+    symbol_map = {s.id: s.symbol for s in symbols}
     current_prices = {}
-    if symbol_ids:
-        # Get latest 1m candle for each symbol
-        latest_subq = db.session.query(
-            Candle.symbol_id,
-            func.max(Candle.timestamp).label('max_ts')
-        ).filter(
-            Candle.symbol_id.in_(symbol_ids),
-            Candle.timeframe == '1m'
-        ).group_by(Candle.symbol_id).subquery()
-
-        latest_candles = db.session.query(Candle).join(
-            latest_subq,
-            and_(
-                Candle.symbol_id == latest_subq.c.symbol_id,
-                Candle.timestamp == latest_subq.c.max_ts,
-                Candle.timeframe == '1m'
-            )
-        ).all()
-
-        current_prices = {c.symbol_id: c.close for c in latest_candles}
+    for pattern in patterns:
+        sym_name = symbol_map.get(pattern.symbol_id) or pattern.symbol.symbol
+        current_prices[pattern.symbol_id] = cached_prices.get(sym_name)
 
     # Calculate trading levels for each pattern
+    # Cache candles AND pre-computed ATR/swings by (symbol_id, timeframe)
     patterns_with_levels = []
-    candle_cache = {}  # Cache candles by (symbol_id, timeframe)
+    candle_cache = {}
+    levels_cache = {}  # Cache ATR, swing_high, swing_low per (symbol, tf)
 
     for pattern in patterns:
         cache_key = (pattern.symbol_id, pattern.timeframe)
@@ -91,8 +90,43 @@ def index():
 
         df = candle_cache[cache_key]
 
-        # Calculate trading levels
-        levels = get_trading_levels_for_pattern(pattern, df)
+        # Get pre-computed ATR/swings (cached per symbol/tf)
+        if cache_key not in levels_cache:
+            from app.services.trading import calculate_atr, find_swing_high, find_swing_low
+            if df is not None and not df.empty:
+                levels_cache[cache_key] = {
+                    'atr': calculate_atr(df),
+                    'swing_high': find_swing_high(df, len(df) - 1),
+                    'swing_low': find_swing_low(df, len(df) - 1),
+                }
+            else:
+                levels_cache[cache_key] = {'atr': 0, 'swing_high': None, 'swing_low': None}
+
+        cached_levels = levels_cache[cache_key]
+
+        # Calculate trading levels using cached ATR/swings
+        from app.services.trading import calculate_trading_levels
+        tl = calculate_trading_levels(
+            pattern_type=pattern.pattern_type,
+            zone_low=pattern.zone_low,
+            zone_high=pattern.zone_high,
+            direction=pattern.direction,
+            atr=cached_levels['atr'],
+            swing_high=cached_levels['swing_high'],
+            swing_low=cached_levels['swing_low']
+        )
+
+        levels = {
+            'entry': tl.entry,
+            'stop_loss': tl.stop_loss,
+            'take_profit_1': tl.take_profit_1,
+            'take_profit_2': tl.take_profit_2,
+            'take_profit_3': tl.take_profit_3,
+            'risk': tl.risk,
+            'risk_reward_1': round(tl.risk_reward_1, 2),
+            'risk_reward_2': round(tl.risk_reward_2, 2),
+            'risk_reward_3': round(tl.risk_reward_3, 2),
+        }
 
         # Attach levels and current price to pattern object
         pattern.trading_levels = levels

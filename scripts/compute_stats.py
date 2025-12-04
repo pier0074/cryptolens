@@ -224,6 +224,12 @@ def compute_stats():
 
     verification_pct = (verified_count / total_candles * 100) if total_candles > 0 else 0
 
+    # Find the most recent data timestamp across all symbols
+    last_data_update = None
+    for stat in symbol_stats:
+        if stat['newest_ts'] and (last_data_update is None or stat['newest_ts'] > last_data_update):
+            last_data_update = stat['newest_ts']
+
     # Build global stats
     global_stats = {
         'symbol_stats': symbol_stats,
@@ -237,6 +243,7 @@ def compute_stats():
         'verification_pct': verification_pct,
         'computed_at': now_ms,
         'computed_at_formatted': datetime.fromtimestamp(now_ms / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC'),
+        'last_data_update': last_data_update,
     }
 
     # Store in cache

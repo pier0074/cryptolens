@@ -67,16 +67,17 @@ def create_app(config_name=None):
     # Register custom Jinja2 filters
     app.jinja_env.filters['price'] = format_price
 
-    # Context processor - inject last_update into all templates
+    # Context processor - inject last_update into all templates (from cache)
     @app.context_processor
     def inject_last_update():
-        from app.models import Candle
-        from sqlalchemy import func
+        from app.models import StatsCache
+        import json
         try:
-            latest = Candle.query.with_entities(func.max(Candle.timestamp)).filter(
-                Candle.timeframe == '1m'
-            ).scalar()
-            return {'last_data_update': latest}
+            cache = StatsCache.query.filter_by(key='global').first()
+            if cache:
+                data = json.loads(cache.data)
+                return {'last_data_update': data.get('last_data_update')}
+            return {'last_data_update': None}
         except Exception:
             return {'last_data_update': None}
 
