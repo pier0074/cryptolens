@@ -150,6 +150,21 @@
 - [ ] Add Coinbase, Kraken, Bybit adapters
 - [ ] Exchange selector in settings
 
+### Redis Integration (for scaling)
+- [ ] Install `redis`: `pip install redis`
+- [ ] Configure `REDIS_URL` env var (default: `redis://localhost:6379/0`)
+- [ ] **File**: `app/__init__.py` - Update limiter storage backend:
+  ```python
+  from flask_limiter.util import get_remote_address
+  limiter = Limiter(
+      key_func=get_remote_address,
+      storage_uri=os.getenv('REDIS_URL', 'memory://')
+  )
+  ```
+- [ ] Add Redis for session storage (optional)
+- [ ] Add Redis for caching pattern results (optional)
+- [ ] Docker Compose service for Redis
+
 ---
 
 ## Progress Tracking

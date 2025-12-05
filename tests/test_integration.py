@@ -33,6 +33,24 @@ class TestPatternDetectionPipeline:
 
             assert result['patterns_found'] == 0
 
+    def test_detector_accepts_preloaded_dataframe(self, app, sample_candles_bullish_fvg):
+        """Test that detectors accept pre-loaded DataFrame (Phase 3.3 optimization)"""
+        import pandas as pd
+        from app.services.patterns.imbalance import ImbalanceDetector
+        from app.services.aggregator import get_candles_as_dataframe
+
+        with app.app_context():
+            detector = ImbalanceDetector()
+
+            # Get DataFrame
+            df = get_candles_as_dataframe('BTC/USDT', '1h', limit=200)
+
+            # Detect with pre-loaded DataFrame (should not query DB again)
+            patterns = detector.detect('BTC/USDT', '1h', df=df)
+
+            # Should work and return list (may be empty if no patterns found)
+            assert isinstance(patterns, list)
+
     def test_pattern_to_signal_pipeline(self, app, sample_symbol):
         """Test full flow: candles -> pattern -> signal"""
         with app.app_context():
