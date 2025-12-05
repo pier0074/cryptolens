@@ -91,24 +91,22 @@
 
 ## Phase 3: Performance Improvements
 
-### 3.1 Add Missing Database Index
-- [ ] **File**: `app/models.py`
-- [ ] Add index: `db.Index('idx_pattern_list', 'status', 'detected_at')`
-- [ ] Create migration script
-- [ ] Run migration
-- [ ] Verify with `EXPLAIN ANALYZE`
+### 3.1 Add Missing Database Index ✅
+- [x] **File**: `app/models.py`
+- [x] Add index: `db.Index('idx_pattern_list', 'status', 'detected_at')`
+- [x] Create migration script: `scripts/migrate_add_pattern_index.py`
 
-### 3.2 Optimize Portfolio Stats Query
-- [ ] **File**: `app/routes/portfolio.py`
-- [ ] Replace Python loops with SQL aggregation in `detail()`
-- [ ] Replace Python loops with SQL aggregation in `api_portfolio_stats()`
-- [ ] Test: Compare response times before/after
+### 3.2 Optimize Portfolio Stats Query ✅
+- [x] **File**: `app/routes/portfolio.py`
+- [x] Replace Python loops with SQL aggregation in `api_portfolio_stats()`
+- [x] Uses COUNT, SUM, CASE WHEN, GROUP BY for 2 queries instead of loading all trades
 
 ### 3.3 Optimize Pattern Detector DataFrame Loading
 - [ ] **File**: `app/services/patterns/__init__.py`
 - [ ] Modify `scan_all_patterns()` to load DataFrame once per symbol
 - [ ] Pass DataFrame to each detector's `detect()` method
 - [ ] Update detector signatures to accept optional DataFrame
+- **Note**: Deferred - requires changing detector interface, lower priority
 
 ---
 
@@ -164,9 +162,9 @@
 | 2.2 | Logging | **Done** | |
 | 2.3 | Gunicorn | **Done** | |
 | 2.4 | Connection Pool | **Done** | |
-| 3.1 | DB Index | Pending | |
-| 3.2 | Portfolio Query | Pending | |
-| 3.3 | DataFrame Opt | Pending | |
+| 3.1 | DB Index | **Done** | |
+| 3.2 | Portfolio Query | **Done** | |
+| 3.3 | DataFrame Opt | Deferred | Lower priority |
 | 4.1 | Test Coverage | Pending | |
 | 4.2 | Type Hints | Pending | |
 

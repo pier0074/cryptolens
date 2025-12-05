@@ -734,46 +734,66 @@ def api_trade_from_signal():
 
 @portfolio_bp.route('/api/portfolios/<int:portfolio_id>/stats')
 def api_portfolio_stats(portfolio_id):
-    """API: Get portfolio statistics"""
+    """API: Get portfolio statistics (optimized with SQL aggregation)"""
+    from sqlalchemy import func, case
+
     portfolio = db.session.get(Portfolio, portfolio_id)
     if not portfolio:
         return jsonify({'error': 'Portfolio not found'}), 404
 
-    closed_trades = portfolio.trades.filter_by(status='closed').all()
+    # Main stats query - single SQL aggregation instead of loading all trades
+    stats = db.session.query(
+        func.count(Trade.id).label('total_trades'),
+        func.sum(case((Trade.pnl_amount > 0, 1), else_=0)).label('winning_trades'),
+        func.sum(case((Trade.pnl_amount < 0, 1), else_=0)).label('losing_trades'),
+        func.coalesce(func.sum(Trade.pnl_amount), 0).label('total_pnl'),
+        func.coalesce(func.sum(case((Trade.pnl_amount > 0, Trade.pnl_amount), else_=0)), 0).label('gross_profit'),
+        func.coalesce(func.sum(case((Trade.pnl_amount < 0, func.abs(Trade.pnl_amount)), else_=0)), 0).label('gross_loss'),
+        func.coalesce(func.avg(Trade.pnl_r), 0).label('avg_r')
+    ).filter(
+        Trade.portfolio_id == portfolio_id,
+        Trade.status == 'closed'
+    ).first()
 
-    # Calculate detailed stats
-    winning_trades = [t for t in closed_trades if t.pnl_amount and t.pnl_amount > 0]
-    losing_trades = [t for t in closed_trades if t.pnl_amount and t.pnl_amount < 0]
+    total_trades = stats.total_trades or 0
+    winning_trades = int(stats.winning_trades or 0)
+    losing_trades = int(stats.losing_trades or 0)
+    total_pnl = float(stats.total_pnl or 0)
+    gross_profit = float(stats.gross_profit or 0)
+    gross_loss = float(stats.gross_loss or 0)
+    avg_r = float(stats.avg_r or 0)
 
-    total_pnl = sum(t.pnl_amount for t in closed_trades if t.pnl_amount)
-    gross_profit = sum(t.pnl_amount for t in winning_trades)
-    gross_loss = abs(sum(t.pnl_amount for t in losing_trades))
+    # By-symbol stats - single query with GROUP BY
+    symbol_stats = db.session.query(
+        Trade.symbol,
+        func.count(Trade.id).label('trades'),
+        func.coalesce(func.sum(Trade.pnl_amount), 0).label('pnl'),
+        func.sum(case((Trade.pnl_amount > 0, 1), else_=0)).label('wins')
+    ).filter(
+        Trade.portfolio_id == portfolio_id,
+        Trade.status == 'closed'
+    ).group_by(Trade.symbol).all()
 
-    # Calculate by symbol
-    by_symbol = {}
-    for trade in closed_trades:
-        if trade.symbol not in by_symbol:
-            by_symbol[trade.symbol] = {'trades': 0, 'pnl': 0, 'wins': 0}
-        by_symbol[trade.symbol]['trades'] += 1
-        by_symbol[trade.symbol]['pnl'] += trade.pnl_amount or 0
-        if trade.pnl_amount and trade.pnl_amount > 0:
-            by_symbol[trade.symbol]['wins'] += 1
-
-    # Calculate R multiples
-    r_multiples = [t.pnl_r for t in closed_trades if t.pnl_r is not None]
-    avg_r = sum(r_multiples) / len(r_multiples) if r_multiples else 0
+    by_symbol = {
+        row.symbol: {
+            'trades': row.trades,
+            'pnl': float(row.pnl),
+            'wins': int(row.wins)
+        }
+        for row in symbol_stats
+    }
 
     return jsonify({
-        'total_trades': len(closed_trades),
-        'winning_trades': len(winning_trades),
-        'losing_trades': len(losing_trades),
-        'win_rate': round(len(winning_trades) / len(closed_trades) * 100, 1) if closed_trades else 0,
+        'total_trades': total_trades,
+        'winning_trades': winning_trades,
+        'losing_trades': losing_trades,
+        'win_rate': round(winning_trades / total_trades * 100, 1) if total_trades else 0,
         'total_pnl': round(total_pnl, 2),
         'gross_profit': round(gross_profit, 2),
         'gross_loss': round(gross_loss, 2),
         'profit_factor': round(gross_profit / gross_loss, 2) if gross_loss > 0 else 0,
-        'avg_win': round(gross_profit / len(winning_trades), 2) if winning_trades else 0,
-        'avg_loss': round(gross_loss / len(losing_trades), 2) if losing_trades else 0,
+        'avg_win': round(gross_profit / winning_trades, 2) if winning_trades else 0,
+        'avg_loss': round(gross_loss / losing_trades, 2) if losing_trades else 0,
         'avg_r': round(avg_r, 2),
         'by_symbol': by_symbol
     })

@@ -145,6 +145,7 @@ class Pattern(db.Model):
     __table_args__ = (
         db.Index('idx_pattern_active', 'symbol_id', 'timeframe', 'status'),
         db.Index('idx_pattern_detected', 'detected_at'),
+        db.Index('idx_pattern_list', 'status', 'detected_at'),  # For pattern list page queries
     )
 
     def __repr__(self):
