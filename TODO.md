@@ -1,11 +1,25 @@
-# CryptoLens - Improvement Plan
+# CryptoLens v2.0 - Improvement Plan
 
-> Last updated: 2025-12-05 (Post-Architecture Audit)
+> **Current Version**: v2.0.0-dev (v1.0.0 released 2025-12-05)
+> **Goal**: Security hardening, production readiness, performance optimization
 > See: ARCHITECTURE_AUDIT.md for full details
 
 ---
 
-## Phase 1: Critical Security Fixes
+## v2.0 Roadmap
+
+| Version | Focus | Status |
+|---------|-------|--------|
+| v2.0.0 | API Auth + Rate Limiting | Pending |
+| v2.1.0 | Input Validation + CSRF Fix | Pending |
+| v2.2.0 | Health Check + Logging | Pending |
+| v2.3.0 | Gunicorn + Connection Pooling | Pending |
+| v2.4.0 | Performance (DB Index, Query Opt) | Pending |
+| v2.5.0 | Code Quality (Coverage, Types) | Pending |
+
+---
+
+## Phase 1: Critical Security Fixes (v2.0.x - v2.1.x)
 
 ### 1.1 Fix API Authentication Default
 - [ ] **File**: `app/routes/api.py`
