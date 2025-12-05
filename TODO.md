@@ -1,8 +1,7 @@
-# CryptoLens v2.0 - Improvement Plan
+# CryptoLens v2.0 - Development Roadmap
 
-> **Current Version**: v2.0.0-dev (v1.0.0 released 2025-12-05)
-> **Goal**: Security hardening, production readiness, performance optimization
-> See: ARCHITECTURE_AUDIT.md for full details
+> **Current Version**: v2.0.0 (Released 2025-12-05)
+> **Status**: All core phases complete, Phase 5 contains optional enhancements
 
 ---
 
@@ -12,10 +11,10 @@
 |---------|-------|--------|
 | v2.0.0 | API Auth + Rate Limiting | **Done** |
 | v2.1.0 | Input Validation + CSRF Fix | **Done** |
-| v2.2.0 | Health Check + Logging | Pending |
-| v2.3.0 | Gunicorn + Connection Pooling | Pending |
-| v2.4.0 | Performance (DB Index, Query Opt) | Pending |
-| v2.5.0 | Code Quality (Coverage, Types) | Pending |
+| v2.2.0 | Health Check + Logging | **Done** |
+| v2.3.0 | Gunicorn + Connection Pooling | **Done** |
+| v2.4.0 | Performance (DB Index, Query Opt) | **Done** |
+| v2.5.0 | Code Quality (Coverage, Types) | **Done** |
 
 ---
 
@@ -145,6 +144,17 @@
 - [ ] Real-time pattern notifications in UI
 - [ ] Signal alerts without page refresh
 
+### Symbol/Currency Management (Settings)
+- [ ] Add symbols management page in Settings
+- [ ] **File**: `app/routes/settings.py` - Add symbol CRUD endpoints
+- [ ] **File**: `app/templates/settings.html` - Add symbol selector UI:
+  - List all symbols with active/inactive toggle
+  - Search bar to find symbols from exchange
+  - Add new symbol button (fetches from Binance)
+  - Delete symbol (with confirmation)
+- [ ] Symbol model already has `is_active` field - use it
+- [ ] Update `fetch.py` to only fetch active symbols
+
 ### Multi-Exchange Support
 - [ ] Abstract exchange interface
 - [ ] Add Coinbase, Kraken, Bybit adapters
@@ -167,67 +177,17 @@
 
 ---
 
-## Progress Tracking
+## Progress Summary
 
-| Phase | Task | Status | Notes |
-|-------|------|--------|-------|
-| 1.1 | API Auth | **Done** | Critical |
-| 1.2 | Rate Limiting | **Done** | Critical |
-| 1.3 | Input Validation | **Done** | Critical |
-| 1.4 | CSRF Fix | **Done** | Critical |
-| 2.1 | Health Check | **Done** | |
-| 2.2 | Logging | **Done** | |
-| 2.3 | Gunicorn | **Done** | |
-| 2.4 | Connection Pool | **Done** | |
-| 3.1 | DB Index | **Done** | |
-| 3.2 | Portfolio Query | **Done** | |
-| 3.3 | DataFrame Opt | **Done** | |
-| 4.1 | Test Coverage | **Done** | 68% coverage |
-| 4.2 | Type Hints | **Done** | api.py typed |
+All phases 1-4 complete. Test coverage at 68%.
 
----
-
-## Completed (Previous Work)
-
-### Phase 6: Architecture (Dec 2025)
-- [x] Cron-based scheduling (replaced APScheduler)
-- [x] Async parallel fetch script (fetch.py)
-- [x] Pattern detection script (detect.py)
-- [x] Pattern expiry system (timeframe-based)
-- [x] Stats page optimization (390→10 queries)
-- [x] Patterns page optimization (8.4s → 53ms)
-- [x] Pre-computed trading levels
-
-### Phase 5: Code Quality
-- [x] Type hints in key services
-- [x] Configuration centralization
-- [x] DRY pattern detector refactoring
-
-### Phase 4: Portfolio & Journal
-- [x] Portfolio management
-- [x] Trade logging with journal entries
-- [x] Performance analytics
-
-### Phase 3: Testing
-- [x] 164 tests passing
-- [x] API, routes, services, patterns covered
-
-### Phase 2: Performance
-- [x] N+1 query fixes
-- [x] Exchange instance caching
-- [x] Direct SQL to DataFrame
-
-### Phase 1: Security (Partial)
-- [x] API key authentication (needs hardening)
-- [x] CSRF protection (needs fix for settings)
-- [x] Notification retry logic
-
-### Core Features
-- [x] Pattern detection (FVG, Order Block, Liquidity Sweep)
-- [x] Multi-timeframe aggregation
-- [x] Signal generation with confluence
-- [x] NTFY notifications
-- [x] Backtesting system
+| Phase | Focus | Tasks |
+|-------|-------|-------|
+| 1 | Security | API Auth, Rate Limiting, Input Validation, CSRF |
+| 2 | Production | Health Check, Logging, Gunicorn, Connection Pool |
+| 3 | Performance | DB Index, Portfolio Query, DataFrame Optimization |
+| 4 | Quality | Test Coverage (68%), Type Hints |
+| 5 | Future | Optional enhancements (see above) |
 
 ---
 
