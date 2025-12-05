@@ -306,12 +306,12 @@ class TestAPIAuthentication:
     """Tests for API key authentication"""
 
     def test_scan_without_api_key_no_key_set(self, client, app):
-        """Test scan endpoint works when no API key is configured"""
+        """Test scan endpoint denies access when no API key is configured (secure default)"""
         with app.app_context():
-            # No API key set - should allow access
+            # No API key set - should return 503 (secure default)
             response = client.post('/api/scan')
-            # May fail for other reasons, but shouldn't be 401
-            assert response.status_code != 401
+            assert response.status_code == 503
+            assert 'API not configured' in response.json['error']
 
     def test_scan_with_api_key_required(self, client, app):
         """Test scan endpoint requires API key when configured"""
@@ -383,12 +383,28 @@ class TestAPIAuthentication:
 class TestFetchEndpoint:
     """Tests for /api/fetch endpoint"""
 
-    def test_fetch_missing_params(self, client, app):
-        """Test fetch endpoint requires symbol and timeframe"""
+    def test_fetch_requires_auth(self, client, app):
+        """Test fetch endpoint requires authentication"""
         with app.app_context():
+            # No API key configured - should return 503
             response = client.post(
                 '/api/fetch',
                 content_type='application/json',
+                data=json.dumps({})
+            )
+            assert response.status_code == 503
+            assert 'API not configured' in response.json['error']
+
+    def test_fetch_missing_params(self, client, app):
+        """Test fetch endpoint requires symbol and timeframe"""
+        with app.app_context():
+            Setting.set('api_key', 'test-secret-key')
+            db.session.commit()
+
+            response = client.post(
+                '/api/fetch',
+                content_type='application/json',
+                headers={'X-API-Key': 'test-secret-key'},
                 data=json.dumps({})
             )
             assert response.status_code == 400
@@ -397,12 +413,16 @@ class TestFetchEndpoint:
     def test_fetch_with_params(self, client, app, sample_symbol):
         """Test fetch endpoint with valid parameters"""
         with app.app_context():
+            Setting.set('api_key', 'test-secret-key')
+            db.session.commit()
+
             response = client.post(
                 '/api/fetch',
                 content_type='application/json',
+                headers={'X-API-Key': 'test-secret-key'},
                 data=json.dumps({'symbol': 'BTC/USDT', 'timeframe': '1h'})
             )
-            # May succeed or fail (network), but shouldn't be 400
+            # May succeed or fail (network), but shouldn't be 400 or 401
             # Just verify the endpoint handles the request
             assert response.status_code in [200, 500]  # 200 success or 500 network error
 

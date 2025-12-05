@@ -1,3 +1,5 @@
+import hmac
+import os
 from functools import wraps
 from flask import Blueprint, request, jsonify
 from sqlalchemy.orm import joinedload
@@ -12,23 +14,38 @@ csrf.exempt(api_bp)
 
 
 def require_api_key(f):
-    """Decorator to require API key for sensitive endpoints"""
+    """
+    Decorator to require API key for sensitive endpoints.
+
+    Security: DENY by default. To allow unauthenticated access (dev only),
+    set environment variable: ALLOW_UNAUTHENTICATED_API=true
+    """
     @wraps(f)
     def decorated(*args, **kwargs):
-        # Get API key from settings (if not set, endpoints are open)
-        api_key = Setting.get('api_key')
-        if not api_key:
-            # No API key configured - allow access (for development)
+        # Check if auth is explicitly disabled (development only)
+        if os.getenv('ALLOW_UNAUTHENTICATED_API', 'false').lower() == 'true':
             return f(*args, **kwargs)
 
-        # Check header
+        # Get API key from settings
+        api_key = Setting.get('api_key')
+        if not api_key:
+            # No API key configured - DENY access (secure default)
+            return jsonify({
+                'error': 'API not configured',
+                'message': 'Set an API key in Settings, or set ALLOW_UNAUTHENTICATED_API=true for development'
+            }), 503
+
+        # Check header first, then query param
         provided_key = request.headers.get('X-API-Key')
         if not provided_key:
-            # Also check query param for browser testing
             provided_key = request.args.get('api_key')
 
-        if provided_key != api_key:
-            return jsonify({'error': 'Unauthorized - Invalid or missing API key'}), 401
+        if not provided_key:
+            return jsonify({'error': 'Unauthorized - API key required'}), 401
+
+        # Use timing-safe comparison to prevent timing attacks
+        if not hmac.compare_digest(provided_key, api_key):
+            return jsonify({'error': 'Unauthorized - Invalid API key'}), 401
 
         return f(*args, **kwargs)
     return decorated
