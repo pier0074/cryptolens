@@ -21,12 +21,12 @@
 
 ## Phase 1: Critical Security Fixes (v2.0.x - v2.1.x)
 
-### 1.1 Fix API Authentication Default
-- [ ] **File**: `app/routes/api.py`
-- [ ] Change `require_api_key` to deny by default
-- [ ] Add `ALLOW_UNAUTHENTICATED_API` env var for dev mode
-- [ ] Use `hmac.compare_digest()` for timing-safe comparison
-- [ ] Test: Verify API returns 503 when no key configured
+### 1.1 Fix API Authentication Default ✅
+- [x] **File**: `app/routes/api.py`
+- [x] Change `require_api_key` to deny by default
+- [x] Add `ALLOW_UNAUTHENTICATED_API` env var for dev mode
+- [x] Use `hmac.compare_digest()` for timing-safe comparison
+- [x] Test: Verify API returns 503 when no key configured
 
 ### 1.2 Add Rate Limiting
 - [ ] Install `flask-limiter`: `pip install flask-limiter`
@@ -155,7 +155,7 @@
 
 | Phase | Task | Status | Notes |
 |-------|------|--------|-------|
-| 1.1 | API Auth | Pending | Critical |
+| 1.1 | API Auth | **Done** | Critical |
 | 1.2 | Rate Limiting | Pending | Critical |
 | 1.3 | Input Validation | Pending | Critical |
 | 1.4 | CSRF Fix | Pending | Critical |
