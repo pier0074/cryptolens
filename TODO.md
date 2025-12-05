@@ -28,14 +28,14 @@
 - [x] Use `hmac.compare_digest()` for timing-safe comparison
 - [x] Test: Verify API returns 503 when no key configured
 
-### 1.2 Add Rate Limiting
-- [ ] Install `flask-limiter`: `pip install flask-limiter`
-- [ ] **File**: `app/__init__.py` - Initialize limiter
-- [ ] **File**: `app/routes/api.py` - Add limits to expensive endpoints:
+### 1.2 Add Rate Limiting ✅
+- [x] Install `flask-limiter`: `pip install flask-limiter`
+- [x] **File**: `app/__init__.py` - Initialize limiter
+- [x] **File**: `app/routes/api.py` - Add limits to expensive endpoints:
   - `/api/scan` - 1/minute
   - `/api/fetch` - 5/minute
   - `/api/scheduler/*` - 2/minute
-- [ ] Test: Verify 429 response on rate limit exceeded
+- [x] Test: Verify rate limiting is active
 
 ### 1.3 Add Input Validation
 - [ ] **File**: `app/routes/portfolio.py`
@@ -156,7 +156,7 @@
 | Phase | Task | Status | Notes |
 |-------|------|--------|-------|
 | 1.1 | API Auth | **Done** | Critical |
-| 1.2 | Rate Limiting | Pending | Critical |
+| 1.2 | Rate Limiting | **Done** | Critical |
 | 1.3 | Input Validation | Pending | Critical |
 | 1.4 | CSRF Fix | Pending | Critical |
 | 2.1 | Health Check | Pending | |

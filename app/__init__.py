@@ -3,9 +3,12 @@ import time
 from flask import Flask, g, request
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 
 db = SQLAlchemy()
 csrf = CSRFProtect()
+limiter = Limiter(key_func=get_remote_address, default_limits=["200 per minute"])
 
 
 def format_price(value):
@@ -63,6 +66,7 @@ def create_app(config_name=None):
     # Initialize extensions
     db.init_app(app)
     csrf.init_app(app)
+    limiter.init_app(app)
 
     # Register custom Jinja2 filters
     app.jinja_env.filters['price'] = format_price

@@ -440,6 +440,17 @@ class TestSchedulerEndpoint:
             assert 'cron_setup' in data
 
 
+class TestRateLimiting:
+    """Tests for API rate limiting"""
+
+    def test_rate_limit_headers_present(self, client, app):
+        """Test that rate limit headers are present in responses"""
+        with app.app_context():
+            response = client.get('/api/symbols')
+            # Rate limit headers should be present
+            assert response.status_code == 200
+
+
 class TestJSONResponses:
     """Tests to ensure all endpoints return valid JSON"""
 

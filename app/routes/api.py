@@ -5,7 +5,7 @@ from flask import Blueprint, request, jsonify
 from sqlalchemy.orm import joinedload
 from app.models import Symbol, Candle, Pattern, Signal, Setting
 from app.config import Config
-from app import db, csrf
+from app import db, csrf, limiter
 
 api_bp = Blueprint('api', __name__)
 
@@ -174,6 +174,7 @@ def get_matrix():
 
 
 @api_bp.route('/scan', methods=['POST'])
+@limiter.limit("1 per minute")
 @require_api_key
 def trigger_scan():
     """Manually trigger a pattern scan"""
@@ -184,6 +185,7 @@ def trigger_scan():
 
 
 @api_bp.route('/fetch', methods=['POST'])
+@limiter.limit("5 per minute")
 @require_api_key
 def trigger_fetch():
     """Manually trigger data fetch"""
@@ -208,6 +210,7 @@ def scheduler_status():
 
 
 @api_bp.route('/scheduler/start', methods=['POST'])
+@limiter.limit("2 per minute")
 @require_api_key
 def scheduler_start():
     """Start the background scheduler"""
@@ -219,6 +222,7 @@ def scheduler_start():
 
 
 @api_bp.route('/scheduler/stop', methods=['POST'])
+@limiter.limit("2 per minute")
 @require_api_key
 def scheduler_stop():
     """Stop the background scheduler"""
@@ -229,6 +233,7 @@ def scheduler_stop():
 
 
 @api_bp.route('/scheduler/toggle', methods=['POST'])
+@limiter.limit("2 per minute")
 @require_api_key
 def scheduler_toggle():
     """Legacy endpoint - scheduler is now cron-based"""
@@ -240,6 +245,7 @@ def scheduler_toggle():
 
 
 @api_bp.route('/scan/run', methods=['POST'])
+@limiter.limit("1 per minute")
 @require_api_key
 def run_scan_now():
     """Trigger a manual scan"""
