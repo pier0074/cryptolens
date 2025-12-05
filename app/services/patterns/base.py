@@ -281,7 +281,13 @@ class PatternDetector(ABC):
         pass
 
     @abstractmethod
-    def detect(self, symbol: str, timeframe: str, limit: int = 200) -> List[Dict[str, Any]]:
+    def detect(
+        self,
+        symbol: str,
+        timeframe: str,
+        limit: int = 200,
+        df: Optional[pd.DataFrame] = None
+    ) -> List[Dict[str, Any]]:
         """
         Detect patterns in the given symbol/timeframe
 
@@ -289,6 +295,7 @@ class PatternDetector(ABC):
             symbol: Trading pair (e.g., 'BTC/USDT')
             timeframe: Candle timeframe (e.g., '1h')
             limit: Number of candles to analyze
+            df: Optional pre-loaded DataFrame (avoids redundant DB queries)
 
         Returns:
             List of detected patterns

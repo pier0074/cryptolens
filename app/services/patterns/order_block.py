@@ -12,7 +12,7 @@ Bearish Order Block:
 - The last bullish (green) candle before a strong bearish move
 - Price often returns to this zone before continuing down
 """
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import pandas as pd
 from app.services.patterns.base import PatternDetector
 from app.models import Symbol
@@ -27,14 +27,27 @@ class OrderBlockDetector(PatternDetector):
     def pattern_type(self) -> str:
         return 'order_block'
 
-    def detect(self, symbol: str, timeframe: str, limit: int = 200) -> List[Dict[str, Any]]:
+    def detect(
+        self,
+        symbol: str,
+        timeframe: str,
+        limit: int = 200,
+        df: Optional[pd.DataFrame] = None
+    ) -> List[Dict[str, Any]]:
         """
         Detect Order Blocks in the given symbol/timeframe
+
+        Args:
+            symbol: Trading pair (e.g., 'BTC/USDT')
+            timeframe: Candle timeframe (e.g., '1h')
+            limit: Number of candles to analyze
+            df: Optional pre-loaded DataFrame (avoids redundant DB queries)
 
         Returns:
             List of detected order block patterns
         """
-        df = self.get_candles_df(symbol, timeframe, limit)
+        if df is None:
+            df = self.get_candles_df(symbol, timeframe, limit)
 
         if df.empty or len(df) < 5:
             return []

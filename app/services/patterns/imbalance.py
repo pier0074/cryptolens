@@ -7,7 +7,8 @@ Detects price imbalances where:
 
 These gaps often get "filled" when price returns to them.
 """
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+import pandas as pd
 from app.services.patterns.base import PatternDetector
 from app.models import Symbol
 from app import db
@@ -20,14 +21,27 @@ class ImbalanceDetector(PatternDetector):
     def pattern_type(self) -> str:
         return 'imbalance'
 
-    def detect(self, symbol: str, timeframe: str, limit: int = 200) -> List[Dict[str, Any]]:
+    def detect(
+        self,
+        symbol: str,
+        timeframe: str,
+        limit: int = 200,
+        df: Optional[pd.DataFrame] = None
+    ) -> List[Dict[str, Any]]:
         """
         Detect imbalances in the given symbol/timeframe
+
+        Args:
+            symbol: Trading pair (e.g., 'BTC/USDT')
+            timeframe: Candle timeframe (e.g., '1h')
+            limit: Number of candles to analyze
+            df: Optional pre-loaded DataFrame (avoids redundant DB queries)
 
         Returns:
             List of detected imbalance patterns
         """
-        df = self.get_candles_df(symbol, timeframe, limit)
+        if df is None:
+            df = self.get_candles_df(symbol, timeframe, limit)
 
         if df.empty or len(df) < 3:
             return []

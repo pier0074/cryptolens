@@ -101,12 +101,12 @@
 - [x] Replace Python loops with SQL aggregation in `api_portfolio_stats()`
 - [x] Uses COUNT, SUM, CASE WHEN, GROUP BY for 2 queries instead of loading all trades
 
-### 3.3 Optimize Pattern Detector DataFrame Loading
-- [ ] **File**: `app/services/patterns/__init__.py`
-- [ ] Modify `scan_all_patterns()` to load DataFrame once per symbol
-- [ ] Pass DataFrame to each detector's `detect()` method
-- [ ] Update detector signatures to accept optional DataFrame
-- **Note**: Deferred - requires changing detector interface, lower priority
+### 3.3 Optimize Pattern Detector DataFrame Loading ✅
+- [x] **File**: `app/services/patterns/__init__.py`
+- [x] Modify `scan_all_patterns()` to load DataFrame once per symbol/timeframe
+- [x] Pass DataFrame to each detector's `detect()` method
+- [x] Update detector signatures to accept optional DataFrame
+- [x] Updated base.py, imbalance.py, order_block.py, liquidity.py
 
 ---
 
@@ -164,7 +164,7 @@
 | 2.4 | Connection Pool | **Done** | |
 | 3.1 | DB Index | **Done** | |
 | 3.2 | Portfolio Query | **Done** | |
-| 3.3 | DataFrame Opt | Deferred | Lower priority |
+| 3.3 | DataFrame Opt | **Done** | |
 | 4.1 | Test Coverage | Pending | |
 | 4.2 | Type Hints | Pending | |
 

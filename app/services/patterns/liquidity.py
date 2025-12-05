@@ -14,7 +14,7 @@ Bearish Liquidity Sweep (Sweep High):
 - Then reverses and closes back below the high
 - Signal to go short
 """
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import pandas as pd
 import numpy as np
 from app.services.patterns.base import PatternDetector
@@ -67,14 +67,27 @@ class LiquiditySweepDetector(PatternDetector):
 
         return swing_highs, swing_lows
 
-    def detect(self, symbol: str, timeframe: str, limit: int = 200) -> List[Dict[str, Any]]:
+    def detect(
+        self,
+        symbol: str,
+        timeframe: str,
+        limit: int = 200,
+        df: Optional[pd.DataFrame] = None
+    ) -> List[Dict[str, Any]]:
         """
         Detect Liquidity Sweeps in the given symbol/timeframe
+
+        Args:
+            symbol: Trading pair (e.g., 'BTC/USDT')
+            timeframe: Candle timeframe (e.g., '1h')
+            limit: Number of candles to analyze
+            df: Optional pre-loaded DataFrame (avoids redundant DB queries)
 
         Returns:
             List of detected liquidity sweep patterns
         """
-        df = self.get_candles_df(symbol, timeframe, limit)
+        if df is None:
+            df = self.get_candles_df(symbol, timeframe, limit)
 
         if df.empty or len(df) < 20:
             return []

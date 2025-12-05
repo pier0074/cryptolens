@@ -104,7 +104,10 @@ def get_all_detectors() -> list:
 
 def scan_all_patterns(pattern_types: list = None) -> dict:
     """
-    Scan all active symbols for patterns
+    Scan all active symbols for patterns.
+
+    Optimized to load DataFrame once per symbol/timeframe and pass to all detectors,
+    avoiding redundant database queries.
 
     Args:
         pattern_types: List of pattern types to scan (default: all)
@@ -114,6 +117,7 @@ def scan_all_patterns(pattern_types: list = None) -> dict:
     """
     from app.models import Symbol
     from app.config import Config
+    from app.services.aggregator import get_candles_as_dataframe
 
     symbols = Symbol.query.filter_by(is_active=True).all()
 
@@ -126,20 +130,30 @@ def scan_all_patterns(pattern_types: list = None) -> dict:
         'by_symbol': {}
     }
 
+    # Initialize counters
     for pattern_type in pattern_types:
-        detector = get_detector(pattern_type)
-        if not detector:
-            continue
-
         results['by_type'][pattern_type] = 0
 
-        for symbol in symbols:
-            if symbol.symbol not in results['by_symbol']:
-                results['by_symbol'][symbol.symbol] = 0
+    # Get all detectors upfront
+    detectors = [(pt, get_detector(pt)) for pt in pattern_types]
+    detectors = [(pt, d) for pt, d in detectors if d is not None]
 
-            for tf in Config.TIMEFRAMES:
+    for symbol in symbols:
+        if symbol.symbol not in results['by_symbol']:
+            results['by_symbol'][symbol.symbol] = 0
+
+        for tf in Config.TIMEFRAMES:
+            # Load DataFrame once per symbol/timeframe
+            try:
+                df = get_candles_as_dataframe(symbol.symbol, tf, limit=200)
+            except Exception as e:
+                print(f"Error loading candles for {symbol.symbol} {tf}: {e}")
+                continue
+
+            # Pass to all detectors
+            for pattern_type, detector in detectors:
                 try:
-                    patterns = detector.detect(symbol.symbol, tf)
+                    patterns = detector.detect(symbol.symbol, tf, df=df)
                     count = len(patterns)
                     results['patterns_found'] += count
                     results['by_type'][pattern_type] += count
@@ -152,28 +166,40 @@ def scan_all_patterns(pattern_types: list = None) -> dict:
 
 def scan_symbol(symbol: str, pattern_types: list = None) -> dict:
     """
-    Scan a single symbol for all pattern types
+    Scan a single symbol for all pattern types.
+
+    Optimized to load DataFrame once per timeframe and pass to all detectors.
 
     Returns:
         Dict with patterns by timeframe
     """
     from app.config import Config
+    from app.services.aggregator import get_candles_as_dataframe
 
     if pattern_types is None:
         pattern_types = PATTERN_TYPES
 
     results = {}
 
+    # Get all detectors upfront
+    detectors = [(pt, get_detector(pt)) for pt in pattern_types]
+    detectors = [(pt, d) for pt, d in detectors if d is not None]
+
     for tf in Config.TIMEFRAMES:
         results[tf] = []
 
-        for pattern_type in pattern_types:
-            detector = get_detector(pattern_type)
-            if detector:
-                try:
-                    patterns = detector.detect(symbol, tf)
-                    results[tf].extend(patterns)
-                except Exception:
-                    pass
+        # Load DataFrame once per timeframe
+        try:
+            df = get_candles_as_dataframe(symbol, tf, limit=200)
+        except Exception:
+            continue
+
+        # Pass to all detectors
+        for pattern_type, detector in detectors:
+            try:
+                patterns = detector.detect(symbol, tf, df=df)
+                results[tf].extend(patterns)
+            except Exception:
+                pass
 
     return results
