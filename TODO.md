@@ -73,13 +73,13 @@
 - [x] Add log level configuration via `LOG_LEVEL` env var (DEBUG/INFO/WARNING/ERROR)
 - [x] Add `LOG_FORMAT` env var support (colored or json)
 
-### 2.3 Add Gunicorn Configuration
-- [ ] Create `gunicorn.conf.py`:
-  - workers = 4
+### 2.3 Add Gunicorn Configuration ✅
+- [x] Create `gunicorn.conf.py`:
+  - workers = min(cpu_count * 2 + 1, 4) (capped for SQLite)
   - bind = "0.0.0.0:5000"
   - timeout = 120
-- [ ] Update `requirements.txt` with gunicorn
-- [ ] Create `start.sh` script for production
+- [x] Update `requirements.txt` with gunicorn (already present)
+- [x] Create `start.sh` script for production
 
 ### 2.4 Add Connection Pooling Config
 - [ ] **File**: `app/config.py`
@@ -163,7 +163,7 @@
 | 1.4 | CSRF Fix | **Done** | Critical |
 | 2.1 | Health Check | **Done** | |
 | 2.2 | Logging | **Done** | |
-| 2.3 | Gunicorn | Pending | |
+| 2.3 | Gunicorn | **Done** | |
 | 2.4 | Connection Pool | Pending | |
 | 3.1 | DB Index | Pending | |
 | 3.2 | Portfolio Query | Pending | |
