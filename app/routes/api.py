@@ -1,7 +1,8 @@
 import hmac
 import os
 from functools import wraps
-from flask import Blueprint, request, jsonify
+from typing import Callable, Tuple, Any
+from flask import Blueprint, request, jsonify, Response
 from sqlalchemy.orm import joinedload
 from app.models import Symbol, Candle, Pattern, Signal, Setting
 from app.config import Config
@@ -9,11 +10,14 @@ from app import db, csrf, limiter
 
 api_bp = Blueprint('api', __name__)
 
+# Type alias for Flask route responses
+JsonResponse = Tuple[Response, int] | Response
+
 # Exempt API from CSRF (uses API key authentication instead)
 csrf.exempt(api_bp)
 
 
-def require_api_key(f):
+def require_api_key(f: Callable[..., Any]) -> Callable[..., Any]:
     """
     Decorator to require API key for sensitive endpoints.
 
@@ -21,7 +25,7 @@ def require_api_key(f):
     set environment variable: ALLOW_UNAUTHENTICATED_API=true
     """
     @wraps(f)
-    def decorated(*args, **kwargs):
+    def decorated(*args: Any, **kwargs: Any) -> JsonResponse:
         # Check if auth is explicitly disabled (development only)
         if os.getenv('ALLOW_UNAUTHENTICATED_API', 'false').lower() == 'true':
             return f(*args, **kwargs)
@@ -52,7 +56,7 @@ def require_api_key(f):
 
 
 @api_bp.route('/health')
-def health_check():
+def health_check() -> JsonResponse:
     """
     Health check endpoint for monitoring and load balancers.
 
@@ -85,7 +89,7 @@ def health_check():
 
 
 @api_bp.route('/symbols')
-def get_symbols():
+def get_symbols() -> Response:
     """Get all symbols"""
     active_only = request.args.get('active', 'true') == 'true'
     query = Symbol.query
@@ -96,7 +100,7 @@ def get_symbols():
 
 
 @api_bp.route('/candles/<symbol>/<timeframe>')
-def get_candles(symbol, timeframe):
+def get_candles(symbol: str, timeframe: str) -> JsonResponse:
     """Get candles for a symbol/timeframe"""
     sym = Symbol.query.filter_by(symbol=symbol.replace('-', '/')).first()
     if not sym:
@@ -113,7 +117,7 @@ def get_candles(symbol, timeframe):
 
 
 @api_bp.route('/patterns')
-def get_patterns():
+def get_patterns() -> Response:
     """Get patterns with optional filters"""
     symbol = request.args.get('symbol')
     timeframe = request.args.get('timeframe')
@@ -138,7 +142,7 @@ def get_patterns():
 
 
 @api_bp.route('/signals')
-def get_signals():
+def get_signals() -> Response:
     """Get signals with optional filters"""
     status = request.args.get('status')
     direction = request.args.get('direction')
@@ -164,7 +168,7 @@ def get_signals():
 
 
 @api_bp.route('/matrix')
-def get_matrix():
+def get_matrix() -> Response:
     """Get the symbol/timeframe pattern matrix (optimized: 1 query instead of 180)"""
     from sqlalchemy import func
 
