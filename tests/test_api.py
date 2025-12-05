@@ -7,6 +7,52 @@ from app.models import Symbol, Candle, Pattern, Signal, Setting
 from app import db
 
 
+class TestHealthEndpoint:
+    """Tests for /api/health endpoint (Phase 2.1)"""
+
+    def test_health_returns_200(self, client, app):
+        """Test health endpoint returns 200 when healthy"""
+        with app.app_context():
+            response = client.get('/api/health')
+            assert response.status_code == 200
+
+    def test_health_returns_json(self, client, app):
+        """Test health endpoint returns valid JSON"""
+        with app.app_context():
+            response = client.get('/api/health')
+            assert response.content_type == 'application/json'
+
+    def test_health_contains_required_fields(self, client, app):
+        """Test health response contains all required fields"""
+        with app.app_context():
+            response = client.get('/api/health')
+            data = response.json
+            assert 'status' in data
+            assert 'database' in data
+            assert 'timestamp' in data
+            assert 'version' in data
+
+    def test_health_status_healthy(self, client, app):
+        """Test health status is 'healthy' when DB is connected"""
+        with app.app_context():
+            response = client.get('/api/health')
+            data = response.json
+            assert data['status'] == 'healthy'
+            assert data['database'] == 'connected'
+
+    def test_health_no_auth_required(self, client, app):
+        """Test health endpoint doesn't require authentication"""
+        with app.app_context():
+            from app.models import Setting
+            # Set API key (which would normally require auth)
+            Setting.set('api_key', 'test-secret-key')
+            db.session.commit()
+
+            # Health should still work without auth
+            response = client.get('/api/health')
+            assert response.status_code == 200
+
+
 class TestSymbolsEndpoint:
     """Tests for /api/symbols endpoint"""
 

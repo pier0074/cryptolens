@@ -1,6 +1,11 @@
 import os
 import time
+import logging
+import warnings
 from flask import Flask, g, request
+
+# Suppress flask-limiter in-memory storage warning (fine for development)
+warnings.filterwarnings('ignore', message='Using the in-memory storage')
 from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
@@ -9,6 +14,56 @@ from flask_limiter.util import get_remote_address
 db = SQLAlchemy()
 csrf = CSRFProtect()
 limiter = Limiter(key_func=get_remote_address, default_limits=["200 per minute"])
+
+# Configure logging
+def setup_logging(app, db_log_level=None):
+    """Configure application logging based on environment or database setting."""
+    # Priority: db setting > env var > default
+    log_level = db_log_level or os.getenv('LOG_LEVEL', 'INFO')
+    log_level = log_level.upper()
+    log_format = os.getenv('LOG_FORMAT', 'colored')
+
+    # Map string to logging level
+    level_map = {
+        'DEBUG': logging.DEBUG,
+        'INFO': logging.INFO,
+        'WARNING': logging.WARNING,
+        'ERROR': logging.ERROR,
+        'CRITICAL': logging.CRITICAL
+    }
+    level = level_map.get(log_level, logging.INFO)
+
+    # Create logger for the app
+    logger = logging.getLogger('cryptolens')
+    logger.setLevel(level)
+
+    # Remove existing handlers to avoid duplicates
+    logger.handlers.clear()
+
+    # Create console handler
+    handler = logging.StreamHandler()
+    handler.setLevel(level)
+
+    # Create formatter based on format preference
+    if log_format == 'json':
+        # JSON format for production log aggregation
+        formatter = logging.Formatter(
+            '{"timestamp":"%(asctime)s","level":"%(levelname)s","message":"%(message)s"}'
+        )
+    else:
+        # Simple format for development
+        formatter = logging.Formatter(
+            '%(asctime)s [%(levelname)s] %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
+
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+
+    # Store logger on app for easy access
+    app.logger_cryptolens = logger
+
+    return logger
 
 
 def format_price(value):
@@ -93,18 +148,19 @@ def create_app(config_name=None):
     @app.after_request
     def after_request(response):
         if hasattr(g, 'start_time'):
-            import sys
             elapsed_ms = (time.time() - g.start_time) * 1000
-            # Color code based on response time
+
+            # Log level based on response time
+            log_msg = f"[{elapsed_ms:7.1f}ms] {request.method} {request.path} -> {response.status_code}"
+
+            # Get the cryptolens logger
+            req_logger = logging.getLogger('cryptolens')
             if elapsed_ms < 100:
-                color = '\033[92m'  # Green
+                req_logger.debug(log_msg)
             elif elapsed_ms < 500:
-                color = '\033[93m'  # Yellow
+                req_logger.info(log_msg)
             else:
-                color = '\033[91m'  # Red
-            reset = '\033[0m'
-            # Log with timing (to stderr for immediate display)
-            print(f"{color}[{elapsed_ms:7.1f}ms]{reset} {request.method} {request.path}", file=sys.stderr, flush=True)
+                req_logger.warning(log_msg)
         return response
 
     # Register blueprints
@@ -128,9 +184,8 @@ def create_app(config_name=None):
     app.register_blueprint(stats_bp, url_prefix='/stats')
     app.register_blueprint(portfolio_bp, url_prefix='/portfolio')
 
-    # Exempt API and test endpoints from CSRF
+    # Exempt API from CSRF (uses API key authentication instead)
     csrf.exempt(api_bp)
-    csrf.exempt(settings_bp)
 
     # Create database tables and enable WAL mode for better concurrency
     with app.app_context():
@@ -139,5 +194,10 @@ def create_app(config_name=None):
         if 'sqlite' in app.config['SQLALCHEMY_DATABASE_URI']:
             db.session.execute(db.text('PRAGMA journal_mode=WAL'))
             db.session.commit()
+
+        # Setup logging (after DB is ready, so we can read settings)
+        from app.models import Setting
+        db_log_level = Setting.get('log_level')
+        logger = setup_logging(app, db_log_level)
 
     return app

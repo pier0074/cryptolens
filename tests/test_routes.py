@@ -378,3 +378,207 @@ class TestSettingsRoutes:
             assert response.status_code == 200
             data = response.get_json()
             assert 'success' in data
+
+
+class TestPortfolioInputValidation:
+    """Tests for portfolio input validation (Phase 1.3)"""
+
+    def test_create_portfolio_valid(self, client, app):
+        """Test creating portfolio with valid data"""
+        response = client.post(
+            '/portfolio/create',
+            data={'name': 'Test Portfolio', 'initial_balance': '10000'},
+            follow_redirects=False
+        )
+        # Should redirect on success
+        assert response.status_code == 302
+
+    def test_create_portfolio_missing_name(self, client, app):
+        """Test creating portfolio without name fails validation"""
+        response = client.post(
+            '/portfolio/create',
+            data={'initial_balance': '10000'},
+            follow_redirects=True
+        )
+        assert response.status_code == 200
+        assert b'Portfolio name is required' in response.data
+
+    def test_create_portfolio_name_too_long(self, client, app):
+        """Test creating portfolio with name > 100 chars fails"""
+        long_name = 'A' * 101
+        response = client.post(
+            '/portfolio/create',
+            data={'name': long_name, 'initial_balance': '10000'},
+            follow_redirects=True
+        )
+        assert response.status_code == 200
+        assert b'must be less than 100 characters' in response.data
+
+    def test_create_portfolio_negative_balance(self, client, app):
+        """Test creating portfolio with negative balance fails"""
+        response = client.post(
+            '/portfolio/create',
+            data={'name': 'Test', 'initial_balance': '-100'},
+            follow_redirects=True
+        )
+        assert response.status_code == 200
+        assert b'must be at least' in response.data
+
+    def test_create_portfolio_balance_too_high(self, client, app):
+        """Test creating portfolio with balance > 1 billion fails"""
+        response = client.post(
+            '/portfolio/create',
+            data={'name': 'Test', 'initial_balance': '2000000000'},
+            follow_redirects=True
+        )
+        assert response.status_code == 200
+        assert b'must be less than' in response.data
+
+    def test_create_portfolio_invalid_balance(self, client, app):
+        """Test creating portfolio with non-numeric balance fails"""
+        response = client.post(
+            '/portfolio/create',
+            data={'name': 'Test', 'initial_balance': 'not_a_number'},
+            follow_redirects=True
+        )
+        assert response.status_code == 200
+        assert b'must be a valid number' in response.data
+
+
+class TestTradeInputValidation:
+    """Tests for trade input validation (Phase 1.3)"""
+
+    @pytest.fixture
+    def sample_portfolio(self, app):
+        """Create a sample portfolio for testing"""
+        from app.models import Portfolio
+        with app.app_context():
+            portfolio = Portfolio(
+                name='Test Portfolio',
+                initial_balance=10000,
+                current_balance=10000,
+                currency='USDT'
+            )
+            db.session.add(portfolio)
+            db.session.commit()
+            return portfolio.id
+
+    def test_create_trade_valid(self, client, app, sample_portfolio):
+        """Test creating trade with valid data"""
+        response = client.post(
+            f'/portfolio/{sample_portfolio}/trades/new',
+            data={
+                'symbol': 'BTC/USDT',
+                'entry_price': '50000',
+                'entry_quantity': '0.1',
+                'direction': 'long'
+            },
+            follow_redirects=False
+        )
+        # Should redirect on success
+        assert response.status_code == 302
+
+    def test_create_trade_missing_symbol(self, client, app, sample_portfolio):
+        """Test creating trade without symbol fails"""
+        response = client.post(
+            f'/portfolio/{sample_portfolio}/trades/new',
+            data={
+                'entry_price': '50000',
+                'entry_quantity': '0.1',
+                'direction': 'long'
+            },
+            follow_redirects=True
+        )
+        assert response.status_code == 200
+        assert b'Symbol is required' in response.data
+
+    def test_create_trade_symbol_too_short(self, client, app, sample_portfolio):
+        """Test creating trade with symbol < 3 chars fails"""
+        response = client.post(
+            f'/portfolio/{sample_portfolio}/trades/new',
+            data={
+                'symbol': 'BT',
+                'entry_price': '50000',
+                'entry_quantity': '0.1',
+                'direction': 'long'
+            },
+            follow_redirects=True
+        )
+        assert response.status_code == 200
+        assert b'must be at least 3 characters' in response.data
+
+    def test_create_trade_symbol_too_long(self, client, app, sample_portfolio):
+        """Test creating trade with symbol > 20 chars fails"""
+        response = client.post(
+            f'/portfolio/{sample_portfolio}/trades/new',
+            data={
+                'symbol': 'A' * 21,
+                'entry_price': '50000',
+                'entry_quantity': '0.1',
+                'direction': 'long'
+            },
+            follow_redirects=True
+        )
+        assert response.status_code == 200
+        assert b'must be less than 20 characters' in response.data
+
+    def test_create_trade_negative_entry_price(self, client, app, sample_portfolio):
+        """Test creating trade with negative entry_price fails"""
+        response = client.post(
+            f'/portfolio/{sample_portfolio}/trades/new',
+            data={
+                'symbol': 'BTC/USDT',
+                'entry_price': '-100',
+                'entry_quantity': '0.1',
+                'direction': 'long'
+            },
+            follow_redirects=True
+        )
+        assert response.status_code == 200
+        assert b'Entry price' in response.data and b'must be at least' in response.data
+
+    def test_create_trade_zero_entry_quantity(self, client, app, sample_portfolio):
+        """Test creating trade with zero entry_quantity fails"""
+        response = client.post(
+            f'/portfolio/{sample_portfolio}/trades/new',
+            data={
+                'symbol': 'BTC/USDT',
+                'entry_price': '50000',
+                'entry_quantity': '0',
+                'direction': 'long'
+            },
+            follow_redirects=True
+        )
+        assert response.status_code == 200
+        assert b'Entry quantity' in response.data and b'must be at least' in response.data
+
+    def test_create_trade_invalid_entry_price(self, client, app, sample_portfolio):
+        """Test creating trade with non-numeric entry_price fails"""
+        response = client.post(
+            f'/portfolio/{sample_portfolio}/trades/new',
+            data={
+                'symbol': 'BTC/USDT',
+                'entry_price': 'not_a_number',
+                'entry_quantity': '0.1',
+                'direction': 'long'
+            },
+            follow_redirects=True
+        )
+        assert response.status_code == 200
+        assert b'Entry price' in response.data and b'must be a valid number' in response.data
+
+    def test_create_trade_risk_percent_over_100(self, client, app, sample_portfolio):
+        """Test creating trade with risk_percent > 100 fails"""
+        response = client.post(
+            f'/portfolio/{sample_portfolio}/trades/new',
+            data={
+                'symbol': 'BTC/USDT',
+                'entry_price': '50000',
+                'entry_quantity': '0.1',
+                'direction': 'long',
+                'risk_percent': '150'
+            },
+            follow_redirects=True
+        )
+        assert response.status_code == 200
+        assert b'Risk percent' in response.data and b'must be less than' in response.data

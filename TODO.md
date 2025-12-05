@@ -10,8 +10,8 @@
 
 | Version | Focus | Status |
 |---------|-------|--------|
-| v2.0.0 | API Auth + Rate Limiting | Pending |
-| v2.1.0 | Input Validation + CSRF Fix | Pending |
+| v2.0.0 | API Auth + Rate Limiting | **Done** |
+| v2.1.0 | Input Validation + CSRF Fix | **Done** |
 | v2.2.0 | Health Check + Logging | Pending |
 | v2.3.0 | Gunicorn + Connection Pooling | Pending |
 | v2.4.0 | Performance (DB Index, Query Opt) | Pending |
@@ -37,39 +37,41 @@
   - `/api/scheduler/*` - 2/minute
 - [x] Test: Verify rate limiting is active
 
-### 1.3 Add Input Validation
-- [ ] **File**: `app/routes/portfolio.py`
-- [ ] Add validation for `new_trade()`:
+### 1.3 Add Input Validation ✅
+- [x] **File**: `app/routes/portfolio.py`
+- [x] Add validation for `new_trade()`:
   - entry_price > 0
   - entry_quantity > 0
   - symbol length 3-20 chars
-- [ ] Add validation for `create()` portfolio:
+- [x] Add validation for `create()` portfolio:
   - initial_balance > 0, < 1_000_000_000
-- [ ] Return proper error messages on validation failure
+- [x] Return proper error messages on validation failure
+- [x] Test: 14 new validation tests added
 
-### 1.4 Fix CSRF Exemption on Settings
-- [ ] **File**: `app/__init__.py`
-- [ ] Remove `csrf.exempt(settings_bp)`
-- [ ] **File**: `app/routes/settings.py` - Add CSRF tokens to forms
-- [ ] **File**: `app/templates/settings/*.html` - Add `{{ csrf_token() }}`
-- [ ] Test: Verify settings forms still work
+### 1.4 Fix CSRF Exemption on Settings ✅
+- [x] **File**: `app/__init__.py`
+- [x] Remove `csrf.exempt(settings_bp)`
+- [x] **File**: `app/routes/settings.py` - CSRF tokens already in forms
+- [x] **File**: `app/templates/settings.html` - Already has `{{ csrf_token() }}`
+- [x] Test: All 6 settings tests pass
 
 ---
 
 ## Phase 2: Production Readiness
 
-### 2.1 Add Health Check Endpoint
-- [ ] **File**: `app/routes/api.py`
-- [ ] Add `/api/health` endpoint
-- [ ] Check database connectivity
-- [ ] Return JSON with status, db state, timestamp
-- [ ] Test: `curl http://localhost:5000/api/health`
+### 2.1 Add Health Check Endpoint ✅
+- [x] **File**: `app/routes/api.py`
+- [x] Add `/api/health` endpoint
+- [x] Check database connectivity
+- [x] Return JSON with status, db state, timestamp
+- [x] Test: 5 new health check tests added
 
-### 2.2 Replace print() with Logging
-- [ ] **File**: `app/__init__.py`
-- [ ] Configure Python `logging` module
-- [ ] Replace `print()` in request timing middleware
-- [ ] Add log level configuration via env var
+### 2.2 Replace print() with Logging ✅
+- [x] **File**: `app/__init__.py`
+- [x] Configure Python `logging` module with `setup_logging()` function
+- [x] Replace `print()` in request timing middleware with logger.debug/info/warning
+- [x] Add log level configuration via `LOG_LEVEL` env var (DEBUG/INFO/WARNING/ERROR)
+- [x] Add `LOG_FORMAT` env var support (colored or json)
 
 ### 2.3 Add Gunicorn Configuration
 - [ ] Create `gunicorn.conf.py`:
@@ -157,10 +159,10 @@
 |-------|------|--------|-------|
 | 1.1 | API Auth | **Done** | Critical |
 | 1.2 | Rate Limiting | **Done** | Critical |
-| 1.3 | Input Validation | Pending | Critical |
-| 1.4 | CSRF Fix | Pending | Critical |
-| 2.1 | Health Check | Pending | |
-| 2.2 | Logging | Pending | |
+| 1.3 | Input Validation | **Done** | Critical |
+| 1.4 | CSRF Fix | **Done** | Critical |
+| 2.1 | Health Check | **Done** | |
+| 2.2 | Logging | **Done** | |
 | 2.3 | Gunicorn | Pending | |
 | 2.4 | Connection Pool | Pending | |
 | 3.1 | DB Index | Pending | |

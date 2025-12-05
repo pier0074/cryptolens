@@ -51,6 +51,39 @@ def require_api_key(f):
     return decorated
 
 
+@api_bp.route('/health')
+def health_check():
+    """
+    Health check endpoint for monitoring and load balancers.
+
+    Returns JSON with:
+    - status: 'healthy' or 'unhealthy'
+    - database: 'connected' or 'error'
+    - timestamp: current UTC timestamp
+    """
+    import time
+    from datetime import datetime, timezone
+
+    health = {
+        'status': 'healthy',
+        'database': 'connected',
+        'timestamp': datetime.now(timezone.utc).isoformat(),
+        'version': '2.0.0'
+    }
+
+    # Check database connectivity
+    try:
+        db.session.execute(db.text('SELECT 1'))
+        health['database'] = 'connected'
+    except Exception as e:
+        health['status'] = 'unhealthy'
+        health['database'] = 'error'
+        health['database_error'] = str(e)
+        return jsonify(health), 503
+
+    return jsonify(health), 200
+
+
 @api_bp.route('/symbols')
 def get_symbols():
     """Get all symbols"""

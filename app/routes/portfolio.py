@@ -2,7 +2,7 @@
 Portfolio Routes
 CRUD operations for portfolios, trades, and journal entries.
 """
-from flask import Blueprint, render_template, request, jsonify, abort, redirect, url_for
+from flask import Blueprint, render_template, request, jsonify, abort, redirect, url_for, flash
 from datetime import datetime, timezone
 from app.models import (
     Portfolio, Trade, JournalEntry, TradeTag, Signal, Symbol,
@@ -11,6 +11,47 @@ from app.models import (
 from app import db
 
 portfolio_bp = Blueprint('portfolio', __name__)
+
+
+# ==================== VALIDATION HELPERS ====================
+
+class ValidationError(Exception):
+    """Custom exception for validation errors"""
+    pass
+
+
+def validate_positive_float(value, field_name, min_val=0.00000001, max_val=1_000_000_000):
+    """Validate that a value is a positive float within bounds"""
+    if value is None or value == '':
+        raise ValidationError(f"{field_name} is required")
+    try:
+        val = float(value)
+        if val < min_val:
+            raise ValidationError(f"{field_name} must be at least {min_val}")
+        if val > max_val:
+            raise ValidationError(f"{field_name} must be less than {max_val:,}")
+        return val
+    except (ValueError, TypeError):
+        raise ValidationError(f"{field_name} must be a valid number")
+
+
+def validate_string(value, field_name, min_len=1, max_len=100):
+    """Validate that a string is within length bounds"""
+    if value is None or str(value).strip() == '':
+        raise ValidationError(f"{field_name} is required")
+    val = str(value).strip()
+    if len(val) < min_len:
+        raise ValidationError(f"{field_name} must be at least {min_len} characters")
+    if len(val) > max_len:
+        raise ValidationError(f"{field_name} must be less than {max_len} characters")
+    return val
+
+
+def validate_optional_positive_float(value, field_name, min_val=0.00000001, max_val=1_000_000_000):
+    """Validate an optional positive float"""
+    if value is None or value == '':
+        return None
+    return validate_positive_float(value, field_name, min_val, max_val)
 
 
 # ==================== PORTFOLIO CRUD ====================
@@ -35,16 +76,29 @@ def create():
     """Create a new portfolio"""
     if request.method == 'POST':
         data = request.form
-        portfolio = Portfolio(
-            name=data.get('name', 'My Portfolio'),
-            description=data.get('description'),
-            initial_balance=float(data.get('initial_balance', 10000)),
-            current_balance=float(data.get('initial_balance', 10000)),
-            currency=data.get('currency', 'USDT')
-        )
-        db.session.add(portfolio)
-        db.session.commit()
-        return redirect(url_for('portfolio.detail', portfolio_id=portfolio.id))
+        try:
+            # Validate inputs
+            name = validate_string(data.get('name'), 'Portfolio name', min_len=1, max_len=100)
+            initial_balance = validate_positive_float(
+                data.get('initial_balance', 10000),
+                'Initial balance',
+                min_val=0.01,
+                max_val=1_000_000_000
+            )
+
+            portfolio = Portfolio(
+                name=name,
+                description=data.get('description', '').strip()[:500] if data.get('description') else None,
+                initial_balance=initial_balance,
+                current_balance=initial_balance,
+                currency=data.get('currency', 'USDT')[:10]
+            )
+            db.session.add(portfolio)
+            db.session.commit()
+            return redirect(url_for('portfolio.detail', portfolio_id=portfolio.id))
+        except ValidationError as e:
+            flash(str(e), 'error')
+            return render_template('portfolio/create.html', error=str(e))
 
     return render_template('portfolio/create.html')
 
@@ -206,30 +260,52 @@ def new_trade(portfolio_id):
     if request.method == 'POST':
         data = request.form
 
-        # Calculate risk amount if percentage given
-        risk_percent = float(data.get('risk_percent', 0)) if data.get('risk_percent') else None
-        risk_amount = portfolio.current_balance * (risk_percent / 100) if risk_percent else None
+        try:
+            # Validate required inputs
+            symbol = validate_string(data.get('symbol'), 'Symbol', min_len=3, max_len=20)
+            entry_price = validate_positive_float(data.get('entry_price'), 'Entry price')
+            entry_quantity = validate_positive_float(data.get('entry_quantity'), 'Entry quantity')
 
-        trade = Trade(
-            portfolio_id=portfolio_id,
-            signal_id=int(data.get('signal_id')) if data.get('signal_id') else None,
-            symbol=data.get('symbol'),
-            direction=data.get('direction', 'long'),
-            timeframe=data.get('timeframe'),
-            pattern_type=data.get('pattern_type'),
-            entry_price=float(data.get('entry_price')),
-            entry_quantity=float(data.get('entry_quantity')),
-            stop_loss=float(data.get('stop_loss')) if data.get('stop_loss') else None,
-            take_profit=float(data.get('take_profit')) if data.get('take_profit') else None,
-            risk_amount=risk_amount,
-            risk_percent=risk_percent,
-            setup_notes=data.get('setup_notes'),
-            lessons_learned=data.get('lessons_learned')
-        )
-        db.session.add(trade)
-        db.session.commit()
+            # Validate optional price fields
+            stop_loss = validate_optional_positive_float(data.get('stop_loss'), 'Stop loss')
+            take_profit = validate_optional_positive_float(data.get('take_profit'), 'Take profit')
 
-        return redirect(url_for('portfolio.trade_detail', portfolio_id=portfolio_id, trade_id=trade.id))
+            # Calculate risk amount if percentage given
+            risk_percent = validate_optional_positive_float(data.get('risk_percent'), 'Risk percent', max_val=100)
+            risk_amount = portfolio.current_balance * (risk_percent / 100) if risk_percent else None
+
+            trade = Trade(
+                portfolio_id=portfolio_id,
+                signal_id=int(data.get('signal_id')) if data.get('signal_id') else None,
+                symbol=symbol,
+                direction=data.get('direction', 'long'),
+                timeframe=data.get('timeframe'),
+                pattern_type=data.get('pattern_type'),
+                entry_price=entry_price,
+                entry_quantity=entry_quantity,
+                stop_loss=stop_loss,
+                take_profit=take_profit,
+                risk_amount=risk_amount,
+                risk_percent=risk_percent,
+                setup_notes=data.get('setup_notes'),
+                lessons_learned=data.get('lessons_learned')
+            )
+            db.session.add(trade)
+            db.session.commit()
+
+            return redirect(url_for('portfolio.trade_detail', portfolio_id=portfolio_id, trade_id=trade.id))
+        except ValidationError as e:
+            flash(str(e), 'error')
+            # Re-render form with error
+            symbols = Symbol.query.filter_by(is_active=True).all()
+            current_prices = _get_current_prices()
+            return render_template('portfolio/trade_form.html',
+                                  portfolio=portfolio,
+                                  symbols=symbols,
+                                  current_prices=current_prices,
+                                  trade=None,
+                                  is_edit=False,
+                                  error=str(e))
 
     # Get symbols and current prices
     symbols = Symbol.query.filter_by(is_active=True).all()

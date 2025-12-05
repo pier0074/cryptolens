@@ -94,6 +94,29 @@
             </form>
         </div>
 
+        <!-- Application Settings -->
+        <div class="bg-card rounded-lg p-6">
+            <h2 class="text-lg font-bold mb-4">Application Settings</h2>
+
+            <form action="/settings/save" method="POST" class="space-y-4">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div>
+                    <label class="block text-sm text-muted mb-1">Log Level</label>
+                    <select name="log_level" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2">
+                        <option value="DEBUG" {% if settings.log_level == 'DEBUG' %}selected{% endif %}>DEBUG (All requests)</option>
+                        <option value="INFO" {% if settings.log_level == 'INFO' or not settings.log_level %}selected{% endif %}>INFO (Medium+ requests)</option>
+                        <option value="WARNING" {% if settings.log_level == 'WARNING' %}selected{% endif %}>WARNING (Slow requests only)</option>
+                        <option value="ERROR" {% if settings.log_level == 'ERROR' %}selected{% endif %}>ERROR (Errors only)</option>
+                    </select>
+                    <p class="text-xs text-muted mt-1">Controls request timing log verbosity. Requires app restart to take effect.</p>
+                </div>
+
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">
+                    Save
+                </button>
+            </form>
+        </div>
+
         <!-- Security -->
         <div class="bg-card rounded-lg p-6 lg:col-span-2">
             <h2 class="text-lg font-bold mb-4">API Security</h2>
