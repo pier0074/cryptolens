@@ -1,11 +1,8 @@
 from flask import Blueprint, render_template, request, jsonify
 import json
-import pandas as pd
-from sqlalchemy import func, and_
 from app.models import Symbol, Pattern, Candle, StatsCache
 from app.config import Config
 from app import db
-from app.services.trading import get_trading_levels_for_pattern, calculate_atr
 
 
 def _get_cached_prices():
@@ -13,41 +10,23 @@ def _get_cached_prices():
     cache = StatsCache.query.filter_by(key='global').first()
     if cache:
         data = json.loads(cache.data)
-        # Build symbol -> price map
         return {stat['symbol']: stat['current_price'] for stat in data.get('symbol_stats', [])}
     return {}
 
+
 patterns_bp = Blueprint('patterns', __name__)
 
-
-def get_candles_df(symbol_id: int, timeframe: str, limit: int = 100) -> pd.DataFrame:
-    """Get candles as DataFrame for trading calculations"""
-    candles = Candle.query.filter_by(
-        symbol_id=symbol_id,
-        timeframe=timeframe
-    ).order_by(Candle.timestamp.desc()).limit(limit).all()
-
-    if not candles:
-        return pd.DataFrame()
-
-    data = [{
-        'timestamp': c.timestamp,
-        'open': c.open,
-        'high': c.high,
-        'low': c.low,
-        'close': c.close,
-        'volume': c.volume
-    } for c in reversed(candles)]
-
-    return pd.DataFrame(data)
+# Pagination settings
+PATTERNS_PER_PAGE = 50
 
 
 @patterns_bp.route('/')
 def index():
-    """Pattern list and visualization"""
+    """Pattern list and visualization with pagination"""
     symbol_filter = request.args.get('symbol', None)
     timeframe_filter = request.args.get('timeframe', None)
     status_filter = request.args.get('status', 'active')
+    page = request.args.get('page', 1, type=int)
 
     query = Pattern.query
 
@@ -62,7 +41,11 @@ def index():
     if status_filter:
         query = query.filter_by(status=status_filter)
 
-    patterns = query.order_by(Pattern.detected_at.desc()).limit(100).all()
+    # Paginate results (50 per page)
+    pagination = query.order_by(Pattern.detected_at.desc()).paginate(
+        page=page, per_page=PATTERNS_PER_PAGE, error_out=False
+    )
+    patterns = pagination.items
     symbols = Symbol.query.filter_by(is_active=True).all()
 
     # Get current prices from cache (fast - ~1ms instead of ~3s)
@@ -70,71 +53,15 @@ def index():
 
     # Build symbol_id -> price map
     symbol_map = {s.id: s.symbol for s in symbols}
-    current_prices = {}
+
+    # Attach current price to each pattern (trading_levels already stored in DB)
     for pattern in patterns:
         sym_name = symbol_map.get(pattern.symbol_id) or pattern.symbol.symbol
-        current_prices[pattern.symbol_id] = cached_prices.get(sym_name)
-
-    # Calculate trading levels for each pattern
-    # Cache candles AND pre-computed ATR/swings by (symbol_id, timeframe)
-    patterns_with_levels = []
-    candle_cache = {}
-    levels_cache = {}  # Cache ATR, swing_high, swing_low per (symbol, tf)
-
-    for pattern in patterns:
-        cache_key = (pattern.symbol_id, pattern.timeframe)
-
-        # Get candles (cached)
-        if cache_key not in candle_cache:
-            candle_cache[cache_key] = get_candles_df(pattern.symbol_id, pattern.timeframe)
-
-        df = candle_cache[cache_key]
-
-        # Get pre-computed ATR/swings (cached per symbol/tf)
-        if cache_key not in levels_cache:
-            from app.services.trading import calculate_atr, find_swing_high, find_swing_low
-            if df is not None and not df.empty:
-                levels_cache[cache_key] = {
-                    'atr': calculate_atr(df),
-                    'swing_high': find_swing_high(df, len(df) - 1),
-                    'swing_low': find_swing_low(df, len(df) - 1),
-                }
-            else:
-                levels_cache[cache_key] = {'atr': 0, 'swing_high': None, 'swing_low': None}
-
-        cached_levels = levels_cache[cache_key]
-
-        # Calculate trading levels using cached ATR/swings
-        from app.services.trading import calculate_trading_levels
-        tl = calculate_trading_levels(
-            pattern_type=pattern.pattern_type,
-            zone_low=pattern.zone_low,
-            zone_high=pattern.zone_high,
-            direction=pattern.direction,
-            atr=cached_levels['atr'],
-            swing_high=cached_levels['swing_high'],
-            swing_low=cached_levels['swing_low']
-        )
-
-        levels = {
-            'entry': tl.entry,
-            'stop_loss': tl.stop_loss,
-            'take_profit_1': tl.take_profit_1,
-            'take_profit_2': tl.take_profit_2,
-            'take_profit_3': tl.take_profit_3,
-            'risk': tl.risk,
-            'risk_reward_1': round(tl.risk_reward_1, 2),
-            'risk_reward_2': round(tl.risk_reward_2, 2),
-            'risk_reward_3': round(tl.risk_reward_3, 2),
-        }
-
-        # Attach levels and current price to pattern object
-        pattern.trading_levels = levels
-        pattern.current_price = current_prices.get(pattern.symbol_id)
-        patterns_with_levels.append(pattern)
+        pattern.current_price = cached_prices.get(sym_name)
 
     return render_template('patterns.html',
-                           patterns=patterns_with_levels,
+                           patterns=patterns,
+                           pagination=pagination,
                            symbols=symbols,
                            timeframes=Config.TIMEFRAMES,
                            current_symbol=symbol_filter,

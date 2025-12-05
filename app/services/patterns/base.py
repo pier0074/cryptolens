@@ -110,16 +110,29 @@ class PatternDetector(ABC):
         zone_low: float,
         zone_high: float,
         detected_at: int,
-        symbol_name: str
+        symbol_name: str,
+        df: pd.DataFrame = None
     ) -> Optional[Dict[str, Any]]:
         """
         Common pattern saving logic. Checks for duplicates and saves to DB.
+        Also pre-computes and stores trading levels.
+
+        Args:
+            symbol_id: Symbol ID
+            timeframe: Timeframe
+            direction: Pattern direction
+            zone_low: Zone low price
+            zone_high: Zone high price
+            detected_at: Detection timestamp
+            symbol_name: Symbol name for return dict
+            df: DataFrame with candle data for ATR/swing calculations
 
         Returns:
             Pattern dict if saved, None if already exists
         """
         from app.models import Pattern
         from app import db
+        from app.services.trading import calculate_trading_levels, calculate_atr, find_swing_high, find_swing_low
 
         # Check if exact pattern already exists
         existing = Pattern.query.filter_by(
@@ -132,6 +145,25 @@ class PatternDetector(ABC):
         if existing:
             return None
 
+        # Compute trading levels
+        atr = 0.0
+        swing_high = None
+        swing_low = None
+        if df is not None and not df.empty:
+            atr = calculate_atr(df)
+            swing_high = find_swing_high(df, len(df) - 1)
+            swing_low = find_swing_low(df, len(df) - 1)
+
+        levels = calculate_trading_levels(
+            pattern_type=self.pattern_type,
+            zone_low=zone_low,
+            zone_high=zone_high,
+            direction=direction,
+            atr=atr,
+            swing_high=swing_high,
+            swing_low=swing_low
+        )
+
         pattern = Pattern(
             symbol_id=symbol_id,
             timeframe=timeframe,
@@ -140,7 +172,17 @@ class PatternDetector(ABC):
             zone_high=zone_high,
             zone_low=zone_low,
             detected_at=detected_at,
-            status='active'
+            status='active',
+            # Pre-computed trading levels
+            entry=levels.entry,
+            stop_loss=levels.stop_loss,
+            take_profit_1=levels.take_profit_1,
+            take_profit_2=levels.take_profit_2,
+            take_profit_3=levels.take_profit_3,
+            risk=levels.risk,
+            risk_reward_1=round(levels.risk_reward_1, 2),
+            risk_reward_2=round(levels.risk_reward_2, 2),
+            risk_reward_3=round(levels.risk_reward_3, 2),
         )
         db.session.add(pattern)
 

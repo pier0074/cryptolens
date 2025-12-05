@@ -113,7 +113,7 @@ class OrderBlockDetector(PatternDetector):
                     continue
 
                 pattern_dict = self.save_pattern(
-                    symbol_id, timeframe, direction, zone_low, zone_high, detected_at, symbol_name
+                    symbol_id, timeframe, direction, zone_low, zone_high, detected_at, symbol_name, df
                 )
                 return pattern_dict
 

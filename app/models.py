@@ -131,6 +131,17 @@ class Pattern(db.Model):
     fill_percentage = db.Column(db.Float, nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
+    # Pre-computed trading levels (computed at detection time)
+    entry = db.Column(db.Float, nullable=True)
+    stop_loss = db.Column(db.Float, nullable=True)
+    take_profit_1 = db.Column(db.Float, nullable=True)
+    take_profit_2 = db.Column(db.Float, nullable=True)
+    take_profit_3 = db.Column(db.Float, nullable=True)
+    risk = db.Column(db.Float, nullable=True)
+    risk_reward_1 = db.Column(db.Float, nullable=True)
+    risk_reward_2 = db.Column(db.Float, nullable=True)
+    risk_reward_3 = db.Column(db.Float, nullable=True)
+
     __table_args__ = (
         db.Index('idx_pattern_active', 'symbol_id', 'timeframe', 'status'),
         db.Index('idx_pattern_detected', 'detected_at'),
@@ -198,7 +209,32 @@ class Pattern(db.Model):
             'is_expired': self.is_expired,
             'time_remaining': self.time_remaining,
             'status': self.status,
-            'fill_percentage': self.fill_percentage
+            'fill_percentage': self.fill_percentage,
+            # Trading levels
+            'entry': self.entry,
+            'stop_loss': self.stop_loss,
+            'take_profit_1': self.take_profit_1,
+            'take_profit_2': self.take_profit_2,
+            'take_profit_3': self.take_profit_3,
+            'risk': self.risk,
+            'risk_reward_1': self.risk_reward_1,
+            'risk_reward_2': self.risk_reward_2,
+            'risk_reward_3': self.risk_reward_3,
+        }
+
+    @property
+    def trading_levels(self):
+        """Return trading levels as a dict (for template compatibility)."""
+        return {
+            'entry': self.entry,
+            'stop_loss': self.stop_loss,
+            'take_profit_1': self.take_profit_1,
+            'take_profit_2': self.take_profit_2,
+            'take_profit_3': self.take_profit_3,
+            'risk': self.risk,
+            'risk_reward_1': round(self.risk_reward_1, 2) if self.risk_reward_1 else 0,
+            'risk_reward_2': round(self.risk_reward_2, 2) if self.risk_reward_2 else 0,
+            'risk_reward_3': round(self.risk_reward_3, 2) if self.risk_reward_3 else 0,
         }
 
 

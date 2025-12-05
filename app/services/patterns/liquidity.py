@@ -115,36 +115,13 @@ class LiquiditySweepDetector(PatternDetector):
                     if self.has_overlapping_pattern(sym.id, timeframe, 'bullish', zone_low, zone_high):
                         continue
 
-                    # Check if exact pattern already exists
-                    existing = Pattern.query.filter_by(
-                        symbol_id=sym.id,
-                        timeframe=timeframe,
-                        pattern_type='liquidity_sweep',
-                        detected_at=int(current['timestamp'])
-                    ).first()
-
-                    if not existing:
-                        pattern = Pattern(
-                            symbol_id=sym.id,
-                            timeframe=timeframe,
-                            pattern_type='liquidity_sweep',
-                            direction='bullish',
-                            zone_high=zone_high,
-                            zone_low=zone_low,
-                            detected_at=int(current['timestamp']),
-                            status='active'
-                        )
-                        db.session.add(pattern)
-                        patterns.append({
-                            'type': 'liquidity_sweep',
-                            'direction': 'bullish',
-                            'zone_high': zone_high,
-                            'zone_low': zone_low,
-                            'detected_at': int(current['timestamp']),
-                            'symbol': symbol,
-                            'timeframe': timeframe,
-                            'swept_level': swing_low['price']
-                        })
+                    pattern_dict = self.save_pattern(
+                        sym.id, timeframe, 'bullish', zone_low, zone_high,
+                        int(current['timestamp']), symbol, df
+                    )
+                    if pattern_dict:
+                        pattern_dict['swept_level'] = swing_low['price']
+                        patterns.append(pattern_dict)
                     break  # Only one sweep per candle
 
             # Check for bearish sweep (sweep of highs)
@@ -167,36 +144,13 @@ class LiquiditySweepDetector(PatternDetector):
                     if self.has_overlapping_pattern(sym.id, timeframe, 'bearish', zone_low, zone_high):
                         continue
 
-                    # Check if exact pattern already exists
-                    existing = Pattern.query.filter_by(
-                        symbol_id=sym.id,
-                        timeframe=timeframe,
-                        pattern_type='liquidity_sweep',
-                        detected_at=int(current['timestamp'])
-                    ).first()
-
-                    if not existing:
-                        pattern = Pattern(
-                            symbol_id=sym.id,
-                            timeframe=timeframe,
-                            pattern_type='liquidity_sweep',
-                            direction='bearish',
-                            zone_high=zone_high,
-                            zone_low=zone_low,
-                            detected_at=int(current['timestamp']),
-                            status='active'
-                        )
-                        db.session.add(pattern)
-                        patterns.append({
-                            'type': 'liquidity_sweep',
-                            'direction': 'bearish',
-                            'zone_high': zone_high,
-                            'zone_low': zone_low,
-                            'detected_at': int(current['timestamp']),
-                            'symbol': symbol,
-                            'timeframe': timeframe,
-                            'swept_level': swing_high['price']
-                        })
+                    pattern_dict = self.save_pattern(
+                        sym.id, timeframe, 'bearish', zone_low, zone_high,
+                        int(current['timestamp']), symbol, df
+                    )
+                    if pattern_dict:
+                        pattern_dict['swept_level'] = swing_high['price']
+                        patterns.append(pattern_dict)
                     break  # Only one sweep per candle
 
         db.session.commit()

@@ -50,7 +50,7 @@ class ImbalanceDetector(PatternDetector):
 
                 if self._should_save_pattern(sym.id, timeframe, 'bullish', zone_low, zone_high):
                     pattern_dict = self.save_pattern(
-                        sym.id, timeframe, 'bullish', zone_low, zone_high, detected_at, symbol
+                        sym.id, timeframe, 'bullish', zone_low, zone_high, detected_at, symbol, df
                     )
                     if pattern_dict:
                         patterns.append(pattern_dict)
@@ -63,7 +63,7 @@ class ImbalanceDetector(PatternDetector):
 
                 if self._should_save_pattern(sym.id, timeframe, 'bearish', zone_low, zone_high):
                     pattern_dict = self.save_pattern(
-                        sym.id, timeframe, 'bearish', zone_low, zone_high, detected_at, symbol
+                        sym.id, timeframe, 'bearish', zone_low, zone_high, detected_at, symbol, df
                     )
                     if pattern_dict:
                         patterns.append(pattern_dict)

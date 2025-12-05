@@ -174,6 +174,45 @@
             </tbody>
         </table>
     </div>
+
+    <!-- Pagination -->
+    {% if pagination and pagination.pages > 1 %}
+    <div class="flex items-center justify-between mt-4">
+        <div class="text-sm text-muted">
+            Showing {{ ((pagination.page - 1) * pagination.per_page) + 1 }}-{{ [pagination.page * pagination.per_page, pagination.total] | min }} of {{ pagination.total }} patterns
+        </div>
+        <div class="flex items-center space-x-2">
+            {% if pagination.has_prev %}
+            <a href="?{% if current_symbol %}symbol={{ current_symbol }}&{% endif %}{% if current_timeframe %}timeframe={{ current_timeframe }}&{% endif %}{% if current_status %}status={{ current_status }}&{% endif %}page={{ pagination.prev_num }}"
+               class="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-sm">
+                Previous
+            </a>
+            {% endif %}
+
+            {% for page_num in pagination.iter_pages(left_edge=1, left_current=2, right_current=2, right_edge=1) %}
+                {% if page_num %}
+                    {% if page_num == pagination.page %}
+                    <span class="px-3 py-1 rounded bg-blue-600 text-sm">{{ page_num }}</span>
+                    {% else %}
+                    <a href="?{% if current_symbol %}symbol={{ current_symbol }}&{% endif %}{% if current_timeframe %}timeframe={{ current_timeframe }}&{% endif %}{% if current_status %}status={{ current_status }}&{% endif %}page={{ page_num }}"
+                       class="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-sm">
+                        {{ page_num }}
+                    </a>
+                    {% endif %}
+                {% else %}
+                    <span class="px-2 text-muted">...</span>
+                {% endif %}
+            {% endfor %}
+
+            {% if pagination.has_next %}
+            <a href="?{% if current_symbol %}symbol={{ current_symbol }}&{% endif %}{% if current_timeframe %}timeframe={{ current_timeframe }}&{% endif %}{% if current_status %}status={{ current_status }}&{% endif %}page={{ pagination.next_num }}"
+               class="px-3 py-1 rounded bg-gray-700 hover:bg-gray-600 text-sm">
+                Next
+            </a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
 </div>
 {% endblock %}
 
