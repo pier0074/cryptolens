@@ -81,12 +81,11 @@
 - [x] Update `requirements.txt` with gunicorn (already present)
 - [x] Create `start.sh` script for production
 
-### 2.4 Add Connection Pooling Config
-- [ ] **File**: `app/config.py`
-- [ ] Add `SQLALCHEMY_ENGINE_OPTIONS` with:
-  - pool_size: 10
-  - pool_recycle: 300
-  - pool_pre_ping: True
+### 2.4 Add Connection Pooling Config ✅
+- [x] **File**: `app/config.py`
+- [x] Add `get_engine_options()` method that detects database type:
+  - SQLite: timeout=30, pool_pre_ping=True
+  - PostgreSQL/MySQL: pool_size=10, pool_recycle=300, pool_pre_ping=True, max_overflow=20
 
 ---
 
@@ -164,7 +163,7 @@
 | 2.1 | Health Check | **Done** | |
 | 2.2 | Logging | **Done** | |
 | 2.3 | Gunicorn | **Done** | |
-| 2.4 | Connection Pool | Pending | |
+| 2.4 | Connection Pool | **Done** | |
 | 3.1 | DB Index | Pending | |
 | 3.2 | Portfolio Query | Pending | |
 | 3.3 | DataFrame Opt | Pending | |

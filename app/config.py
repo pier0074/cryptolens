@@ -20,10 +20,31 @@ class Config:
     SECRET_KEY = get_secret_key()
     SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///data/cryptolens.db')
     SQLALCHEMY_TRACK_MODIFICATIONS = False
-    # SQLite timeout to prevent "database is locked" errors
-    SQLALCHEMY_ENGINE_OPTIONS = {
-        'connect_args': {'timeout': 30}  # Wait up to 30 seconds for locks
-    }
+
+    # Database engine options
+    # For SQLite: timeout prevents "database is locked" errors
+    # For PostgreSQL/MySQL: add pool_size, pool_recycle for connection pooling
+    @staticmethod
+    def get_engine_options():
+        """Get database engine options based on database type."""
+        db_url = os.getenv('DATABASE_URL', 'sqlite:///data/cryptolens.db')
+
+        if db_url.startswith('sqlite'):
+            # SQLite uses NullPool by default, no connection pooling needed
+            return {
+                'connect_args': {'timeout': 30},  # Wait up to 30s for locks
+                'pool_pre_ping': True,  # Verify connections before use
+            }
+        else:
+            # PostgreSQL/MySQL connection pooling
+            return {
+                'pool_size': 10,        # Number of connections to keep
+                'pool_recycle': 300,    # Recycle connections after 5 min
+                'pool_pre_ping': True,  # Verify connections before use
+                'max_overflow': 20,     # Allow 20 additional connections
+            }
+
+    SQLALCHEMY_ENGINE_OPTIONS = get_engine_options.__func__()
 
     # NTFY.sh Notifications
     NTFY_TOPIC = os.getenv('NTFY_TOPIC', 'cryptolens-signals')
