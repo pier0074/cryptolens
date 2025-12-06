@@ -667,12 +667,100 @@ class StatsCache(db.Model):
 # USER AUTHENTICATION & SUBSCRIPTION MODELS
 # =============================================================================
 
-# Subscription plan definitions
+# Subscription plan definitions (3-tier system)
 SUBSCRIPTION_PLANS = {
-    'free': {'days': 7, 'price': 0, 'name': 'Free Trial'},
-    'monthly': {'days': 30, 'price': 9.99, 'name': 'Monthly'},
-    'yearly': {'days': 365, 'price': 79.99, 'name': 'Yearly'},
-    'lifetime': {'days': None, 'price': 199.99, 'name': 'Lifetime'},
+    'free': {
+        'name': 'Free',
+        'price': 0,
+        'price_yearly': 0,
+        'days': None,  # Unlimited duration with limited features
+        'tier': 'free',
+    },
+    'pro': {
+        'name': 'Pro',
+        'price': 19,  # Monthly
+        'price_yearly': 190,  # ~$15.83/mo
+        'days': 30,
+        'tier': 'pro',
+    },
+    'premium': {
+        'name': 'Premium',
+        'price': 49,  # Monthly
+        'price_yearly': 490,  # ~$40.83/mo
+        'days': 30,
+        'tier': 'premium',
+    },
+    # Legacy plans for backwards compatibility
+    'monthly': {'name': 'Pro (Legacy)', 'price': 19, 'days': 30, 'tier': 'pro'},
+    'yearly': {'name': 'Pro Yearly (Legacy)', 'price': 190, 'days': 365, 'tier': 'pro'},
+    'lifetime': {'name': 'Premium Lifetime', 'price': 499, 'days': None, 'tier': 'premium'},
+}
+
+# Subscription tier feature limits
+SUBSCRIPTION_TIERS = {
+    'free': {
+        'name': 'Free',
+        'symbols': ['BTC/USDT'],  # Only BTC
+        'max_symbols': 1,
+        'daily_notifications': 3,
+        'dashboard': 'limited',  # BTC only
+        'patterns_page': False,
+        'patterns_limit': 0,
+        'signals_page': False,
+        'signals_limit': 0,
+        'analytics_page': False,
+        'portfolio': False,
+        'portfolio_limit': 0,
+        'transactions_limit': 0,
+        'backtest': False,
+        'stats_page': 'limited',  # BTC only
+        'api_access': False,
+        'priority_support': False,
+        'settings': ['ntfy'],  # Only NTFY settings
+        'risk_parameters': False,
+    },
+    'pro': {
+        'name': 'Pro',
+        'symbols': None,  # Any symbol
+        'max_symbols': 10,
+        'daily_notifications': 100,
+        'dashboard': 'full',
+        'patterns_page': True,
+        'patterns_limit': 100,  # Last 100 entries
+        'signals_page': True,
+        'signals_limit': 100,  # Last 100 entries
+        'analytics_page': True,  # No recent backtest
+        'portfolio': True,
+        'portfolio_limit': 1,
+        'transactions_limit': 10,
+        'backtest': False,
+        'stats_page': 'full',
+        'api_access': False,
+        'priority_support': False,
+        'settings': ['ntfy', 'risk'],  # NTFY + Risk Parameters
+        'risk_parameters': True,
+    },
+    'premium': {
+        'name': 'Premium',
+        'symbols': None,  # Any symbol
+        'max_symbols': None,  # Unlimited
+        'daily_notifications': None,  # Unlimited
+        'dashboard': 'full',
+        'patterns_page': True,
+        'patterns_limit': None,  # Full history
+        'signals_page': True,
+        'signals_limit': None,  # Full history
+        'analytics_page': True,  # Full with backtest
+        'portfolio': True,
+        'portfolio_limit': None,  # Unlimited
+        'transactions_limit': None,  # Unlimited
+        'backtest': True,
+        'stats_page': 'full',
+        'api_access': True,
+        'priority_support': True,
+        'settings': ['ntfy', 'risk'],  # NTFY + Risk Parameters
+        'risk_parameters': True,
+    },
 }
 
 # Subscription status options
@@ -695,6 +783,18 @@ class User(db.Model):
 
     # Unique NTFY topic for this user (generated on registration)
     ntfy_topic = db.Column(db.String(64), unique=True, nullable=False)
+
+    # Email verification
+    email_verification_token = db.Column(db.String(64), nullable=True)
+    email_verification_expires = db.Column(db.DateTime, nullable=True)
+
+    # Password reset
+    password_reset_token = db.Column(db.String(64), nullable=True)
+    password_reset_expires = db.Column(db.DateTime, nullable=True)
+
+    # Two-factor authentication (TOTP)
+    totp_secret = db.Column(db.String(32), nullable=True)
+    totp_enabled = db.Column(db.Boolean, default=False)
 
     # Timestamps
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
@@ -724,6 +824,86 @@ class User(db.Model):
         from werkzeug.security import check_password_hash
         return check_password_hash(self.password_hash, password)
 
+    def generate_email_verification_token(self):
+        """Generate a token for email verification"""
+        import secrets
+        from app.config import Config
+        self.email_verification_token = secrets.token_urlsafe(32)
+        self.email_verification_expires = (
+            datetime.now(timezone.utc) +
+            timedelta(hours=Config.EMAIL_VERIFICATION_EXPIRY_HOURS)
+        )
+        return self.email_verification_token
+
+    def verify_email_token(self, token):
+        """Verify the email verification token"""
+        if not self.email_verification_token or not self.email_verification_expires:
+            return False
+        if self.email_verification_token != token:
+            return False
+        expires = _ensure_utc_naive(self.email_verification_expires)
+        now = _utc_now_naive()
+        if now > expires:
+            return False
+        return True
+
+    def clear_email_verification_token(self):
+        """Clear the email verification token after use"""
+        self.email_verification_token = None
+        self.email_verification_expires = None
+
+    def generate_password_reset_token(self):
+        """Generate a token for password reset"""
+        import secrets
+        from app.config import Config
+        self.password_reset_token = secrets.token_urlsafe(32)
+        self.password_reset_expires = (
+            datetime.now(timezone.utc) +
+            timedelta(hours=Config.PASSWORD_RESET_EXPIRY_HOURS)
+        )
+        return self.password_reset_token
+
+    def verify_password_reset_token(self, token):
+        """Verify the password reset token"""
+        if not self.password_reset_token or not self.password_reset_expires:
+            return False
+        if self.password_reset_token != token:
+            return False
+        expires = _ensure_utc_naive(self.password_reset_expires)
+        now = _utc_now_naive()
+        if now > expires:
+            return False
+        return True
+
+    def clear_password_reset_token(self):
+        """Clear the password reset token after use"""
+        self.password_reset_token = None
+        self.password_reset_expires = None
+
+    def generate_totp_secret(self):
+        """Generate a new TOTP secret for 2FA"""
+        import pyotp
+        self.totp_secret = pyotp.random_base32()
+        return self.totp_secret
+
+    def get_totp_uri(self):
+        """Get the TOTP provisioning URI for QR code"""
+        import pyotp
+        if not self.totp_secret:
+            return None
+        return pyotp.totp.TOTP(self.totp_secret).provisioning_uri(
+            name=self.email,
+            issuer_name='CryptoLens'
+        )
+
+    def verify_totp(self, token):
+        """Verify a TOTP token"""
+        import pyotp
+        if not self.totp_secret:
+            return False
+        totp = pyotp.TOTP(self.totp_secret)
+        return totp.verify(token)
+
     @property
     def has_valid_subscription(self):
         """Check if user has a valid subscription for receiving notifications"""
@@ -739,6 +919,40 @@ class User(db.Model):
             self.is_verified and
             self.has_valid_subscription
         )
+
+    @property
+    def subscription_tier(self):
+        """Get the user's subscription tier (free, pro, premium)"""
+        if not self.subscription or not self.subscription.is_valid:
+            return 'free'
+        plan = self.subscription.plan
+        plan_config = SUBSCRIPTION_PLANS.get(plan, {})
+        return plan_config.get('tier', 'free')
+
+    @property
+    def tier_features(self):
+        """Get the user's tier feature limits"""
+        tier = self.subscription_tier
+        return SUBSCRIPTION_TIERS.get(tier, SUBSCRIPTION_TIERS['free'])
+
+    def can_access_feature(self, feature_name):
+        """Check if user can access a specific feature"""
+        features = self.tier_features
+        value = features.get(feature_name)
+        # For boolean features, return the value directly
+        if isinstance(value, bool):
+            return value
+        # For string features (like 'limited', 'full'), return True if set
+        if isinstance(value, str):
+            return value != 'none'
+        # For int/None features, return True if > 0 or None (unlimited)
+        if value is None:
+            return True
+        return value > 0
+
+    def get_feature_limit(self, feature_name):
+        """Get the limit for a specific feature (None = unlimited)"""
+        return self.tier_features.get(feature_name)
 
     def to_dict(self, include_subscription=True):
         result = {
@@ -792,6 +1006,12 @@ class Subscription(db.Model):
 
     def __repr__(self):
         return f'<Subscription {self.user_id} {self.plan} {self.status}>'
+
+    @property
+    def tier(self):
+        """Get the subscription tier (free, pro, premium)"""
+        plan_config = SUBSCRIPTION_PLANS.get(self.plan, {})
+        return plan_config.get('tier', 'free')
 
     @property
     def is_lifetime(self):

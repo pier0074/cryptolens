@@ -23,6 +23,7 @@ gunicorn>=21.0.0
 # Security
 Flask-WTF>=1.2.0
 Flask-Limiter>=4.1.0
+pyotp>=2.9.0
 
 # Development
 pytest>=7.4.0

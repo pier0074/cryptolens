@@ -3,6 +3,7 @@ from flask import Blueprint, render_template, request, jsonify, flash, redirect,
 from app.models import Symbol, Setting
 from app.config import Config
 from app import db
+from app.decorators import login_required, subscription_required
 
 # Valid symbol pattern: BASE/QUOTE format (e.g., BTC/USDT, ETH/BTC)
 SYMBOL_PATTERN = re.compile(r'^[A-Z0-9]{2,10}/[A-Z0-9]{2,10}$')
@@ -11,8 +12,10 @@ settings_bp = Blueprint('settings', __name__)
 
 
 @settings_bp.route('/')
+@login_required
+@subscription_required
 def index():
-    """Settings page"""
+    """Settings page (requires login + subscription)"""
     symbols = Symbol.query.all()
 
     # Get current settings
@@ -39,6 +42,8 @@ def index():
 
 
 @settings_bp.route('/save', methods=['POST'])
+@login_required
+@subscription_required
 def save():
     """Save settings"""
     data = request.form

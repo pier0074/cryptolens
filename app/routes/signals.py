@@ -1,13 +1,16 @@
 from flask import Blueprint, render_template, request, jsonify, abort
 from app.models import Symbol, Signal, Pattern
 from app import db
+from app.decorators import login_required, feature_required
 
 signals_bp = Blueprint('signals', __name__)
 
 
 @signals_bp.route('/')
+@login_required
+@feature_required('signals_page')
 def index():
-    """Signal list"""
+    """Signal list (Pro+ required)"""
     symbol_filter = request.args.get('symbol', '').strip()
     direction_filter = request.args.get('direction', None)
 

@@ -14,9 +14,27 @@ Automated detection of institutional trading patterns across multiple timeframes
 - **Multi-TF Confluence**: Signals generated when patterns align across timeframes
 - **Interactive Charts**: TradingView-style charts with pattern visualization
 - **Smart Price Formatting**: Auto-adjusts decimals for micro-cap to large-cap tokens
-- **Push Notifications**: Free via NTFY.sh
+- **Push Notifications**: Per-user unique topics via NTFY.sh
 - **Portfolio & Journal**: Trade logging with PnL tracking and journal entries
+- **User Authentication**: Registration, login, email verification, password reset
+- **3-Tier Subscriptions**: Free, Pro, and Premium plans with feature restrictions
 - **Event-Driven**: Each symbol processed immediately after fetch
+
+---
+
+## Subscription Tiers
+
+| Feature | Free | Pro | Premium |
+|---------|------|-----|---------|
+| Symbols | BTC only | Up to 10 | Unlimited |
+| Dashboard | Limited | Full | Full |
+| Patterns Page | - | Last 100 | Full history |
+| Signals Page | - | Last 50 | Full history |
+| Portfolio | - | 3 portfolios | Unlimited |
+| Backtest | - | - | Full access |
+| Analytics | - | Basic | Full |
+| Daily Notifications | 3 | 100 | Unlimited |
+| API Access | - | - | Full |
 
 ---
 
@@ -127,6 +145,13 @@ python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 
+# Configure environment
+cp .env.example .env
+# Edit .env with your SMTP settings for email verification
+
+# Run database migrations
+python scripts/migrate_all.py
+
 # Fetch historical data
 python scripts/fetch_historical.py -v
 
@@ -134,7 +159,30 @@ python scripts/fetch_historical.py -v
 python run.py
 ```
 
-Visit `http://localhost:5000`
+Visit `http://localhost:5000` and register a new account.
+
+---
+
+## Environment Configuration
+
+Create a `.env` file with:
+
+```bash
+# Flask
+SECRET_KEY=your-secret-key-here
+FLASK_ENV=production
+
+# Email (for verification and password reset)
+MAIL_SERVER=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USE_TLS=true
+MAIL_USERNAME=your-email@gmail.com
+MAIL_PASSWORD=your-app-password
+MAIL_DEFAULT_SENDER=your-email@gmail.com
+
+# NTFY (self-hosted or ntfy.sh)
+NTFY_URL=https://ntfy.sh
+```
 
 ---
 
@@ -175,25 +223,43 @@ Patterns auto-expire based on timeframe significance:
 
 ## Web Interface
 
-| Page | Features |
-|------|----------|
-| **Dashboard** | Pattern matrix, data freshness, quick scan |
-| **Patterns** | TradingView charts, pattern zones, timeframe selector |
-| **Signals** | Symbol search, direction filter, confluence scores |
-| **Portfolio** | Multi-portfolio, trade logging, PnL tracking, journal |
-| **Backtest** | Strategy backtesting with historical data |
-| **Stats** | Database stats, candle counts, verification status |
-| **Analytics** | Performance metrics and analysis |
-| **Logs** | Application logs viewer |
-| **Settings** | Symbols, notifications, risk parameters |
+| Page | Features | Access |
+|------|----------|--------|
+| **Dashboard** | Pattern matrix, data freshness, quick scan | All users |
+| **Patterns** | TradingView charts, pattern zones, timeframe selector | Pro+ |
+| **Signals** | Symbol search, direction filter, confluence scores | Pro+ |
+| **Portfolio** | Multi-portfolio, trade logging, PnL tracking, journal | Pro+ |
+| **Backtest** | Strategy backtesting with historical data | Premium |
+| **Stats** | Database stats, candle counts, verification status | All users |
+| **Analytics** | Performance metrics and analysis | Pro+ |
+| **Logs** | Application logs viewer | All users |
+| **Settings** | Symbols, notifications, risk parameters | Subscribers |
+
+---
+
+## Authentication
+
+### Registration
+- Email verification required before full access
+- Unique NTFY topic generated per user
+- Password requirements: 8+ chars, uppercase, lowercase, digit
+
+### Password Reset
+- Request reset via email
+- Secure token-based reset links
+- Rate-limited to prevent abuse
 
 ---
 
 ## Notifications
 
-1. Install [NTFY app](https://ntfy.sh/) on your phone
-2. Subscribe to your topic (default: `cryptolens-signals`)
-3. Test from Settings page
+1. Register and verify your email
+2. Install [NTFY app](https://ntfy.sh/) on your phone
+3. Go to Profile page to see your unique topic
+4. Subscribe to your topic in the NTFY app
+5. Test from Settings page
+
+Each user has a unique notification topic, ensuring privacy.
 
 ---
 
@@ -206,14 +272,16 @@ Patterns auto-expire based on timeframe significance:
 | `/api/signals` | GET | Trade signals |
 | `/api/matrix` | GET | Pattern matrix |
 | `/api/scan/run` | POST | Trigger manual scan |
+| `/api/subscription/status` | GET | Check subscription status |
 
 ---
 
 ## Testing
 
 ```bash
-python -m pytest                    # All tests
+python -m pytest                    # All tests (311 tests)
 python -m pytest --cov=app          # With coverage
+python -m pytest tests/test_auth.py # Auth tests only
 ```
 
 ---
@@ -223,21 +291,31 @@ python -m pytest --cov=app          # With coverage
 ```
 cryptolens/
 ├── app/
-│   ├── routes/          # Web routes (api, dashboard, patterns, signals, etc.)
-│   ├── services/        # Business logic (aggregator, notifier, signals, etc.)
+│   ├── routes/          # Web routes (api, auth, dashboard, patterns, etc.)
+│   ├── services/        # Business logic (auth, email, notifier, signals, etc.)
 │   │   └── patterns/    # FVG, OB, Sweep detectors
 │   ├── templates/       # Jinja2 HTML templates
-│   └── models.py        # SQLAlchemy models
+│   ├── decorators.py    # Access control decorators
+│   └── models.py        # SQLAlchemy models (User, Subscription, etc.)
 ├── scripts/
 │   ├── fetch.py         # Real-time fetch + detection
 │   ├── fetch_historical.py
 │   ├── compute_stats.py # Cache stats
 │   ├── db_health.py     # Data verification
 │   └── migrate_all.py   # DB migrations
-├── tests/               # Test suite
+├── tests/               # Test suite (311 tests)
 ├── crontab.txt          # Cron configuration
 └── run.py
 ```
+
+---
+
+## Roadmap
+
+- [ ] Two-factor authentication (TOTP)
+- [ ] User notification preferences
+- [ ] Payment integration (LemonSqueezy, NOWPayments)
+- [ ] Public landing page
 
 ---
 

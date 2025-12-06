@@ -2,13 +2,16 @@ from flask import Blueprint, render_template, request, jsonify, abort
 from app.models import Symbol, Backtest
 from app.config import Config
 from app import db
+from app.decorators import login_required, feature_required
 
 backtest_bp = Blueprint('backtest', __name__)
 
 
 @backtest_bp.route('/')
+@login_required
+@feature_required('backtest')
 def index():
-    """Backtest interface"""
+    """Backtest interface (Premium only)"""
     symbols = Symbol.query.filter_by(is_active=True).all()
     backtests = Backtest.query.order_by(Backtest.created_at.desc()).limit(20).all()
 
@@ -19,8 +22,10 @@ def index():
 
 
 @backtest_bp.route('/run', methods=['POST'])
+@login_required
+@feature_required('backtest')
 def run():
-    """Run a backtest"""
+    """Run a backtest (Premium only)"""
     data = request.get_json()
 
     symbol = data.get('symbol')

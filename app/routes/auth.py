@@ -2,7 +2,6 @@
 Authentication Routes
 Handles user registration, login, logout, and profile
 """
-from functools import wraps
 from urllib.parse import urlparse
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, jsonify, g
 from app.services.auth import (
@@ -10,7 +9,12 @@ from app.services.auth import (
     get_user_by_id, AuthError
 )
 from app.services.subscription import check_subscription_status
+from app.services.email import (
+    send_verification_email, send_password_reset_email,
+    send_welcome_email, send_password_changed_email, is_email_configured
+)
 from app.models import User, SUBSCRIPTION_PLANS
+from app.decorators import login_required, admin_required, get_current_user
 from app import db, limiter
 
 
@@ -31,41 +35,6 @@ def is_safe_url(target):
     )
 
 auth_bp = Blueprint('auth', __name__)
-
-
-def login_required(f):
-    """Decorator to require login for a route"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            flash('Please log in to access this page.', 'warning')
-            return redirect(url_for('auth.login', next=request.url))
-        return f(*args, **kwargs)
-    return decorated_function
-
-
-def admin_required(f):
-    """Decorator to require admin privileges"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            flash('Please log in to access this page.', 'warning')
-            return redirect(url_for('auth.login', next=request.url))
-
-        user = get_user_by_id(session['user_id'])
-        if not user or not user.is_admin:
-            flash('Admin access required.', 'error')
-            return redirect(url_for('dashboard.index'))
-
-        return f(*args, **kwargs)
-    return decorated_function
-
-
-def get_current_user():
-    """Get the current logged-in user"""
-    if 'user_id' in session:
-        return get_user_by_id(session['user_id'])
-    return None
 
 
 @auth_bp.before_app_request
@@ -94,7 +63,19 @@ def register():
 
         try:
             user = register_user(email, username, password)
-            flash('Registration successful! Please log in.', 'success')
+
+            # Generate verification token and send email
+            if is_email_configured():
+                token = user.generate_email_verification_token()
+                db.session.commit()
+                send_verification_email(user, token)
+                flash('Registration successful! Please check your email to verify your account.', 'success')
+            else:
+                # Auto-verify if email not configured (development mode)
+                user.is_verified = True
+                db.session.commit()
+                flash('Registration successful! Please log in.', 'success')
+
             return redirect(url_for('auth.login'))
         except AuthError as e:
             flash(str(e), 'error')
@@ -213,3 +194,129 @@ def api_topic():
         'topic': user.ntfy_topic,
         'url': f"https://ntfy.sh/{user.ntfy_topic}",
     })
+
+
+# =============================================================================
+# EMAIL VERIFICATION ROUTES
+# =============================================================================
+
+@auth_bp.route('/verify-email/<token>')
+def verify_email(token):
+    """Verify email with token"""
+    # Find user with this token
+    user = User.query.filter_by(email_verification_token=token).first()
+
+    if not user:
+        flash('Invalid verification link.', 'error')
+        return redirect(url_for('auth.login'))
+
+    if not user.verify_email_token(token):
+        flash('Verification link has expired. Please request a new one.', 'error')
+        return redirect(url_for('auth.login'))
+
+    # Verify the user
+    user.is_verified = True
+    user.clear_email_verification_token()
+    db.session.commit()
+
+    # Send welcome email
+    if is_email_configured():
+        send_welcome_email(user)
+
+    flash('Email verified successfully! You can now log in.', 'success')
+    return redirect(url_for('auth.login'))
+
+
+@auth_bp.route('/resend-verification', methods=['GET', 'POST'])
+@limiter.limit("3 per hour")
+def resend_verification():
+    """Resend verification email"""
+    if 'user_id' in session:
+        return redirect(url_for('auth.profile'))
+
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip().lower()
+
+        user = User.query.filter_by(email=email).first()
+
+        if user and not user.is_verified:
+            if is_email_configured():
+                token = user.generate_email_verification_token()
+                db.session.commit()
+                send_verification_email(user, token)
+
+        # Always show same message to prevent email enumeration
+        flash('If an account with that email exists and is not verified, a verification link has been sent.', 'info')
+        return redirect(url_for('auth.login'))
+
+    return render_template('auth/resend_verification.html')
+
+
+# =============================================================================
+# PASSWORD RESET ROUTES
+# =============================================================================
+
+@auth_bp.route('/forgot-password', methods=['GET', 'POST'])
+@limiter.limit("3 per hour")
+def forgot_password():
+    """Request password reset"""
+    if 'user_id' in session:
+        return redirect(url_for('auth.profile'))
+
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip().lower()
+
+        user = User.query.filter_by(email=email).first()
+
+        if user and user.is_verified:
+            if is_email_configured():
+                token = user.generate_password_reset_token()
+                db.session.commit()
+                send_password_reset_email(user, token)
+
+        # Always show same message to prevent email enumeration
+        flash('If an account with that email exists, a password reset link has been sent.', 'info')
+        return redirect(url_for('auth.login'))
+
+    return render_template('auth/forgot_password.html')
+
+
+@auth_bp.route('/reset-password/<token>', methods=['GET', 'POST'])
+@limiter.limit("5 per hour")
+def reset_password(token):
+    """Reset password with token"""
+    if 'user_id' in session:
+        return redirect(url_for('auth.profile'))
+
+    # Find user with this token
+    user = User.query.filter_by(password_reset_token=token).first()
+
+    if not user or not user.verify_password_reset_token(token):
+        flash('Invalid or expired reset link. Please request a new one.', 'error')
+        return redirect(url_for('auth.forgot_password'))
+
+    if request.method == 'POST':
+        password = request.form.get('password', '')
+        confirm = request.form.get('confirm_password', '')
+
+        if password != confirm:
+            flash('Passwords do not match.', 'error')
+            return render_template('auth/reset_password.html', token=token)
+
+        if len(password) < 8:
+            flash('Password must be at least 8 characters.', 'error')
+            return render_template('auth/reset_password.html', token=token)
+
+        # Update password
+        user.set_password(password)
+        user.clear_password_reset_token()
+        db.session.commit()
+
+        # Send confirmation email
+        if is_email_configured():
+            send_password_changed_email(user)
+
+        flash('Password reset successfully! Please log in with your new password.', 'success')
+        return redirect(url_for('auth.login'))
+
+    return render_template('auth/reset_password.html', token=token)

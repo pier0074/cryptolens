@@ -9,6 +9,7 @@ from app.models import (
     TRADE_MOODS, TRADE_STATUSES
 )
 from app import db
+from app.decorators import login_required, feature_required, check_feature_limit, get_current_user
 
 portfolio_bp = Blueprint('portfolio', __name__)
 
@@ -57,8 +58,10 @@ def validate_optional_positive_float(value, field_name, min_val=0.00000001, max_
 # ==================== PORTFOLIO CRUD ====================
 
 @portfolio_bp.route('/')
+@login_required
+@feature_required('portfolio')
 def index():
-    """Portfolio list and overview"""
+    """Portfolio list and overview (Pro+ required)"""
     portfolios = Portfolio.query.filter_by(is_active=True).all()
 
     # Calculate summary stats
@@ -72,8 +75,10 @@ def index():
 
 
 @portfolio_bp.route('/create', methods=['GET', 'POST'])
+@login_required
+@feature_required('portfolio')
 def create():
-    """Create a new portfolio"""
+    """Create a new portfolio (Pro+ required)"""
     if request.method == 'POST':
         data = request.form
         try:

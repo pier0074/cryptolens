@@ -7,6 +7,7 @@ from unittest.mock import patch
 from flask import url_for
 from app.models import Symbol, Candle, Pattern, Signal, Log, Backtest, Setting
 from app import db
+from tests.conftest import login_user
 
 
 class TestDashboardRoutes:
@@ -124,30 +125,35 @@ class TestLogsRoutes:
 
 
 class TestPatternsRoutes:
-    """Tests for patterns routes"""
+    """Tests for patterns routes (requires Pro+ subscription)"""
 
-    def test_patterns_index(self, client, app):
-        """Test patterns page loads"""
+    def test_patterns_index(self, client, app, sample_user):
+        """Test patterns page loads for authenticated Pro user"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/patterns/')
         assert response.status_code == 200
 
-    def test_patterns_index_with_data(self, client, app, sample_symbol, sample_pattern):
+    def test_patterns_index_with_data(self, client, app, sample_user, sample_symbol, sample_pattern):
         """Test patterns page with pattern data"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/patterns/')
         assert response.status_code == 200
 
-    def test_patterns_filter_by_symbol(self, client, app, sample_symbol, sample_pattern):
+    def test_patterns_filter_by_symbol(self, client, app, sample_user, sample_symbol, sample_pattern):
         """Test patterns filtered by symbol"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/patterns/?symbol=BTC/USDT')
         assert response.status_code == 200
 
-    def test_patterns_filter_by_timeframe(self, client, app, sample_symbol, sample_pattern):
+    def test_patterns_filter_by_timeframe(self, client, app, sample_user, sample_symbol, sample_pattern):
         """Test patterns filtered by timeframe"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/patterns/?timeframe=1h')
         assert response.status_code == 200
 
-    def test_patterns_filter_by_status(self, client, app, sample_symbol, sample_pattern):
+    def test_patterns_filter_by_status(self, client, app, sample_user, sample_symbol, sample_pattern):
         """Test patterns filtered by status"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/patterns/?status=active')
         assert response.status_code == 200
 
@@ -166,15 +172,17 @@ class TestPatternsRoutes:
 
 
 class TestSignalsRoutes:
-    """Tests for signals routes"""
+    """Tests for signals routes (requires Pro+ subscription)"""
 
-    def test_signals_index(self, client, app):
-        """Test signals page loads"""
+    def test_signals_index(self, client, app, sample_user):
+        """Test signals page loads for authenticated Pro user"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/signals/')
         assert response.status_code == 200
 
-    def test_signals_with_data(self, client, app, sample_symbol, sample_pattern):
+    def test_signals_with_data(self, client, app, sample_user, sample_symbol, sample_pattern):
         """Test signals page with signal data"""
+        login_user(client, 'test@example.com', 'TestPass123')
         with app.app_context():
             signal = Signal(
                 symbol_id=sample_symbol,
@@ -195,8 +203,9 @@ class TestSignalsRoutes:
         response = client.get('/signals/')
         assert response.status_code == 200
 
-    def test_signals_filter_by_status(self, client, app, sample_symbol, sample_pattern):
+    def test_signals_filter_by_status(self, client, app, sample_user, sample_symbol, sample_pattern):
         """Test signals filtered by status"""
+        login_user(client, 'test@example.com', 'TestPass123')
         with app.app_context():
             signal = Signal(
                 symbol_id=sample_symbol,
@@ -217,8 +226,9 @@ class TestSignalsRoutes:
         response = client.get('/signals/?status=notified')
         assert response.status_code == 200
 
-    def test_signals_filter_by_direction(self, client, app, sample_symbol, sample_pattern):
+    def test_signals_filter_by_direction(self, client, app, sample_user, sample_symbol, sample_pattern):
         """Test signals filtered by direction"""
+        login_user(client, 'test@example.com', 'TestPass123')
         with app.app_context():
             signal = Signal(
                 symbol_id=sample_symbol,
@@ -300,15 +310,17 @@ class TestSignalsRoutes:
 
 
 class TestBacktestRoutes:
-    """Tests for backtest routes"""
+    """Tests for backtest routes (requires Premium subscription)"""
 
-    def test_backtest_index(self, client, app):
-        """Test backtest page loads"""
+    def test_backtest_index(self, client, app, user_lifetime):
+        """Test backtest page loads for authenticated Premium user"""
+        login_user(client, 'lifetime@example.com', 'TestPass123')
         response = client.get('/backtest/')
         assert response.status_code == 200
 
-    def test_backtest_index_with_symbols(self, client, app, sample_symbol):
+    def test_backtest_index_with_symbols(self, client, app, user_lifetime, sample_symbol):
         """Test backtest page with symbols"""
+        login_user(client, 'lifetime@example.com', 'TestPass123')
         response = client.get('/backtest/')
         assert response.status_code == 200
 
@@ -319,15 +331,17 @@ class TestBacktestRoutes:
 
 
 class TestSettingsRoutes:
-    """Tests for settings routes"""
+    """Tests for settings routes (requires subscription)"""
 
-    def test_settings_index(self, client, app):
-        """Test settings page loads"""
+    def test_settings_index(self, client, app, sample_user):
+        """Test settings page loads for authenticated user with subscription"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/settings/')
         assert response.status_code == 200
 
-    def test_settings_save(self, client, app):
+    def test_settings_save(self, client, app, sample_user):
         """Test saving settings"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             '/settings/save',
             data={'ntfy_topic': 'test-topic', 'ntfy_priority': '3'},
@@ -381,10 +395,11 @@ class TestSettingsRoutes:
 
 
 class TestPortfolioInputValidation:
-    """Tests for portfolio input validation (Phase 1.3)"""
+    """Tests for portfolio input validation (requires Pro+ subscription)"""
 
-    def test_create_portfolio_valid(self, client, app):
+    def test_create_portfolio_valid(self, client, app, sample_user):
         """Test creating portfolio with valid data"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             '/portfolio/create',
             data={'name': 'Test Portfolio', 'initial_balance': '10000'},
@@ -393,8 +408,9 @@ class TestPortfolioInputValidation:
         # Should redirect on success
         assert response.status_code == 302
 
-    def test_create_portfolio_missing_name(self, client, app):
+    def test_create_portfolio_missing_name(self, client, app, sample_user):
         """Test creating portfolio without name fails validation"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             '/portfolio/create',
             data={'initial_balance': '10000'},
@@ -403,8 +419,9 @@ class TestPortfolioInputValidation:
         assert response.status_code == 200
         assert b'Portfolio name is required' in response.data
 
-    def test_create_portfolio_name_too_long(self, client, app):
+    def test_create_portfolio_name_too_long(self, client, app, sample_user):
         """Test creating portfolio with name > 100 chars fails"""
+        login_user(client, 'test@example.com', 'TestPass123')
         long_name = 'A' * 101
         response = client.post(
             '/portfolio/create',
@@ -414,8 +431,9 @@ class TestPortfolioInputValidation:
         assert response.status_code == 200
         assert b'must be less than 100 characters' in response.data
 
-    def test_create_portfolio_negative_balance(self, client, app):
+    def test_create_portfolio_negative_balance(self, client, app, sample_user):
         """Test creating portfolio with negative balance fails"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             '/portfolio/create',
             data={'name': 'Test', 'initial_balance': '-100'},
@@ -424,8 +442,9 @@ class TestPortfolioInputValidation:
         assert response.status_code == 200
         assert b'must be at least' in response.data
 
-    def test_create_portfolio_balance_too_high(self, client, app):
+    def test_create_portfolio_balance_too_high(self, client, app, sample_user):
         """Test creating portfolio with balance > 1 billion fails"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             '/portfolio/create',
             data={'name': 'Test', 'initial_balance': '2000000000'},
@@ -434,8 +453,9 @@ class TestPortfolioInputValidation:
         assert response.status_code == 200
         assert b'must be less than' in response.data
 
-    def test_create_portfolio_invalid_balance(self, client, app):
+    def test_create_portfolio_invalid_balance(self, client, app, sample_user):
         """Test creating portfolio with non-numeric balance fails"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             '/portfolio/create',
             data={'name': 'Test', 'initial_balance': 'not_a_number'},
@@ -446,7 +466,7 @@ class TestPortfolioInputValidation:
 
 
 class TestTradeInputValidation:
-    """Tests for trade input validation (Phase 1.3)"""
+    """Tests for trade input validation (requires Pro+ subscription)"""
 
     @pytest.fixture
     def sample_portfolio(self, app):
@@ -463,8 +483,9 @@ class TestTradeInputValidation:
             db.session.commit()
             return portfolio.id
 
-    def test_create_trade_valid(self, client, app, sample_portfolio):
+    def test_create_trade_valid(self, client, app, sample_user, sample_portfolio):
         """Test creating trade with valid data"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             f'/portfolio/{sample_portfolio}/trades/new',
             data={
@@ -478,8 +499,9 @@ class TestTradeInputValidation:
         # Should redirect on success
         assert response.status_code == 302
 
-    def test_create_trade_missing_symbol(self, client, app, sample_portfolio):
+    def test_create_trade_missing_symbol(self, client, app, sample_user, sample_portfolio):
         """Test creating trade without symbol fails"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             f'/portfolio/{sample_portfolio}/trades/new',
             data={
@@ -492,8 +514,9 @@ class TestTradeInputValidation:
         assert response.status_code == 200
         assert b'Symbol is required' in response.data
 
-    def test_create_trade_symbol_too_short(self, client, app, sample_portfolio):
+    def test_create_trade_symbol_too_short(self, client, app, sample_user, sample_portfolio):
         """Test creating trade with symbol < 3 chars fails"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             f'/portfolio/{sample_portfolio}/trades/new',
             data={
@@ -507,8 +530,9 @@ class TestTradeInputValidation:
         assert response.status_code == 200
         assert b'must be at least 3 characters' in response.data
 
-    def test_create_trade_symbol_too_long(self, client, app, sample_portfolio):
+    def test_create_trade_symbol_too_long(self, client, app, sample_user, sample_portfolio):
         """Test creating trade with symbol > 20 chars fails"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             f'/portfolio/{sample_portfolio}/trades/new',
             data={
@@ -522,8 +546,9 @@ class TestTradeInputValidation:
         assert response.status_code == 200
         assert b'must be less than 20 characters' in response.data
 
-    def test_create_trade_negative_entry_price(self, client, app, sample_portfolio):
+    def test_create_trade_negative_entry_price(self, client, app, sample_user, sample_portfolio):
         """Test creating trade with negative entry_price fails"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             f'/portfolio/{sample_portfolio}/trades/new',
             data={
@@ -537,8 +562,9 @@ class TestTradeInputValidation:
         assert response.status_code == 200
         assert b'Entry price' in response.data and b'must be at least' in response.data
 
-    def test_create_trade_zero_entry_quantity(self, client, app, sample_portfolio):
+    def test_create_trade_zero_entry_quantity(self, client, app, sample_user, sample_portfolio):
         """Test creating trade with zero entry_quantity fails"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             f'/portfolio/{sample_portfolio}/trades/new',
             data={
@@ -552,8 +578,9 @@ class TestTradeInputValidation:
         assert response.status_code == 200
         assert b'Entry quantity' in response.data and b'must be at least' in response.data
 
-    def test_create_trade_invalid_entry_price(self, client, app, sample_portfolio):
+    def test_create_trade_invalid_entry_price(self, client, app, sample_user, sample_portfolio):
         """Test creating trade with non-numeric entry_price fails"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             f'/portfolio/{sample_portfolio}/trades/new',
             data={
@@ -567,8 +594,9 @@ class TestTradeInputValidation:
         assert response.status_code == 200
         assert b'Entry price' in response.data and b'must be a valid number' in response.data
 
-    def test_create_trade_risk_percent_over_100(self, client, app, sample_portfolio):
+    def test_create_trade_risk_percent_over_100(self, client, app, sample_user, sample_portfolio):
         """Test creating trade with risk_percent > 100 fails"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             f'/portfolio/{sample_portfolio}/trades/new',
             data={

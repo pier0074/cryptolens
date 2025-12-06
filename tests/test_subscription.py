@@ -28,16 +28,17 @@ class TestSubscriptionCreation:
             assert sub.days_remaining >= 6  # 6-7 days depending on time of creation
             assert sub.is_valid is True
 
-    def test_create_monthly_subscription(self, app, user_no_subscription):
-        """Test creating a monthly subscription"""
+    def test_create_pro_subscription(self, app, user_no_subscription):
+        """Test creating a pro subscription"""
         with app.app_context():
-            sub = create_subscription(user_no_subscription, 'monthly')
+            sub = create_subscription(user_no_subscription, 'pro')
 
             assert sub is not None
-            assert sub.plan == 'monthly'
+            assert sub.plan == 'pro'
             assert sub.status == 'active'
             assert sub.days_remaining >= 29  # 29-30 days depending on time of creation
-            assert sub.plan_name == 'Monthly'
+            assert sub.plan_name == 'Pro'
+            assert sub.tier == 'pro'
 
     def test_create_yearly_subscription(self, app, user_no_subscription):
         """Test creating a yearly subscription"""

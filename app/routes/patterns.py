@@ -3,6 +3,7 @@ import json
 from app.models import Symbol, Pattern, Candle, StatsCache
 from app.config import Config
 from app import db
+from app.decorators import feature_required, login_required, limit_query_results, get_current_user
 
 
 def _get_cached_prices():
@@ -21,8 +22,10 @@ PATTERNS_PER_PAGE = 50
 
 
 @patterns_bp.route('/')
+@login_required
+@feature_required('patterns_page')
 def index():
-    """Pattern list and visualization with pagination"""
+    """Pattern list and visualization with pagination (Pro+ required)"""
     symbol_filter = request.args.get('symbol', None)
     timeframe_filter = request.args.get('timeframe', None)
     status_filter = request.args.get('status', 'active')
