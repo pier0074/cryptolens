@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Privacy Policy - CryptoLens</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        darker: '#0a0a0f',
+                        dark: '#12121a',
+                        card: '#1a1a24',
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-darker text-gray-100 min-h-screen">
+    <!-- Header -->
+    <header class="bg-dark border-b border-gray-800 py-4">
+        <div class="max-w-4xl mx-auto px-4 flex items-center justify-between">
+            <a href="{{ url_for('main.landing') }}" class="text-2xl font-bold bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+                CryptoLens
+            </a>
+            <a href="{{ url_for('main.landing') }}" class="text-gray-400 hover:text-white text-sm">
+                Back to Home
+            </a>
+        </div>
+    </header>
+
+    <!-- Content -->
+    <main class="max-w-4xl mx-auto px-4 py-12">
+        <!-- Draft Notice -->
+        <div class="bg-yellow-900/30 border border-yellow-700 rounded-lg p-4 mb-8">
+            <p class="text-yellow-200 text-sm">
+                <strong>DRAFT - NEEDS LEGAL REVIEW:</strong> This privacy policy is a template and should be reviewed by a qualified legal professional before use. Last updated: January 2025.
+            </p>
+        </div>
+
+        <h1 class="text-3xl font-bold mb-8">Privacy Policy</h1>
+
+        <div class="prose prose-invert max-w-none space-y-8">
+            <section>
+                <h2 class="text-xl font-semibold text-blue-400 mb-4">1. Introduction</h2>
+                <p class="text-gray-300 leading-relaxed">
+                    CryptoLens ("we", "our", or "us") is committed to protecting your privacy. This Privacy Policy explains how we collect, use, disclose, and safeguard your information when you use our cryptocurrency pattern detection service.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-semibold text-blue-400 mb-4">2. Information We Collect</h2>
+                <h3 class="text-lg font-medium text-gray-200 mb-2">Account Information</h3>
+                <ul class="list-disc list-inside text-gray-300 space-y-1 mb-4">
+                    <li>Email address (for account creation and notifications)</li>
+                    <li>Username</li>
+                    <li>Password (stored securely using industry-standard hashing)</li>
+                </ul>
+
+                <h3 class="text-lg font-medium text-gray-200 mb-2">Usage Data</h3>
+                <ul class="list-disc list-inside text-gray-300 space-y-1 mb-4">
+                    <li>Trading symbols you track</li>
+                    <li>Notification preferences</li>
+                    <li>Portfolio and trade journal entries (if you choose to use these features)</li>
+                    <li>Service usage patterns and preferences</li>
+                </ul>
+
+                <h3 class="text-lg font-medium text-gray-200 mb-2">Technical Data</h3>
+                <ul class="list-disc list-inside text-gray-300 space-y-1">
+                    <li>IP address</li>
+                    <li>Browser type and version</li>
+                    <li>Device information</li>
+                    <li>Session data</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-semibold text-blue-400 mb-4">3. How We Use Your Information</h2>
+                <ul class="list-disc list-inside text-gray-300 space-y-1">
+                    <li>To provide and maintain our service</li>
+                    <li>To send you pattern detection notifications via NTFY.sh</li>
+                    <li>To process your subscription payments</li>
+                    <li>To respond to your inquiries and support requests</li>
+                    <li>To improve our service and develop new features</li>
+                    <li>To detect and prevent fraud or abuse</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-semibold text-blue-400 mb-4">4. Third-Party Services</h2>
+                <p class="text-gray-300 leading-relaxed mb-4">We use the following third-party services:</p>
+                <ul class="list-disc list-inside text-gray-300 space-y-1">
+                    <li><strong>NTFY.sh:</strong> For push notifications (your unique topic ID)</li>
+                    <li><strong>Binance API:</strong> For cryptocurrency market data (no personal data shared)</li>
+                    <li><strong>LemonSqueezy:</strong> For credit card payment processing</li>
+                    <li><strong>NOWPayments:</strong> For cryptocurrency payment processing</li>
+                </ul>
+                <p class="text-gray-300 leading-relaxed mt-4">
+                    Each third-party service has its own privacy policy governing their use of your data.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-semibold text-blue-400 mb-4">5. Data Security</h2>
+                <p class="text-gray-300 leading-relaxed">
+                    We implement appropriate technical and organizational measures to protect your personal data, including:
+                </p>
+                <ul class="list-disc list-inside text-gray-300 space-y-1 mt-2">
+                    <li>Encryption of passwords using bcrypt hashing</li>
+                    <li>HTTPS encryption for all data transmission</li>
+                    <li>CSRF protection on all forms</li>
+                    <li>Rate limiting to prevent abuse</li>
+                    <li>Optional two-factor authentication (TOTP)</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-semibold text-blue-400 mb-4">6. Data Retention</h2>
+                <p class="text-gray-300 leading-relaxed">
+                    We retain your account data for as long as your account is active. Pattern detection data is retained based on timeframe (1 minute to 14 days). You may request deletion of your account and associated data at any time.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-semibold text-blue-400 mb-4">7. Your Rights</h2>
+                <p class="text-gray-300 leading-relaxed">You have the right to:</p>
+                <ul class="list-disc list-inside text-gray-300 space-y-1 mt-2">
+                    <li>Access your personal data</li>
+                    <li>Correct inaccurate data</li>
+                    <li>Request deletion of your data</li>
+                    <li>Export your data</li>
+                    <li>Withdraw consent for data processing</li>
+                </ul>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-semibold text-blue-400 mb-4">8. Cookies</h2>
+                <p class="text-gray-300 leading-relaxed">
+                    We use essential cookies for session management and authentication. We do not use tracking or advertising cookies.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-semibold text-blue-400 mb-4">9. Changes to This Policy</h2>
+                <p class="text-gray-300 leading-relaxed">
+                    We may update this Privacy Policy from time to time. We will notify you of any changes by posting the new Privacy Policy on this page and updating the "Last updated" date.
+                </p>
+            </section>
+
+            <section>
+                <h2 class="text-xl font-semibold text-blue-400 mb-4">10. Contact Us</h2>
+                <p class="text-gray-300 leading-relaxed">
+                    If you have questions about this Privacy Policy, please contact us at: [INSERT CONTACT EMAIL]
+                </p>
+            </section>
+        </div>
+
+        <div class="mt-12 pt-8 border-t border-gray-800 text-center">
+            <a href="{{ url_for('main.landing') }}" class="text-blue-400 hover:text-blue-300">
+                Return to CryptoLens
+            </a>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="bg-dark border-t border-gray-800 py-6 mt-12">
+        <div class="max-w-4xl mx-auto px-4 text-center text-gray-500 text-sm">
+            &copy; 2025 CryptoLens. All rights reserved.
+        </div>
+    </footer>
+</body>
+</html>

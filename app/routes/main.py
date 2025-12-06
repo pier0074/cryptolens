@@ -48,3 +48,19 @@ def features():
     return render_template('features.html',
         user=get_current_user()
     )
+
+
+@main_bp.route('/privacy')
+def privacy():
+    """Privacy Policy page"""
+    return render_template('legal/privacy.html',
+        user=get_current_user()
+    )
+
+
+@main_bp.route('/terms')
+def terms():
+    """Terms of Service page"""
+    return render_template('legal/terms.html',
+        user=get_current_user()
+    )
