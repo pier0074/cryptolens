@@ -13,32 +13,9 @@ settings_bp = Blueprint('settings', __name__)
 
 @settings_bp.route('/')
 @login_required
-@subscription_required
 def index():
-    """Settings page (requires login + subscription)"""
-    symbols = Symbol.query.all()
-
-    # Get current settings
-    settings = {
-        'ntfy_topic': Setting.get('ntfy_topic', Config.NTFY_TOPIC),
-        'ntfy_priority': Setting.get('ntfy_priority', str(Config.NTFY_PRIORITY)),
-        'scan_interval': Setting.get('scan_interval', str(Config.SCAN_INTERVAL_MINUTES)),
-        'risk_per_trade': Setting.get('risk_per_trade', '1.0'),
-        'default_rr': Setting.get('default_rr', '3.0'),
-        'min_confluence': Setting.get('min_confluence', '2'),
-        'notifications_enabled': Setting.get('notifications_enabled', 'true'),
-        'api_key': Setting.get('api_key', ''),
-        'log_level': Setting.get('log_level', 'INFO'),
-    }
-
-    # Show all symbols in dropdown, sorted alphabetically
-    # (duplicates are handled by the add action which will reactivate if inactive)
-    available_symbols = sorted(Config.SYMBOLS)
-
-    return render_template('settings.html',
-                           symbols=symbols,
-                           settings=settings,
-                           available_symbols=available_symbols)
+    """Redirect old settings page to unified profile"""
+    return redirect(url_for('auth.profile'))
 
 
 @settings_bp.route('/save', methods=['POST'])
@@ -50,7 +27,7 @@ def save():
 
     # Save each setting
     for key in ['ntfy_topic', 'ntfy_priority', 'scan_interval',
-                'risk_per_trade', 'default_rr', 'min_confluence', 'api_key']:
+                'risk_per_trade', 'default_rr', 'min_confluence', 'api_key', 'log_level']:
         if key in data:
             Setting.set(key, data[key])
 
@@ -58,7 +35,7 @@ def save():
     Setting.set('notifications_enabled', 'true' if 'notifications_enabled' in data else 'false')
 
     flash('Settings saved successfully!', 'success')
-    return redirect(url_for('settings.index'))
+    return redirect(url_for('auth.profile'))
 
 
 @settings_bp.route('/symbols', methods=['POST'])

@@ -12,6 +12,7 @@ Simple, consistent flow:
 7. Generate signals
 8. Expire old patterns
 9. Notify
+10. Log run to database
 
 Cron setup:
   * * * * * cd /path && venv/bin/python scripts/fetch.py
@@ -20,6 +21,7 @@ import sys
 import os
 import asyncio
 import time
+import traceback
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import ccxt.async_support as ccxt_async
@@ -255,53 +257,149 @@ def expire_old_patterns(app, verbose=False):
         return expired_count
 
 
+def start_cron_run(app, job_name='fetch'):
+    """Start tracking a cron run."""
+    from app.models import CronJob, CronRun
+    from app import db
+
+    with app.app_context():
+        # Get or create the job
+        job = CronJob.query.filter_by(name=job_name).first()
+        if not job:
+            from app.models import CRON_JOB_TYPES
+            config = CRON_JOB_TYPES.get(job_name, {})
+            job = CronJob(
+                name=job_name,
+                description=config.get('description', ''),
+                schedule=config.get('schedule', '* * * * *'),
+                is_enabled=True
+            )
+            db.session.add(job)
+            db.session.commit()
+
+        # Check if job is enabled
+        if not job.is_enabled:
+            return None
+
+        # Create a new run record
+        run = CronRun(job_id=job.id)
+        db.session.add(run)
+        db.session.commit()
+        return run.id
+
+
+def complete_cron_run(app, run_id, success=True, error_message=None,
+                      symbols_processed=0, candles_fetched=0, patterns_found=0,
+                      signals_generated=0, notifications_sent=0):
+    """Complete a cron run with results."""
+    from app.models import CronRun
+    from app import db
+
+    if not run_id:
+        return
+
+    with app.app_context():
+        run = CronRun.query.get(run_id)
+        if run:
+            run.ended_at = datetime.now(timezone.utc)
+            run.duration_ms = int((run.ended_at - run.started_at).total_seconds() * 1000)
+            run.success = success
+            run.error_message = error_message
+            run.symbols_processed = symbols_processed
+            run.candles_fetched = candles_fetched
+            run.patterns_found = patterns_found
+            run.signals_generated = signals_generated
+            run.notifications_sent = notifications_sent
+            db.session.commit()
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Candle fetcher with pattern detection')
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
+    parser.add_argument('--gaps', action='store_true', help='Fill data gaps (hourly job)')
     args = parser.parse_args()
 
+    job_name = 'gaps' if args.gaps else 'fetch'
+
     ts = datetime.now(timezone.utc).strftime('%H:%M:%S')
-    print(f"[{ts}] Fetching...", end=' ', flush=True)
+    print(f"[{ts}] {'Filling gaps' if args.gaps else 'Fetching'}...", end=' ', flush=True)
 
     start_time = time.time()
+    run_id = None
+    error_msg = None
 
     from app import create_app
     from app.models import Symbol
 
     app = create_app()
-    with app.app_context():
-        symbols = [s.symbol for s in Symbol.query.filter_by(is_active=True).all()]
 
-    if not symbols:
-        print("No active symbols found")
-        return
+    try:
+        # Start tracking the run
+        run_id = start_cron_run(app, job_name)
+        if run_id is None:
+            print("Job disabled, skipping")
+            return
 
-    if args.verbose:
-        print(f"\n  {len(symbols)} symbols")
+        with app.app_context():
+            symbols = [s.symbol for s in Symbol.query.filter_by(is_active=True).all()]
 
-    # 1. Fetch and process all symbols (parallel)
-    results = asyncio.run(run_fetch_cycle(symbols, app, args.verbose))
+        if not symbols:
+            print("No active symbols found")
+            complete_cron_run(app, run_id, success=True, symbols_processed=0)
+            return
 
-    # 2. Generate signals
-    signal_result = generate_signals_batch(app, args.verbose)
+        if args.verbose:
+            print(f"\n  {len(symbols)} symbols")
 
-    # 3. Expire old patterns
-    expired = expire_old_patterns(app, args.verbose)
+        # 1. Fetch and process all symbols (parallel)
+        results = asyncio.run(run_fetch_cycle(symbols, app, args.verbose))
 
-    elapsed = time.time() - start_time
+        # 2. Generate signals
+        signal_result = generate_signals_batch(app, args.verbose)
 
-    # Summary
-    total_new = sum(r.get('new', 0) for r in results)
-    total_patterns = sum(r.get('patterns', 0) for r in results)
-    total_signals = signal_result.get('signals_generated', 0)
+        # 3. Expire old patterns
+        expired = expire_old_patterns(app, args.verbose)
 
-    if args.verbose:
-        print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] "
-              f"new={total_new} patterns={total_patterns} signals={total_signals} "
-              f"time={elapsed:.1f}s")
-    else:
-        print(f"done. {total_new} candles, {total_patterns} patterns, {total_signals} signals ({elapsed:.1f}s)")
+        elapsed = time.time() - start_time
+
+        # Summary
+        total_new = sum(r.get('new', 0) for r in results)
+        total_patterns = sum(r.get('patterns', 0) for r in results)
+        total_signals = signal_result.get('signals_generated', 0)
+        errors = [r.get('error') for r in results if r.get('error')]
+
+        # Log success (or partial success with errors)
+        complete_cron_run(
+            app, run_id,
+            success=len(errors) == 0,
+            error_message='; '.join(errors[:3]) if errors else None,
+            symbols_processed=len(symbols),
+            candles_fetched=total_new,
+            patterns_found=total_patterns,
+            signals_generated=total_signals,
+            notifications_sent=0  # Updated by notification service if used
+        )
+
+        if args.verbose:
+            print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] "
+                  f"new={total_new} patterns={total_patterns} signals={total_signals} "
+                  f"time={elapsed:.1f}s")
+        else:
+            print(f"done. {total_new} candles, {total_patterns} patterns, {total_signals} signals ({elapsed:.1f}s)")
+
+    except Exception as e:
+        error_msg = f"{type(e).__name__}: {str(e)}"
+        print(f"ERROR: {error_msg}")
+        if args.verbose:
+            traceback.print_exc()
+
+        # Log failure
+        complete_cron_run(
+            app, run_id,
+            success=False,
+            error_message=error_msg
+        )
 
 
 if __name__ == '__main__':

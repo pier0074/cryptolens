@@ -31,56 +31,68 @@ class TestDashboardRoutes:
         response = client.get('/')
         assert response.status_code == 200
 
-    def test_analytics_page(self, client, app, sample_user, sample_symbol):
-        """Test analytics page loads for authenticated user"""
-        login_user(client, 'test@example.com', 'TestPass123')
+    def test_analytics_page(self, client, app, user_lifetime, sample_symbol):
+        """Test analytics page loads for authenticated Premium user"""
+        login_user(client, 'lifetime@example.com', 'TestPass123')
         response = client.get('/analytics')
         assert response.status_code == 200
 
-    def test_analytics_with_data(self, client, app, sample_user, sample_symbol, sample_pattern):
+    def test_analytics_with_data(self, client, app, user_lifetime, sample_symbol, sample_pattern):
         """Test analytics with patterns data"""
-        login_user(client, 'test@example.com', 'TestPass123')
+        login_user(client, 'lifetime@example.com', 'TestPass123')
         response = client.get('/analytics')
         assert response.status_code == 200
+
+    def test_analytics_redirects_non_premium(self, client, app, sample_user):
+        """Test analytics redirects non-premium users"""
+        login_user(client, 'test@example.com', 'TestPass123')
+        response = client.get('/analytics')
+        assert response.status_code == 302  # Redirect to upgrade page
 
 
 class TestStatsRoutes:
-    """Tests for stats routes (requires login)"""
+    """Tests for stats routes (requires admin)"""
 
-    def test_stats_index_empty(self, client, app, sample_user):
+    def test_stats_index_empty(self, client, app, admin_user):
         """Test stats page with no data"""
-        login_user(client, 'test@example.com', 'TestPass123')
+        login_user(client, 'admin@example.com', 'AdminPass123')
         response = client.get('/stats/')
         assert response.status_code == 200
 
-    def test_stats_index_with_symbol(self, client, app, sample_user, sample_symbol):
+    def test_stats_index_with_symbol(self, client, app, admin_user, sample_symbol):
         """Test stats page renders (data loaded via AJAX)"""
-        login_user(client, 'test@example.com', 'TestPass123')
+        login_user(client, 'admin@example.com', 'AdminPass123')
         response = client.get('/stats/')
         assert response.status_code == 200
         # Page loads skeleton, data fetched via /stats/api
         assert b'Database Statistics' in response.data
 
-    def test_stats_api(self, client, app, sample_user, sample_symbol):
+    def test_stats_api(self, client, app, admin_user, sample_symbol):
         """Test stats API returns data"""
-        login_user(client, 'test@example.com', 'TestPass123')
+        login_user(client, 'admin@example.com', 'AdminPass123')
         response = client.get('/stats/api')
         assert response.status_code == 200
         data = response.get_json()
         # API should return stats structure (may be empty if cache not populated)
         assert 'symbols_count' in data or 'error' in data
 
-    def test_stats_with_candles(self, client, app, sample_user, sample_candles_bullish_fvg):
+    def test_stats_with_candles(self, client, app, admin_user, sample_candles_bullish_fvg):
         """Test stats page shows candle counts"""
-        login_user(client, 'test@example.com', 'TestPass123')
+        login_user(client, 'admin@example.com', 'AdminPass123')
         response = client.get('/stats/')
         assert response.status_code == 200
 
-    def test_stats_shows_patterns(self, client, app, sample_user, sample_symbol, sample_pattern):
+    def test_stats_shows_patterns(self, client, app, admin_user, sample_symbol, sample_pattern):
         """Test stats page shows pattern counts"""
-        login_user(client, 'test@example.com', 'TestPass123')
+        login_user(client, 'admin@example.com', 'AdminPass123')
         response = client.get('/stats/')
         assert response.status_code == 200
+
+    def test_stats_redirects_non_admin(self, client, app, sample_user):
+        """Test stats redirects non-admin users"""
+        login_user(client, 'test@example.com', 'TestPass123')
+        response = client.get('/stats/')
+        assert response.status_code == 302  # Redirect to dashboard
 
 
 class TestLogsRoutes:
@@ -360,10 +372,12 @@ class TestSettingsRoutes:
     """Tests for settings routes (requires subscription)"""
 
     def test_settings_index(self, client, app, sample_user):
-        """Test settings page loads for authenticated user with subscription"""
+        """Test settings page redirects to profile for authenticated user"""
         login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/settings/')
-        assert response.status_code == 200
+        # Settings now redirects to unified profile page
+        assert response.status_code == 302
+        assert '/profile' in response.headers['Location']
 
     def test_settings_save(self, client, app, sample_user):
         """Test saving settings"""

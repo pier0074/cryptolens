@@ -74,34 +74,71 @@
     <!-- Available Plans -->
     <h2 class="text-xl font-semibold mb-4">Available Plans</h2>
 
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         {% for plan_key, plan in plans.items() %}
-        <div class="bg-card rounded-lg p-6 border-2 {% if subscription.plan == plan_key %}border-blue-500{% else %}border-transparent{% endif %}">
-            <h3 class="text-lg font-semibold mb-2">{{ plan.name }}</h3>
-            <p class="text-3xl font-bold mb-2">
-                {% if plan.price == 0 %}
-                    Free
-                {% else %}
-                    ${{ plan.price }}
+        <div class="bg-card rounded-lg p-6 border-2 {% if subscription.plan == plan_key %}border-blue-500{% else %}border-gray-700 hover:border-gray-600{% endif %} transition-colors">
+            <h3 class="text-xl font-semibold mb-2">{{ plan.name }}</h3>
+            <div class="mb-4">
+                <p class="text-3xl font-bold">
+                    {% if plan.price == 0 %}
+                        Free
+                    {% else %}
+                        ${{ plan.price }}<span class="text-lg text-gray-400 font-normal">/mo</span>
+                    {% endif %}
+                </p>
+                {% if plan.price_yearly and plan.price_yearly > 0 %}
+                <p class="text-sm text-gray-400">or ${{ plan.price_yearly }}/year (save 17%)</p>
                 {% endif %}
-            </p>
-            <p class="text-gray-400 text-sm mb-4">
-                {% if plan.days %}
-                    {{ plan.days }} days
-                {% else %}
-                    Lifetime access
+            </div>
+
+            <!-- Feature highlights -->
+            <ul class="text-sm text-gray-300 mb-6 space-y-2">
+                {% if plan_key == 'free' %}
+                <li>• BTC/USDT only</li>
+                <li>• 3 notifications/day</li>
+                <li>• Basic dashboard</li>
+                {% elif plan_key == 'pro' %}
+                <li>• Up to 10 symbols</li>
+                <li>• 100 notifications/day</li>
+                <li>• Full patterns & signals</li>
+                <li>• 1 portfolio</li>
+                {% elif plan_key == 'premium' %}
+                <li>• Unlimited symbols</li>
+                <li>• Unlimited notifications</li>
+                <li>• Full patterns & signals</li>
+                <li>• Unlimited portfolios</li>
+                <li>• Backtesting</li>
+                <li>• API access</li>
                 {% endif %}
-            </p>
+            </ul>
+
             {% if subscription.plan == plan_key %}
-                <span class="inline-block px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">Current Plan</span>
+                <span class="block w-full text-center px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">Current Plan</span>
+            {% elif g.user.is_admin %}
+                <form action="{{ url_for('auth.change_subscription') }}" method="POST">
+                    <input type="hidden" name="plan" value="{{ plan_key }}">
+                    <button type="submit" class="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm transition-colors">
+                        Switch to {{ plan.name }}
+                    </button>
+                </form>
+            {% else %}
+                <button disabled class="w-full px-4 py-2 bg-gray-800 text-gray-500 rounded-lg text-sm cursor-not-allowed">
+                    Contact Admin
+                </button>
             {% endif %}
         </div>
         {% endfor %}
     </div>
 
+    {% if not g.user.is_admin %}
     <p class="mt-8 text-gray-400 text-sm">
         To upgrade your subscription, please contact the administrator.
     </p>
+    {% else %}
+    <p class="mt-8 text-blue-400 text-sm">
+        As an admin, you can switch plans directly for testing purposes.
+    </p>
+    {% endif %}
 
     <a href="{{ url_for('auth.profile') }}" class="mt-4 inline-block text-blue-400 hover:text-blue-300">
         Back to Profile

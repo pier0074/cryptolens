@@ -264,15 +264,6 @@ Patterns auto-expire based on timeframe significance:
 | Order Block | ✗ | ✓ | ✓ |
 | Liquidity Sweep | ✗ | ✓ | ✓ |
 
-> **Note**: FVG (Fair Value Gap) and Imbalance refer to the same pattern - a 3-candle gap where price moves so fast it leaves unfilled orders.
-
-**Notes:**
-- **BTC/USDT only**: Free tier limited to Bitcoin and USDT pairs
-- **5 symbols**: Pro tier limited to 5 actively tracked symbols
-- **Last 100/50**: Most recent entries only
-- **10min delay**: Free notifications delayed by 10 minutes
-- **Admin**: Requires admin privileges (separate from subscription tier)
-
 ---
 
 ## Authentication
@@ -303,21 +294,26 @@ Each user has a unique notification topic, ensuring privacy.
 
 ## API
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/symbols` | GET | List tracked symbols |
-| `/api/patterns` | GET | Detected patterns |
-| `/api/signals` | GET | Trade signals |
-| `/api/matrix` | GET | Pattern matrix |
-| `/api/scan/run` | POST | Trigger manual scan |
-| `/api/subscription/status` | GET | Check subscription status |
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/api/health` | GET | No | Health check for monitoring |
+| `/api/symbols` | GET | No | List tracked symbols |
+| `/api/candles/{symbol}/{tf}` | GET | No | Get candles for symbol/timeframe |
+| `/api/patterns` | GET | No | Detected patterns |
+| `/api/signals` | GET | No | Trade signals |
+| `/api/matrix` | GET | No | Pattern matrix data |
+| `/api/scan` | POST | API Key | Trigger manual pattern scan |
+| `/api/fetch` | POST | API Key | Trigger manual data fetch |
+| `/api/scan/run` | POST | API Key | Run full fetch cycle |
+
+**Note**: POST endpoints require API Key in `X-API-Key` header (set in Settings).
 
 ---
 
 ## Testing
 
 ```bash
-python -m pytest                    # All tests (311 tests)
+python -m pytest                    # All tests (314 tests)
 python -m pytest --cov=app          # With coverage
 python -m pytest tests/test_auth.py # Auth tests only
 ```
@@ -341,7 +337,7 @@ cryptolens/
 │   ├── compute_stats.py # Cache stats
 │   ├── db_health.py     # Data verification
 │   └── migrate_all.py   # DB migrations
-├── tests/               # Test suite (311 tests)
+├── tests/               # Test suite (314 tests)
 ├── crontab.txt          # Cron configuration
 └── run.py
 ```

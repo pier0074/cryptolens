@@ -7,12 +7,7 @@
     <!-- Header -->
     <div class="flex items-center justify-between flex-wrap gap-4">
         <h1 class="text-2xl font-bold">Pattern Matrix</h1>
-        <div class="flex items-center space-x-4">
-            <span class="text-muted text-sm">{{ symbols|length }} symbols × {{ timeframes|length }} timeframes</span>
-            <div id="scheduler-status" class="text-xs px-2 py-1 rounded bg-green-900 text-green-200">
-                ⏰ Auto-scan active
-            </div>
-        </div>
+        <span class="text-muted text-sm">{{ symbols|length }} symbols × {{ timeframes|length }} timeframes</span>
     </div>
 
     <!-- Pattern Type Tabs -->
@@ -94,11 +89,15 @@
                         {% if cell_data %}
                             {# Show individual pattern types with Alpine filtering #}
                             {% for ptype, pattern in cell_data.patterns.items() %}
-                            <div x-show="selectedPattern === 'all' || selectedPattern === '{{ ptype }}'"
-                                 x-cloak
-                                 class="pattern-cell inline-block w-8 h-8 rounded cursor-pointer {% if pattern.direction == 'bullish' %}bg-green-500/80{% else %}bg-red-500/80{% endif %} {% if cell_data.count > 1 %}border-2 border-yellow-500{% endif %}"
-                                 title="{{ pattern.direction|capitalize }} {{ ptype.replace('_', ' ')|title }}&#10;Zone: ${{ '%.2f'|format(pattern.zone_low) }} - ${{ '%.2f'|format(pattern.zone_high) }}">
-                            </div>
+                            {% set pattern_name = 'FVG' if ptype == 'imbalance' else ('OB' if ptype == 'order_block' else 'Sweep') %}
+                            {% set pattern_full = 'Imbalance (FVG)' if ptype == 'imbalance' else ('Order Block' if ptype == 'order_block' else 'Liquidity Sweep') %}
+                            <a href="/patterns?symbol={{ symbol.symbol }}&timeframe={{ tf }}&type={{ ptype }}"
+                               x-show="selectedPattern === 'all' || selectedPattern === '{{ ptype }}'"
+                               x-cloak
+                               class="pattern-cell inline-flex items-center justify-center w-8 h-8 rounded cursor-pointer text-xs font-bold text-white {% if pattern.direction == 'bullish' %}bg-green-500 hover:bg-green-400{% else %}bg-red-500 hover:bg-red-400{% endif %} {% if cell_data.count > 1 %}border-2 border-yellow-400{% endif %} transition-colors"
+                               title="{{ pattern.direction|capitalize }} {{ pattern_full }}&#10;Zone: ${{ '%.2f'|format(pattern.zone_low) }} - ${{ '%.2f'|format(pattern.zone_high) }}&#10;Click to view pattern details">
+                                {{ pattern_name[:1] }}
+                            </a>
                             {# Count patterns by type and direction #}
                             {% if pattern.direction == 'bullish' %}
                                 {% set all_bullish.value = all_bullish.value + 1 %}
@@ -115,13 +114,17 @@
                             {# Show empty when filtered pattern not present #}
                             {% for ptype in ['imbalance', 'order_block', 'liquidity_sweep'] %}
                             {% if ptype not in cell_data.patterns %}
-                            <div x-show="selectedPattern === '{{ ptype }}'"
-                                 x-cloak
-                                 class="inline-block w-8 h-8 rounded bg-gray-700"></div>
+                            <a href="/patterns?symbol={{ symbol.symbol }}&timeframe={{ tf }}&type={{ ptype }}"
+                               x-show="selectedPattern === '{{ ptype }}'"
+                               x-cloak
+                               class="inline-block w-8 h-8 rounded bg-gray-700 hover:bg-gray-600 transition-colors"
+                               title="No {{ 'FVG' if ptype == 'imbalance' else ('Order Block' if ptype == 'order_block' else 'Liquidity Sweep') }} pattern&#10;Click to view all {{ symbol.symbol }} {{ tf }} patterns"></a>
                             {% endif %}
                             {% endfor %}
                         {% else %}
-                            <div class="inline-block w-8 h-8 rounded bg-gray-700"></div>
+                            <a href="/patterns?symbol={{ symbol.symbol }}&timeframe={{ tf }}"
+                               class="inline-block w-8 h-8 rounded bg-gray-700 hover:bg-gray-600 transition-colors"
+                               title="No patterns&#10;Click to view {{ symbol.symbol }} {{ tf }} patterns"></a>
                         {% endif %}
                     </td>
                     {% endfor %}

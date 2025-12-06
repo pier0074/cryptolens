@@ -1,0 +1,143 @@
+{% extends "base.html" %}
+
+{% block title %}{{ job.name|title }} History - Admin{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold">{{ job.name|title }} History</h1>
+            <p class="text-gray-400 text-sm mt-1">{{ job.description }}</p>
+        </div>
+        <a href="{{ url_for('admin.crons') }}" class="text-blue-400 hover:text-blue-300">
+            &larr; Back to Cron Jobs
+        </a>
+    </div>
+</div>
+
+<!-- Job Stats -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Status</p>
+        <p class="text-xl font-bold {% if job.is_enabled %}text-green-400{% else %}text-gray-400{% endif %}">
+            {% if job.is_enabled %}Enabled{% else %}Disabled{% endif %}
+        </p>
+    </div>
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Schedule</p>
+        <p class="text-xl font-bold">
+            <code class="bg-gray-800 px-2 py-1 rounded text-sm">{{ job.schedule }}</code>
+        </p>
+    </div>
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Success Rate (24h)</p>
+        <p class="text-xl font-bold {% if job.success_rate_24h and job.success_rate_24h >= 95 %}text-green-400{% elif job.success_rate_24h and job.success_rate_24h >= 80 %}text-yellow-400{% elif job.success_rate_24h %}text-red-400{% endif %}">
+            {% if job.success_rate_24h is not none %}{{ job.success_rate_24h }}%{% else %}N/A{% endif %}
+        </p>
+    </div>
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Avg Duration (24h)</p>
+        <p class="text-xl font-bold">
+            {% if job.avg_duration_24h is not none %}{{ job.avg_duration_24h }}s{% else %}N/A{% endif %}
+        </p>
+    </div>
+</div>
+
+<!-- Execution History -->
+<div class="bg-card rounded-lg p-6">
+    <h2 class="text-xl font-semibold mb-4">Execution History</h2>
+
+    {% if runs.items %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-gray-400 border-b border-gray-700">
+                    <th class="text-left py-3 px-4">Started</th>
+                    <th class="text-left py-3 px-4">Ended</th>
+                    <th class="text-left py-3 px-4">Duration</th>
+                    <th class="text-left py-3 px-4">Result</th>
+                    <th class="text-left py-3 px-4">Symbols</th>
+                    <th class="text-left py-3 px-4">Candles</th>
+                    <th class="text-left py-3 px-4">Patterns</th>
+                    <th class="text-left py-3 px-4">Signals</th>
+                    <th class="text-left py-3 px-4">Notifs</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in runs.items %}
+                <tr class="border-b border-gray-800 hover:bg-gray-800/50 {% if not run.success %}bg-red-900/20{% endif %}">
+                    <td class="py-3 px-4 text-gray-300">
+                        {{ run.started_at.strftime('%Y-%m-%d %H:%M:%S') }}
+                    </td>
+                    <td class="py-3 px-4 text-gray-400">
+                        {% if run.ended_at %}
+                            {{ run.ended_at.strftime('%H:%M:%S') }}
+                        {% else %}
+                            <span class="text-yellow-400">Running...</span>
+                        {% endif %}
+                    </td>
+                    <td class="py-3 px-4">
+                        {% if run.duration_ms %}
+                            {{ (run.duration_ms / 1000)|round(2) }}s
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td class="py-3 px-4">
+                        {% if run.success %}
+                            <span class="text-green-400">Success</span>
+                        {% else %}
+                            <div>
+                                <span class="text-red-400">Failed</span>
+                                {% if run.error_message %}
+                                    <div class="text-red-400 text-xs mt-1 max-w-xs" title="{{ run.error_message }}">
+                                        {{ run.error_message[:80] }}{% if run.error_message|length > 80 %}...{% endif %}
+                                    </div>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    </td>
+                    <td class="py-3 px-4 text-gray-400">{{ run.symbols_processed or '-' }}</td>
+                    <td class="py-3 px-4 text-gray-400">{{ run.candles_fetched or '-' }}</td>
+                    <td class="py-3 px-4 text-gray-400">{{ run.patterns_found or '-' }}</td>
+                    <td class="py-3 px-4 text-gray-400">{{ run.signals_generated or '-' }}</td>
+                    <td class="py-3 px-4 text-gray-400">{{ run.notifications_sent or '-' }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    {% if runs.pages > 1 %}
+    <div class="flex justify-center mt-6 space-x-2">
+        {% if runs.has_prev %}
+            <a href="{{ url_for('admin.cron_history', job_id=job.id, page=runs.prev_num) }}"
+               class="px-3 py-1 bg-gray-700 rounded hover:bg-gray-600">&laquo; Prev</a>
+        {% endif %}
+
+        {% for p in runs.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+            {% if p %}
+                {% if p == runs.page %}
+                    <span class="px-3 py-1 bg-blue-600 rounded">{{ p }}</span>
+                {% else %}
+                    <a href="{{ url_for('admin.cron_history', job_id=job.id, page=p) }}"
+                       class="px-3 py-1 bg-gray-700 rounded hover:bg-gray-600">{{ p }}</a>
+                {% endif %}
+            {% else %}
+                <span class="px-3 py-1 text-gray-500">...</span>
+            {% endif %}
+        {% endfor %}
+
+        {% if runs.has_next %}
+            <a href="{{ url_for('admin.cron_history', job_id=job.id, page=runs.next_num) }}"
+               class="px-3 py-1 bg-gray-700 rounded hover:bg-gray-600">Next &raquo;</a>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    {% else %}
+    <p class="text-gray-400 text-center py-8">No execution history for this job.</p>
+    {% endif %}
+</div>
+{% endblock %}

@@ -2,7 +2,7 @@
 Admin Routes
 User and subscription management for administrators
 """
-from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify
+from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session
 from app.routes.auth import admin_required, get_current_user
 from app.services.auth import (
     verify_user, deactivate_user, activate_user,
@@ -13,8 +13,9 @@ from app.services.subscription import (
     reactivate_subscription, get_subscription_stats, get_expiring_soon,
     SubscriptionError
 )
-from app.models import User, Subscription, SUBSCRIPTION_PLANS
+from app.models import User, Subscription, SUBSCRIPTION_PLANS, CronJob, CronRun, CRON_JOB_TYPES
 from app import db
+from datetime import datetime, timezone, timedelta
 
 admin_bp = Blueprint('admin', __name__)
 
@@ -291,3 +292,122 @@ def api_update_user(user_id):
     db.session.commit()
 
     return jsonify(user.to_dict())
+
+
+@admin_bp.route('/set-view-as', methods=['POST'])
+@admin_required
+def set_view_as():
+    """Set the 'view as' tier for testing navigation and access"""
+    tier = request.form.get('tier', 'admin')
+
+    if tier not in ['admin', 'free', 'pro', 'premium']:
+        flash('Invalid tier selected.', 'error')
+        return redirect(url_for('admin.index'))
+
+    if tier == 'admin':
+        session.pop('view_as', None)
+        flash('Viewing as Admin (full access).', 'success')
+    else:
+        session['view_as'] = tier
+        flash(f'Now viewing as {tier.title()} tier. Navigation restricted accordingly.', 'info')
+
+    return redirect(url_for('admin.index'))
+
+
+# =============================================================================
+# CRON JOB MANAGEMENT
+# =============================================================================
+
+def ensure_cron_jobs():
+    """Ensure all cron jobs exist in database"""
+    for key, config in CRON_JOB_TYPES.items():
+        job = CronJob.query.filter_by(name=key).first()
+        if not job:
+            job = CronJob(
+                name=key,
+                description=config['description'],
+                schedule=config['schedule'],
+                is_enabled=True
+            )
+            db.session.add(job)
+    db.session.commit()
+
+
+@admin_bp.route('/crons')
+@admin_required
+def crons():
+    """Cron jobs management page"""
+    ensure_cron_jobs()
+    jobs = CronJob.query.order_by(CronJob.name).all()
+
+    # Get recent runs for history
+    recent_runs = CronRun.query.order_by(CronRun.started_at.desc()).limit(50).all()
+
+    # Calculate overall stats
+    since_24h = datetime.now(timezone.utc) - timedelta(hours=24)
+    total_runs_24h = CronRun.query.filter(CronRun.started_at >= since_24h).count()
+    failed_runs_24h = CronRun.query.filter(
+        CronRun.started_at >= since_24h,
+        CronRun.success == False
+    ).count()
+
+    return render_template('admin/crons.html',
+                           jobs=jobs,
+                           recent_runs=recent_runs,
+                           total_runs_24h=total_runs_24h,
+                           failed_runs_24h=failed_runs_24h,
+                           cron_types=CRON_JOB_TYPES)
+
+
+@admin_bp.route('/crons/<int:job_id>/toggle', methods=['POST'])
+@admin_required
+def toggle_cron(job_id):
+    """Toggle cron job enabled status"""
+    job = CronJob.query.get_or_404(job_id)
+    job.is_enabled = not job.is_enabled
+    db.session.commit()
+
+    status = 'enabled' if job.is_enabled else 'disabled'
+    flash(f'Cron job "{job.name}" {status}.', 'success')
+    return redirect(url_for('admin.crons'))
+
+
+@admin_bp.route('/crons/<int:job_id>/history')
+@admin_required
+def cron_history(job_id):
+    """Get detailed history for a cron job"""
+    job = CronJob.query.get_or_404(job_id)
+    page = request.args.get('page', 1, type=int)
+    per_page = 50
+
+    runs = job.runs.order_by(CronRun.started_at.desc()).paginate(
+        page=page, per_page=per_page, error_out=False
+    )
+
+    return render_template('admin/cron_history.html',
+                           job=job,
+                           runs=runs)
+
+
+@admin_bp.route('/api/crons')
+@admin_required
+def api_crons():
+    """Get cron jobs status as JSON"""
+    ensure_cron_jobs()
+    jobs = CronJob.query.all()
+    return jsonify({
+        'jobs': [j.to_dict() for j in jobs]
+    })
+
+
+@admin_bp.route('/api/crons/<int:job_id>/runs')
+@admin_required
+def api_cron_runs(job_id):
+    """Get recent runs for a cron job"""
+    job = CronJob.query.get_or_404(job_id)
+    limit = request.args.get('limit', 20, type=int)
+    runs = job.runs.order_by(CronRun.started_at.desc()).limit(limit).all()
+    return jsonify({
+        'job': job.to_dict(),
+        'runs': [r.to_dict() for r in runs]
+    })

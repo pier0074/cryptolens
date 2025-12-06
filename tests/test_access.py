@@ -424,11 +424,11 @@ class TestEdgeCases:
             assert user.can_receive_notifications is False
 
             # Renew subscription using extend_subscription
-            renewed_sub = extend_subscription(user.id, 'yearly')
+            renewed_sub = extend_subscription(user.id, 'pro')
 
             # User should now have access with renewed subscription
             db.session.refresh(user)
             assert user.subscription.status == 'active'
-            assert user.subscription.plan == 'yearly'
+            assert user.subscription.plan == 'pro'
             assert user.subscription.is_valid is True
             assert user.can_receive_notifications is True

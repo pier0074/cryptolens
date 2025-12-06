@@ -161,14 +161,35 @@ def logout():
 @auth_bp.route('/profile')
 @login_required
 def profile():
-    """User profile and subscription status"""
+    """User profile and subscription status (unified with settings)"""
+    from app.models import Symbol, Setting
+    from app.config import Config
+
     user = get_current_user()
     sub_status = check_subscription_status(user.id)
+
+    # Settings data (for Trading and System tabs)
+    symbols = Symbol.query.all()
+    settings = {
+        'ntfy_topic': Setting.get('ntfy_topic', Config.NTFY_TOPIC),
+        'ntfy_priority': Setting.get('ntfy_priority', str(Config.NTFY_PRIORITY)),
+        'scan_interval': Setting.get('scan_interval', str(Config.SCAN_INTERVAL_MINUTES)),
+        'risk_per_trade': Setting.get('risk_per_trade', '1.0'),
+        'default_rr': Setting.get('default_rr', '3.0'),
+        'min_confluence': Setting.get('min_confluence', '2'),
+        'notifications_enabled': Setting.get('notifications_enabled', 'true'),
+        'api_key': Setting.get('api_key', ''),
+        'log_level': Setting.get('log_level', 'INFO'),
+    }
+    available_symbols = sorted(Config.SYMBOLS)
 
     return render_template('auth/profile.html',
                            user=user,
                            subscription=sub_status,
-                           plans=SUBSCRIPTION_PLANS)
+                           plans=SUBSCRIPTION_PLANS,
+                           symbols=symbols,
+                           settings=settings,
+                           available_symbols=available_symbols)
 
 
 @auth_bp.route('/change-password', methods=['POST'])
@@ -204,6 +225,44 @@ def subscription():
                            user=user,
                            subscription=sub_status,
                            plans=SUBSCRIPTION_PLANS)
+
+
+@auth_bp.route('/change-subscription', methods=['POST'])
+@login_required
+@admin_required
+def change_subscription():
+    """Change subscription plan (admin only for testing)"""
+    from app.models import Subscription
+    from datetime import datetime, timezone, timedelta
+
+    user = get_current_user()
+    new_plan = request.form.get('plan', '').strip()
+
+    if new_plan not in SUBSCRIPTION_PLANS:
+        flash('Invalid plan selected.', 'error')
+        return redirect(url_for('auth.subscription'))
+
+    # Get or create subscription
+    sub = user.subscription
+    if not sub:
+        sub = Subscription(user_id=user.id)
+        db.session.add(sub)
+
+    # Update plan
+    sub.plan = new_plan
+    sub.status = 'active'
+    sub.starts_at = datetime.now(timezone.utc)
+
+    # Set expiry based on plan
+    plan_config = SUBSCRIPTION_PLANS[new_plan]
+    if plan_config.get('days'):
+        sub.expires_at = datetime.now(timezone.utc) + timedelta(days=plan_config['days'])
+    else:
+        sub.expires_at = None  # No expiry for free tier
+
+    db.session.commit()
+    flash(f'Subscription changed to {plan_config["name"]}!', 'success')
+    return redirect(url_for('auth.subscription'))
 
 
 # API endpoints for AJAX
@@ -481,7 +540,7 @@ def notification_preferences():
 
         db.session.commit()
         flash('Notification preferences saved!', 'success')
-        return redirect(url_for('auth.notification_preferences'))
+        return redirect(url_for('auth.profile'))
 
     return render_template('auth/notifications.html', user=user)
 

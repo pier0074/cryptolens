@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+
+{% block title %}Cron Jobs - Admin{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold">Cron Jobs</h1>
+            <p class="text-gray-400 text-sm mt-1">Manage scheduled tasks and view execution history</p>
+        </div>
+        <a href="{{ url_for('admin.index') }}" class="text-blue-400 hover:text-blue-300">
+            &larr; Back to Admin
+        </a>
+    </div>
+</div>
+
+<!-- Stats Overview -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Total Jobs</p>
+        <p class="text-2xl font-bold">{{ jobs|length }}</p>
+    </div>
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Runs (24h)</p>
+        <p class="text-2xl font-bold">{{ total_runs_24h }}</p>
+    </div>
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Failed (24h)</p>
+        <p class="text-2xl font-bold {% if failed_runs_24h > 0 %}text-red-400{% else %}text-green-400{% endif %}">
+            {{ failed_runs_24h }}
+        </p>
+    </div>
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Success Rate</p>
+        <p class="text-2xl font-bold {% if total_runs_24h > 0 and failed_runs_24h == 0 %}text-green-400{% elif failed_runs_24h > 0 %}text-yellow-400{% endif %}">
+            {% if total_runs_24h > 0 %}
+                {{ ((total_runs_24h - failed_runs_24h) / total_runs_24h * 100)|round(1) }}%
+            {% else %}
+                N/A
+            {% endif %}
+        </p>
+    </div>
+</div>
+
+<!-- Cron Jobs List -->
+<div class="bg-card rounded-lg p-6 mb-8">
+    <h2 class="text-xl font-semibold mb-4">Scheduled Jobs</h2>
+
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-gray-400 border-b border-gray-700">
+                    <th class="text-left py-3 px-4">Job</th>
+                    <th class="text-left py-3 px-4">Schedule</th>
+                    <th class="text-left py-3 px-4">Status</th>
+                    <th class="text-left py-3 px-4">Last Run</th>
+                    <th class="text-left py-3 px-4">Success Rate</th>
+                    <th class="text-left py-3 px-4">Avg Duration</th>
+                    <th class="text-right py-3 px-4">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for job in jobs %}
+                <tr class="border-b border-gray-800 hover:bg-gray-800/50">
+                    <td class="py-3 px-4">
+                        <div class="font-medium">{{ cron_types.get(job.name, {}).get('name', job.name) }}</div>
+                        <div class="text-gray-400 text-xs">{{ job.description }}</div>
+                    </td>
+                    <td class="py-3 px-4">
+                        <code class="bg-gray-800 px-2 py-1 rounded text-xs">{{ job.schedule }}</code>
+                    </td>
+                    <td class="py-3 px-4">
+                        {% if job.is_enabled %}
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-green-900 text-green-300">
+                                <span class="w-2 h-2 rounded-full bg-green-400 mr-1.5 animate-pulse"></span>
+                                Enabled
+                            </span>
+                        {% else %}
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-700 text-gray-400">
+                                <span class="w-2 h-2 rounded-full bg-gray-500 mr-1.5"></span>
+                                Disabled
+                            </span>
+                        {% endif %}
+                    </td>
+                    <td class="py-3 px-4">
+                        {% if job.last_run %}
+                            <div class="{% if job.last_run.success %}text-green-400{% else %}text-red-400{% endif %}">
+                                {% if job.last_run.success %}
+                                    <span title="Success">&#10003;</span>
+                                {% else %}
+                                    <span title="Failed">&#10007;</span>
+                                {% endif %}
+                                {{ job.last_run.started_at.strftime('%Y-%m-%d %H:%M:%S') }}
+                            </div>
+                            {% if not job.last_run.success and job.last_run.error_message %}
+                                <div class="text-red-400 text-xs truncate max-w-xs" title="{{ job.last_run.error_message }}">
+                                    {{ job.last_run.error_message[:50] }}...
+                                </div>
+                            {% endif %}
+                        {% else %}
+                            <span class="text-gray-500">Never</span>
+                        {% endif %}
+                    </td>
+                    <td class="py-3 px-4">
+                        {% if job.success_rate_24h is not none %}
+                            <div class="{% if job.success_rate_24h >= 95 %}text-green-400{% elif job.success_rate_24h >= 80 %}text-yellow-400{% else %}text-red-400{% endif %}">
+                                {{ job.success_rate_24h }}%
+                            </div>
+                        {% else %}
+                            <span class="text-gray-500">N/A</span>
+                        {% endif %}
+                    </td>
+                    <td class="py-3 px-4">
+                        {% if job.avg_duration_24h is not none %}
+                            {{ job.avg_duration_24h }}s
+                        {% else %}
+                            <span class="text-gray-500">N/A</span>
+                        {% endif %}
+                    </td>
+                    <td class="py-3 px-4 text-right">
+                        <form action="{{ url_for('admin.toggle_cron', job_id=job.id) }}" method="POST" class="inline">
+                            <button type="submit" class="text-xs px-2 py-1 rounded {% if job.is_enabled %}bg-red-600 hover:bg-red-700{% else %}bg-green-600 hover:bg-green-700{% endif %}">
+                                {% if job.is_enabled %}Disable{% else %}Enable{% endif %}
+                            </button>
+                        </form>
+                        <a href="{{ url_for('admin.cron_history', job_id=job.id) }}" class="text-xs px-2 py-1 rounded bg-gray-600 hover:bg-gray-500 ml-1">
+                            History
+                        </a>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<!-- Recent Execution History -->
+<div class="bg-card rounded-lg p-6">
+    <h2 class="text-xl font-semibold mb-4">Recent Executions</h2>
+
+    {% if recent_runs %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-gray-400 border-b border-gray-700">
+                    <th class="text-left py-3 px-4">Job</th>
+                    <th class="text-left py-3 px-4">Started</th>
+                    <th class="text-left py-3 px-4">Duration</th>
+                    <th class="text-left py-3 px-4">Result</th>
+                    <th class="text-left py-3 px-4">Stats</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in recent_runs %}
+                <tr class="border-b border-gray-800 hover:bg-gray-800/50">
+                    <td class="py-3 px-4">
+                        {{ cron_types.get(run.job.name, {}).get('name', run.job.name) }}
+                    </td>
+                    <td class="py-3 px-4 text-gray-400">
+                        {{ run.started_at.strftime('%Y-%m-%d %H:%M:%S') }}
+                    </td>
+                    <td class="py-3 px-4">
+                        {% if run.duration_ms %}
+                            {{ (run.duration_ms / 1000)|round(2) }}s
+                        {% else %}
+                            <span class="text-yellow-400">Running...</span>
+                        {% endif %}
+                    </td>
+                    <td class="py-3 px-4">
+                        {% if run.success %}
+                            <span class="text-green-400">Success</span>
+                        {% else %}
+                            <span class="text-red-400" title="{{ run.error_message }}">Failed</span>
+                        {% endif %}
+                    </td>
+                    <td class="py-3 px-4 text-gray-400 text-xs">
+                        {% if run.symbols_processed or run.candles_fetched or run.patterns_found %}
+                            <span class="mr-2" title="Symbols">S: {{ run.symbols_processed }}</span>
+                            <span class="mr-2" title="Candles">C: {{ run.candles_fetched }}</span>
+                            <span class="mr-2" title="Patterns">P: {{ run.patterns_found }}</span>
+                            {% if run.signals_generated %}
+                                <span class="mr-2" title="Signals">Sig: {{ run.signals_generated }}</span>
+                            {% endif %}
+                            {% if run.notifications_sent %}
+                                <span title="Notifications">N: {{ run.notifications_sent }}</span>
+                            {% endif %}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-center py-8">No execution history yet.</p>
+    {% endif %}
+</div>
+
+<!-- Cron Setup Instructions -->
+<div class="bg-card rounded-lg p-6 mt-8">
+    <h2 class="text-xl font-semibold mb-4">Cron Setup</h2>
+    <p class="text-gray-400 mb-4">
+        CryptoLens uses system cron for reliable scheduling. Add these entries to your crontab:
+    </p>
+    <pre class="bg-gray-900 p-4 rounded-lg overflow-x-auto text-sm">
+# CryptoLens - Fetch candles every minute
+* * * * * cd {{ request.host_url.rstrip('/').replace('http://', '/path/to/').replace('https://', '/path/to/') }} && venv/bin/python scripts/fetch.py >> logs/cron.log 2>&1
+
+# CryptoLens - Fill data gaps every hour
+0 * * * * cd {{ request.host_url.rstrip('/').replace('http://', '/path/to/').replace('https://', '/path/to/') }} && venv/bin/python scripts/fetch.py --gaps >> logs/cron.log 2>&1
+    </pre>
+    <p class="text-gray-500 text-sm mt-4">
+        Edit your crontab with: <code class="bg-gray-800 px-2 py-1 rounded">crontab -e</code>
+    </p>
+</div>
+{% endblock %}

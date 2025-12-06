@@ -40,25 +40,15 @@ class TestSubscriptionCreation:
             assert sub.plan_name == 'Pro'
             assert sub.tier == 'pro'
 
-    def test_create_yearly_subscription(self, app, user_no_subscription):
-        """Test creating a yearly subscription"""
+    def test_create_premium_subscription(self, app, user_no_subscription):
+        """Test creating a premium subscription"""
         with app.app_context():
-            sub = create_subscription(user_no_subscription, 'yearly')
+            sub = create_subscription(user_no_subscription, 'premium')
 
             assert sub is not None
-            assert sub.plan == 'yearly'
-            assert sub.days_remaining >= 364  # 364-365 days depending on time of creation
-
-    def test_create_lifetime_subscription(self, app, user_no_subscription):
-        """Test creating a lifetime subscription"""
-        with app.app_context():
-            sub = create_subscription(user_no_subscription, 'lifetime')
-
-            assert sub is not None
-            assert sub.plan == 'lifetime'
-            assert sub.expires_at is None
-            assert sub.is_lifetime is True
-            assert sub.is_valid is True
+            assert sub.plan == 'premium'
+            assert sub.days_remaining >= 29  # 29-30 days depending on time of creation
+            assert sub.tier == 'premium'
 
     def test_create_subscription_invalid_plan(self, app, user_no_subscription):
         """Test creating subscription with invalid plan fails"""
@@ -71,7 +61,7 @@ class TestSubscriptionCreation:
         """Test creating subscription when user already has one fails"""
         with app.app_context():
             with pytest.raises(SubscriptionError) as exc_info:
-                create_subscription(sample_user, 'monthly')
+                create_subscription(sample_user, 'pro')
             assert 'already has a subscription' in str(exc_info.value)
 
 
@@ -142,7 +132,7 @@ class TestSubscriptionExtension:
             user = db.session.get(User, sample_user)
             original_expiry = user.subscription.expires_at
 
-            sub = extend_subscription(sample_user, 'monthly')
+            sub = extend_subscription(sample_user, 'pro')
             db.session.refresh(user.subscription)
 
             assert sub is not None
@@ -151,9 +141,9 @@ class TestSubscriptionExtension:
     def test_extend_creates_if_none(self, app, user_no_subscription):
         """Test extending creates subscription if none exists"""
         with app.app_context():
-            sub = extend_subscription(user_no_subscription, 'monthly')
+            sub = extend_subscription(user_no_subscription, 'pro')
             assert sub is not None
-            assert sub.plan == 'monthly'
+            assert sub.plan == 'pro'
             assert sub.status == 'active'
 
 
@@ -211,7 +201,7 @@ class TestSubscriptionExpiry:
 
             sub = Subscription(
                 user_id=user.id,
-                plan='monthly',
+                plan='pro',
                 starts_at=datetime.now(timezone.utc) - timedelta(days=40),
                 expires_at=datetime.now(timezone.utc) - timedelta(days=10),
                 status='active',
@@ -301,17 +291,15 @@ class TestSubscriptionPlans:
     def test_all_plans_exist(self, app):
         """Test that all expected plans are configured"""
         assert 'free' in SUBSCRIPTION_PLANS
-        assert 'monthly' in SUBSCRIPTION_PLANS
-        assert 'yearly' in SUBSCRIPTION_PLANS
-        assert 'lifetime' in SUBSCRIPTION_PLANS
+        assert 'pro' in SUBSCRIPTION_PLANS
+        assert 'premium' in SUBSCRIPTION_PLANS
 
     def test_plan_properties(self, app):
         """Test plan configurations have required properties"""
         for plan_key, plan in SUBSCRIPTION_PLANS.items():
             assert 'name' in plan
             assert 'price' in plan
-            if plan_key != 'lifetime':
-                assert 'days' in plan
+            assert 'tier' in plan
 
 
 class TestCheckSubscriptionStatus:

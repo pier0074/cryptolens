@@ -690,10 +690,6 @@ SUBSCRIPTION_PLANS = {
         'days': 30,
         'tier': 'premium',
     },
-    # Legacy plans for backwards compatibility
-    'monthly': {'name': 'Pro (Legacy)', 'price': 19, 'days': 30, 'tier': 'pro'},
-    'yearly': {'name': 'Pro Yearly (Legacy)', 'price': 190, 'days': 365, 'tier': 'pro'},
-    'lifetime': {'name': 'Premium Lifetime', 'price': 499, 'days': None, 'tier': 'premium'},
 }
 
 # Subscription tier feature limits
@@ -1257,4 +1253,164 @@ class Payment(db.Model):
             'status': self.status,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+        }
+
+
+# =============================================================================
+# CRON JOB TRACKING MODELS
+# =============================================================================
+
+# Cron job types
+CRON_JOB_TYPES = {
+    'fetch': {
+        'name': 'Data Fetch',
+        'description': 'Fetch 1-minute candles from exchange',
+        'schedule': '* * * * *',  # Every minute
+    },
+    'gaps': {
+        'name': 'Gap Fill',
+        'description': 'Fill gaps in historical data',
+        'schedule': '0 * * * *',  # Every hour
+    },
+    'cleanup': {
+        'name': 'Cleanup',
+        'description': 'Clean up old logs and expired data',
+        'schedule': '0 0 * * *',  # Daily at midnight
+    },
+}
+
+
+class CronJob(db.Model):
+    """Cron job definitions and status"""
+    __tablename__ = 'cron_jobs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)  # 'fetch', 'gaps', 'cleanup'
+    description = db.Column(db.String(200), nullable=True)
+    schedule = db.Column(db.String(50), nullable=False)  # Cron expression
+
+    # Status
+    is_enabled = db.Column(db.Boolean, default=True)
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc),
+                          onupdate=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    runs = db.relationship('CronRun', backref='job', lazy='dynamic',
+                          cascade='all, delete-orphan')
+
+    def __repr__(self):
+        return f'<CronJob {self.name}>'
+
+    @property
+    def last_run(self):
+        """Get the most recent run"""
+        return self.runs.order_by(CronRun.started_at.desc()).first()
+
+    @property
+    def last_successful_run(self):
+        """Get the most recent successful run"""
+        return self.runs.filter_by(success=True).order_by(CronRun.started_at.desc()).first()
+
+    @property
+    def recent_errors(self):
+        """Get recent failed runs (last 5)"""
+        return self.runs.filter_by(success=False).order_by(
+            CronRun.started_at.desc()
+        ).limit(5).all()
+
+    @property
+    def success_rate_24h(self):
+        """Calculate success rate over last 24 hours"""
+        since = datetime.now(timezone.utc) - timedelta(hours=24)
+        total = self.runs.filter(CronRun.started_at >= since).count()
+        if total == 0:
+            return None
+        success = self.runs.filter(
+            CronRun.started_at >= since,
+            CronRun.success == True
+        ).count()
+        return round((success / total) * 100, 1)
+
+    @property
+    def avg_duration_24h(self):
+        """Calculate average duration over last 24 hours (in seconds)"""
+        since = datetime.now(timezone.utc) - timedelta(hours=24)
+        runs = self.runs.filter(
+            CronRun.started_at >= since,
+            CronRun.duration_ms.isnot(None)
+        ).all()
+        if not runs:
+            return None
+        total_ms = sum(r.duration_ms for r in runs)
+        return round(total_ms / len(runs) / 1000, 2)
+
+    def to_dict(self):
+        last = self.last_run
+        return {
+            'id': self.id,
+            'name': self.name,
+            'description': self.description,
+            'schedule': self.schedule,
+            'is_enabled': self.is_enabled,
+            'last_run': last.to_dict() if last else None,
+            'success_rate_24h': self.success_rate_24h,
+            'avg_duration_24h': self.avg_duration_24h,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class CronRun(db.Model):
+    """Cron job execution history"""
+    __tablename__ = 'cron_runs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    job_id = db.Column(db.Integer, db.ForeignKey('cron_jobs.id'), nullable=False)
+
+    # Execution timing
+    started_at = db.Column(db.DateTime, nullable=False,
+                          default=lambda: datetime.now(timezone.utc))
+    ended_at = db.Column(db.DateTime, nullable=True)
+    duration_ms = db.Column(db.Integer, nullable=True)  # Duration in milliseconds
+
+    # Result
+    success = db.Column(db.Boolean, default=True)
+    error_message = db.Column(db.Text, nullable=True)
+
+    # Statistics from the run
+    symbols_processed = db.Column(db.Integer, default=0)
+    candles_fetched = db.Column(db.Integer, default=0)
+    patterns_found = db.Column(db.Integer, default=0)
+    signals_generated = db.Column(db.Integer, default=0)
+    notifications_sent = db.Column(db.Integer, default=0)
+
+    # Additional details (JSON)
+    details = db.Column(db.Text, nullable=True)
+
+    __table_args__ = (
+        db.Index('idx_cron_run_job', 'job_id', 'started_at'),
+        db.Index('idx_cron_run_success', 'success', 'started_at'),
+    )
+
+    def __repr__(self):
+        return f'<CronRun {self.job_id} {self.started_at}>'
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'job_id': self.job_id,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'ended_at': self.ended_at.isoformat() if self.ended_at else None,
+            'duration_ms': self.duration_ms,
+            'duration_str': f'{self.duration_ms / 1000:.2f}s' if self.duration_ms else None,
+            'success': self.success,
+            'error_message': self.error_message,
+            'symbols_processed': self.symbols_processed,
+            'candles_fetched': self.candles_fetched,
+            'patterns_found': self.patterns_found,
+            'signals_generated': self.signals_generated,
+            'notifications_sent': self.notifications_sent,
+            'details': self.details,
         }

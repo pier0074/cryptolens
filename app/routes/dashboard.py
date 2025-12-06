@@ -2,7 +2,7 @@ from flask import Blueprint, render_template, jsonify
 from app.models import Symbol, Pattern, Signal, Candle, Backtest
 from app.config import Config
 from app.services.patterns import PATTERN_TYPES
-from app.decorators import login_required
+from app.decorators import login_required, tier_required
 from sqlalchemy import func
 from datetime import datetime, timedelta, timezone
 
@@ -62,9 +62,9 @@ def index():
 
 
 @dashboard_bp.route('/analytics')
-@login_required
+@tier_required('premium')
 def analytics():
-    """Performance analytics dashboard"""
+    """Performance analytics dashboard - Premium only"""
     # Get statistics
     stats = {
         'total_symbols': Symbol.query.filter_by(is_active=True).count(),

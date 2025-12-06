@@ -246,7 +246,7 @@ def sample_user(app):
         # Add active subscription
         sub = Subscription(
             user_id=user.id,
-            plan='monthly',
+            plan='pro',
             starts_at=datetime.now(timezone.utc),
             expires_at=datetime.now(timezone.utc) + timedelta(days=30),
             status='active'
@@ -330,7 +330,7 @@ def user_expired_subscription(app):
         # Subscription expired 10 days ago (past 3-day grace period)
         sub = Subscription(
             user_id=user.id,
-            plan='monthly',
+            plan='pro',
             starts_at=datetime.now(timezone.utc) - timedelta(days=40),
             expires_at=datetime.now(timezone.utc) - timedelta(days=10),
             status='expired',
@@ -361,7 +361,7 @@ def user_grace_period(app):
         # Subscription expired 1 day ago (within 3-day grace period)
         sub = Subscription(
             user_id=user.id,
-            plan='monthly',
+            plan='pro',
             starts_at=datetime.now(timezone.utc) - timedelta(days=31),
             expires_at=datetime.now(timezone.utc) - timedelta(days=1),
             status='active',
@@ -391,9 +391,9 @@ def user_lifetime(app):
 
         sub = Subscription(
             user_id=user.id,
-            plan='lifetime',
+            plan='premium',
             starts_at=datetime.now(timezone.utc),
-            expires_at=None,
+            expires_at=None,  # No expiry for testing
             status='active'
         )
         db.session.add(sub)
@@ -420,9 +420,9 @@ def admin_user(app):
 
         sub = Subscription(
             user_id=user.id,
-            plan='lifetime',
+            plan='premium',
             starts_at=datetime.now(timezone.utc),
-            expires_at=None,
+            expires_at=None,  # No expiry for testing
             status='active'
         )
         db.session.add(sub)
@@ -449,7 +449,7 @@ def user_expiring_soon(app):
 
         sub = Subscription(
             user_id=user.id,
-            plan='monthly',
+            plan='pro',
             starts_at=datetime.now(timezone.utc) - timedelta(days=27),
             expires_at=datetime.now(timezone.utc) + timedelta(days=3),
             status='active'

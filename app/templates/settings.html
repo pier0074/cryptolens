@@ -129,8 +129,8 @@
                            class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 font-mono"
                            placeholder="Leave empty to disable API authentication">
                     <p class="text-xs text-muted mt-1">
-                        If set, POST requests to /api/scheduler/* and /api/scan require this key in the X-API-Key header.
-                        Leave empty for open access (development mode).
+                        If set, POST requests to /api/scan and /api/fetch require this key in the X-API-Key header.
+                        Data is automatically fetched via system cron (see Admin > Cron Jobs).
                     </p>
                 </div>
 

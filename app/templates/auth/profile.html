@@ -3,233 +3,751 @@
 {% block title %}Profile - CryptoLens{% endblock %}
 
 {% block content %}
-<div class="max-w-4xl mx-auto">
-    <h1 class="text-3xl font-bold mb-8">Your Profile</h1>
-
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <!-- Account Info -->
-        <div class="bg-card rounded-lg p-6">
-            <h2 class="text-xl font-semibold mb-4">Account Information</h2>
-
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm text-gray-400">Email</label>
-                    <p class="text-lg">{{ user.email }}</p>
-                </div>
-
-                <div>
-                    <label class="block text-sm text-gray-400">Username</label>
-                    <p class="text-lg">{{ user.username }}</p>
-                </div>
-
-                <div>
-                    <label class="block text-sm text-gray-400">Account Status</label>
-                    <p class="text-lg">
-                        {% if user.is_verified %}
-                            <span class="text-green-400">Verified</span>
-                        {% else %}
-                            <span class="text-yellow-400">Pending Verification</span>
-                        {% endif %}
-                    </p>
-                </div>
-
-                <div>
-                    <label class="block text-sm text-gray-400">Member Since</label>
-                    <p class="text-lg">{{ user.created_at.strftime('%d %B %Y') }}</p>
-                </div>
-
-                {% if user.is_admin %}
-                <div>
-                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-900 text-purple-200">
-                        Admin
-                    </span>
-                </div>
-                {% endif %}
-            </div>
-        </div>
-
-        <!-- Subscription Info -->
-        <div class="bg-card rounded-lg p-6">
-            <h2 class="text-xl font-semibold mb-4">Subscription</h2>
-
-            {% if subscription %}
-                <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm text-gray-400">Plan</label>
-                        <p class="text-lg font-medium">{{ subscription.plan_name }}</p>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm text-gray-400">Status</label>
-                        <p class="text-lg">
-                            {% if subscription.is_valid %}
-                                <span class="text-green-400">{{ subscription.status_display }}</span>
-                            {% else %}
-                                <span class="text-red-400">{{ subscription.status_display }}</span>
-                            {% endif %}
-                        </p>
-                    </div>
-
-                    {% if not subscription.is_lifetime %}
-                    <div>
-                        <label class="block text-sm text-gray-400">Expires</label>
-                        <p class="text-lg">
-                            {% if subscription.expires_at %}
-                                {{ subscription.expires_at[:10] }}
-                                {% if subscription.days_remaining <= 7 and subscription.days_remaining > 0 %}
-                                    <span class="text-yellow-400">({{ subscription.days_remaining }} days left)</span>
-                                {% endif %}
-                            {% else %}
-                                Never
-                            {% endif %}
-                        </p>
-                    </div>
-                    {% endif %}
-
-                    <div>
-                        <label class="block text-sm text-gray-400">Notifications</label>
-                        <p class="text-lg">
-                            {% if subscription.is_valid and user.is_verified %}
-                                <span class="text-green-400">Active</span>
-                            {% else %}
-                                <span class="text-red-400">Inactive</span>
-                            {% endif %}
-                        </p>
-                    </div>
-                </div>
-            {% else %}
-                <p class="text-gray-400">No active subscription.</p>
-            {% endif %}
-
-            <a href="{{ url_for('auth.subscription') }}"
-               class="mt-4 inline-block text-blue-400 hover:text-blue-300">
-                View Subscription Details
-            </a>
-        </div>
-
-        <!-- NTFY Topic -->
-        <div class="bg-card rounded-lg p-6">
-            <h2 class="text-xl font-semibold mb-4">Push Notifications</h2>
-
-            <p class="text-gray-400 mb-4">
-                Subscribe to your personal NTFY topic to receive trading signals on your phone.
-            </p>
-
-            <div class="bg-darker rounded-lg p-4">
-                <label class="block text-sm text-gray-400 mb-2">Your NTFY Topic</label>
-                <div class="flex items-center space-x-2">
-                    <code class="text-lg text-blue-400 flex-1">{{ user.ntfy_topic }}</code>
-                    <button onclick="copyTopic()"
-                            class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-sm">
-                        Copy
-                    </button>
-                </div>
-            </div>
-
-            <div class="mt-4 space-y-2 text-sm text-gray-400">
-                <p>1. Install the <a href="https://ntfy.sh" target="_blank" class="text-blue-400">NTFY app</a> on your phone</p>
-                <p>2. Subscribe to your topic: <code class="text-blue-400">{{ user.ntfy_topic }}</code></p>
-                <p>3. You'll receive trading signals when you have an active subscription</p>
-            </div>
-
-            <a href="{{ url_for('auth.notification_preferences') }}"
-               class="mt-4 inline-block text-blue-400 hover:text-blue-300">
-                Manage Notification Preferences
-            </a>
-        </div>
-
-        <!-- Two-Factor Authentication -->
-        <div class="bg-card rounded-lg p-6">
-            <h2 class="text-xl font-semibold mb-4">Two-Factor Authentication</h2>
-
-            {% if user.totp_enabled %}
-                <div class="flex items-center space-x-2 mb-4">
-                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-900 text-green-200">
-                        Enabled
-                    </span>
-                    <span class="text-gray-400 text-sm">Your account is protected with 2FA</span>
-                </div>
-
-                <form method="POST" action="{{ url_for('auth.disable_2fa') }}" onsubmit="return confirm('Are you sure you want to disable two-factor authentication?');">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
-                    <div class="mb-4">
-                        <label for="disable_2fa_password" class="block text-sm font-medium text-gray-300 mb-2">Enter your password to disable 2FA</label>
-                        <input type="password" id="disable_2fa_password" name="password" required
-                               class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-red-500 text-white">
-                    </div>
-
-                    <button type="submit"
-                            class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition">
-                        Disable 2FA
-                    </button>
-                </form>
-            {% else %}
-                <div class="flex items-center space-x-2 mb-4">
-                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-900 text-yellow-200">
-                        Not Enabled
-                    </span>
-                    <span class="text-gray-400 text-sm">Add extra security to your account</span>
-                </div>
-
-                <p class="text-gray-400 text-sm mb-4">
-                    Two-factor authentication adds an extra layer of security by requiring a code from your phone in addition to your password.
-                </p>
-
-                <a href="{{ url_for('auth.setup_2fa') }}"
-                   class="inline-block bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">
-                    Setup 2FA
-                </a>
-            {% endif %}
-        </div>
-
-        <!-- Change Password -->
-        <div class="bg-card rounded-lg p-6">
-            <h2 class="text-xl font-semibold mb-4">Change Password</h2>
-
-            <form method="POST" action="{{ url_for('auth.change_password_route') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
-                <div class="mb-4">
-                    <label for="old_password" class="block text-sm font-medium text-gray-300 mb-2">Current Password</label>
-                    <input type="password" id="old_password" name="old_password" required
-                           class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
-                </div>
-
-                <div class="mb-4">
-                    <label for="new_password" class="block text-sm font-medium text-gray-300 mb-2">New Password</label>
-                    <input type="password" id="new_password" name="new_password" required
-                           minlength="8"
-                           class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
-                </div>
-
-                <div class="mb-4">
-                    <label for="confirm_password" class="block text-sm font-medium text-gray-300 mb-2">Confirm New Password</label>
-                    <input type="password" id="confirm_password" name="confirm_password" required
-                           class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
-                </div>
-
-                <button type="submit"
-                        class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">
-                    Update Password
-                </button>
-            </form>
-        </div>
-    </div>
-
-    <!-- Logout -->
-    <div class="mt-8 text-center">
+<div x-data="profileApp()" class="max-w-5xl mx-auto">
+    <div class="flex items-center justify-between mb-6">
+        <h1 class="text-3xl font-bold">Your Profile</h1>
         <a href="{{ url_for('auth.logout') }}"
-           class="text-red-400 hover:text-red-300">
+           class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
             Logout
         </a>
     </div>
+
+    <!-- Tab Navigation -->
+    <div class="flex flex-wrap border-b border-gray-700 mb-6">
+        <button @click="activeTab = 'account'"
+                :class="activeTab === 'account' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300'"
+                class="px-4 py-3 border-b-2 font-medium text-sm transition">
+            Account
+        </button>
+        <button @click="activeTab = 'notifications'"
+                :class="activeTab === 'notifications' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300'"
+                class="px-4 py-3 border-b-2 font-medium text-sm transition">
+            Notifications
+        </button>
+        <button @click="activeTab = 'trading'"
+                :class="activeTab === 'trading' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300'"
+                class="px-4 py-3 border-b-2 font-medium text-sm transition">
+            Trading
+        </button>
+        {% if user.is_admin %}
+        <button @click="activeTab = 'system'"
+                :class="activeTab === 'system' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300'"
+                class="px-4 py-3 border-b-2 font-medium text-sm transition">
+            System
+        </button>
+        {% endif %}
+    </div>
+
+    <!-- ===================== ACCOUNT TAB ===================== -->
+    <div x-show="activeTab === 'account'" x-cloak>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <!-- Account Info -->
+            <div class="bg-card rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">Account Information</h2>
+
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-400">Email</label>
+                        <p class="text-lg">{{ user.email }}</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm text-gray-400">Username</label>
+                        <p class="text-lg">{{ user.username }}</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm text-gray-400">Account Status</label>
+                        <p class="text-lg">
+                            {% if user.is_verified %}
+                                <span class="text-green-400">Verified</span>
+                            {% else %}
+                                <span class="text-yellow-400">Pending Verification</span>
+                            {% endif %}
+                        </p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm text-gray-400">Member Since</label>
+                        <p class="text-lg">{{ user.created_at.strftime('%d %B %Y') }}</p>
+                    </div>
+
+                    {% if user.is_admin %}
+                    <div>
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-900 text-purple-200">
+                            Admin
+                        </span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Subscription Info -->
+            <div class="bg-card rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">Subscription</h2>
+
+                {% if subscription %}
+                    <div class="space-y-4">
+                        <div>
+                            <label class="block text-sm text-gray-400">Plan</label>
+                            <p class="text-lg font-medium">{{ subscription.plan_name }}</p>
+                        </div>
+
+                        <div>
+                            <label class="block text-sm text-gray-400">Status</label>
+                            <p class="text-lg">
+                                {% if subscription.is_valid %}
+                                    <span class="text-green-400">{{ subscription.status_display }}</span>
+                                {% else %}
+                                    <span class="text-red-400">{{ subscription.status_display }}</span>
+                                {% endif %}
+                            </p>
+                        </div>
+
+                        {% if not subscription.is_lifetime %}
+                        <div>
+                            <label class="block text-sm text-gray-400">Expires</label>
+                            <p class="text-lg">
+                                {% if subscription.expires_at %}
+                                    {{ subscription.expires_at[:10] }}
+                                    {% if subscription.days_remaining <= 7 and subscription.days_remaining > 0 %}
+                                        <span class="text-yellow-400">({{ subscription.days_remaining }} days left)</span>
+                                    {% endif %}
+                                {% else %}
+                                    Never
+                                {% endif %}
+                            </p>
+                        </div>
+                        {% endif %}
+                    </div>
+                {% else %}
+                    <p class="text-gray-400">No active subscription.</p>
+                {% endif %}
+
+                <a href="{{ url_for('auth.subscription') }}"
+                   class="mt-4 inline-block text-blue-400 hover:text-blue-300">
+                    View Subscription Details
+                </a>
+            </div>
+
+            <!-- Two-Factor Authentication -->
+            <div class="bg-card rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">Two-Factor Authentication</h2>
+
+                {% if user.totp_enabled %}
+                    <div class="flex items-center space-x-2 mb-4">
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-900 text-green-200">
+                            Enabled
+                        </span>
+                        <span class="text-gray-400 text-sm">Your account is protected with 2FA</span>
+                    </div>
+
+                    <form method="POST" action="{{ url_for('auth.disable_2fa') }}" onsubmit="return confirm('Are you sure you want to disable two-factor authentication?');">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                        <div class="mb-4">
+                            <label for="disable_2fa_password" class="block text-sm font-medium text-gray-300 mb-2">Enter your password to disable 2FA</label>
+                            <input type="password" id="disable_2fa_password" name="password" required
+                                   class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-red-500 text-white">
+                        </div>
+
+                        <button type="submit"
+                                class="bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition">
+                            Disable 2FA
+                        </button>
+                    </form>
+                {% else %}
+                    <div class="flex items-center space-x-2 mb-4">
+                        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-yellow-900 text-yellow-200">
+                            Not Enabled
+                        </span>
+                        <span class="text-gray-400 text-sm">Add extra security to your account</span>
+                    </div>
+
+                    <p class="text-gray-400 text-sm mb-4">
+                        Two-factor authentication adds an extra layer of security by requiring a code from your phone in addition to your password.
+                    </p>
+
+                    <a href="{{ url_for('auth.setup_2fa') }}"
+                       class="inline-block bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">
+                        Setup 2FA
+                    </a>
+                {% endif %}
+            </div>
+
+            <!-- Change Password -->
+            <div class="bg-card rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">Change Password</h2>
+
+                <form method="POST" action="{{ url_for('auth.change_password_route') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                    <div class="mb-4">
+                        <label for="old_password" class="block text-sm font-medium text-gray-300 mb-2">Current Password</label>
+                        <input type="password" id="old_password" name="old_password" required
+                               class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="new_password" class="block text-sm font-medium text-gray-300 mb-2">New Password</label>
+                        <input type="password" id="new_password" name="new_password" required
+                               minlength="8"
+                               class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
+                    </div>
+
+                    <div class="mb-4">
+                        <label for="confirm_password" class="block text-sm font-medium text-gray-300 mb-2">Confirm New Password</label>
+                        <input type="password" id="confirm_password" name="confirm_password" required
+                               class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
+                    </div>
+
+                    <button type="submit"
+                            class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">
+                        Update Password
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== NOTIFICATIONS TAB ===================== -->
+    <div x-show="activeTab === 'notifications'" x-cloak>
+        <form method="POST" action="{{ url_for('auth.notification_preferences') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Master Toggle & NTFY Topic -->
+                <div class="bg-card rounded-lg p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h2 class="text-xl font-semibold">Enable Notifications</h2>
+                            <p class="text-gray-400 text-sm mt-1">Master switch for all notifications</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" name="notify_enabled" class="sr-only peer"
+                                   {% if user.notify_enabled %}checked{% endif %}>
+                            <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                    </div>
+
+                    <!-- NTFY Topic Info -->
+                    <div class="pt-4 border-t border-gray-700">
+                        <label class="block text-sm text-gray-400 mb-2">Your NTFY Topic</label>
+                        <div class="flex items-center space-x-2">
+                            <code class="text-lg text-blue-400 flex-1 bg-darker rounded px-3 py-2">{{ user.ntfy_topic }}</code>
+                            <button type="button" onclick="copyTopic()"
+                                    class="bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded text-sm">
+                                Copy
+                            </button>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-2">
+                            Subscribe to this topic in the <a href="https://ntfy.sh" target="_blank" class="text-blue-400">NTFY app</a>
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Notification Types -->
+                <div class="bg-card rounded-lg p-6">
+                    <h2 class="text-xl font-semibold mb-4">Notification Types</h2>
+
+                    <div class="space-y-4">
+                        <label class="flex items-center justify-between p-3 bg-darker rounded-lg cursor-pointer">
+                            <div>
+                                <span class="font-medium">Signal Notifications</span>
+                                <p class="text-gray-400 text-sm">Receive alerts for new trading signals</p>
+                            </div>
+                            <input type="checkbox" name="notify_signals"
+                                   class="w-5 h-5 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                                   {% if user.notify_signals %}checked{% endif %}>
+                        </label>
+
+                        <label class="flex items-center justify-between p-3 bg-darker rounded-lg cursor-pointer">
+                            <div>
+                                <span class="font-medium">Pattern Notifications</span>
+                                <p class="text-gray-400 text-sm">Receive alerts for new detected patterns</p>
+                            </div>
+                            <input type="checkbox" name="notify_patterns"
+                                   class="w-5 h-5 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                                   {% if user.notify_patterns %}checked{% endif %}>
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Filters -->
+                <div class="bg-card rounded-lg p-6">
+                    <h2 class="text-xl font-semibold mb-4">Filters</h2>
+
+                    <div class="space-y-4">
+                        <!-- Direction -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Signal Direction</label>
+                            <select name="notify_directions"
+                                    class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
+                                <option value="both" {% if user.notify_directions == 'both' %}selected{% endif %}>Both (Long & Short)</option>
+                                <option value="long" {% if user.notify_directions == 'long' %}selected{% endif %}>Long Only</option>
+                                <option value="short" {% if user.notify_directions == 'short' %}selected{% endif %}>Short Only</option>
+                            </select>
+                        </div>
+
+                        <!-- Min Confluence -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Minimum Confluence Score</label>
+                            <select name="notify_min_confluence"
+                                    class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
+                                {% for i in range(1, 7) %}
+                                <option value="{{ i }}" {% if user.notify_min_confluence == i %}selected{% endif %}>
+                                    {{ i }} TF{% if i > 1 %}s{% endif %} aligned
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <!-- Priority -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-300 mb-2">Notification Priority</label>
+                            <select name="notify_priority"
+                                    class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
+                                <option value="1" {% if user.notify_priority == 1 %}selected{% endif %}>1 - Min (no sound)</option>
+                                <option value="2" {% if user.notify_priority == 2 %}selected{% endif %}>2 - Low</option>
+                                <option value="3" {% if user.notify_priority == 3 %}selected{% endif %}>3 - Default</option>
+                                <option value="4" {% if user.notify_priority == 4 %}selected{% endif %}>4 - High</option>
+                                <option value="5" {% if user.notify_priority == 5 %}selected{% endif %}>5 - Max (urgent)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quiet Hours -->
+                <div class="bg-card rounded-lg p-6">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h2 class="text-xl font-semibold">Quiet Hours</h2>
+                            <p class="text-gray-400 text-sm">Pause notifications during specified hours (UTC)</p>
+                        </div>
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" name="quiet_hours_enabled" class="sr-only peer"
+                                   {% if user.quiet_hours_enabled %}checked{% endif %}
+                                   onchange="toggleQuietHours(this)">
+                            <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                        </label>
+                    </div>
+
+                    <div id="quiet-hours-settings" class="{% if not user.quiet_hours_enabled %}opacity-50{% endif %}">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-300 mb-2">Start (UTC)</label>
+                                <select name="quiet_hours_start"
+                                        class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white"
+                                        {% if not user.quiet_hours_enabled %}disabled{% endif %}>
+                                    {% for h in range(24) %}
+                                    <option value="{{ h }}" {% if user.quiet_hours_start == h %}selected{% endif %}>
+                                        {{ '%02d:00'|format(h) }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-300 mb-2">End (UTC)</label>
+                                <select name="quiet_hours_end"
+                                        class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white"
+                                        {% if not user.quiet_hours_enabled %}disabled{% endif %}>
+                                    {% for h in range(24) %}
+                                    <option value="{{ h }}" {% if user.quiet_hours_end == h %}selected{% endif %}>
+                                        {{ '%02d:00'|format(h) }}
+                                    </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Actions -->
+            <div class="mt-6 flex items-center space-x-4">
+                <button type="submit"
+                        class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg transition">
+                    Save Preferences
+                </button>
+
+                <button type="button" onclick="testNotification()"
+                        class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg transition">
+                    Send Test
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- ===================== TRADING TAB (All Users with Tier Restrictions) ===================== -->
+    <div x-show="activeTab === 'trading'" x-cloak>
+        {% set tier = user.subscription_tier %}
+        {% set is_free = tier == 'free' %}
+        {% set is_pro = tier == 'pro' %}
+        {% set is_premium = tier == 'premium' or user.is_admin %}
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Tier Info Banner -->
+            {% if is_free %}
+            <div class="bg-yellow-900/30 border border-yellow-700 rounded-lg p-4 lg:col-span-2">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="font-bold text-yellow-400">Free Tier Limitations</h3>
+                        <p class="text-sm text-yellow-200/80">BTC/USDT only. Upgrade to Pro or Premium for more symbols and features.</p>
+                    </div>
+                    <a href="{{ url_for('auth.subscription') }}" class="bg-yellow-600 hover:bg-yellow-700 px-4 py-2 rounded text-sm font-medium">
+                        Upgrade
+                    </a>
+                </div>
+            </div>
+            {% elif is_pro %}
+            <div class="bg-blue-900/30 border border-blue-700 rounded-lg p-4 lg:col-span-2">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h3 class="font-bold text-blue-400">Pro Tier</h3>
+                        <p class="text-sm text-blue-200/80">Up to 5 symbols tracked. Upgrade to Premium for muting, risk parameters, and more control.</p>
+                    </div>
+                    <a href="{{ url_for('auth.subscription') }}" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-medium">
+                        Upgrade to Premium
+                    </a>
+                </div>
+            </div>
+            {% endif %}
+
+            <!-- Risk Parameters (Premium only) -->
+            {% if is_premium %}
+            <div class="bg-card rounded-lg p-6">
+                <h2 class="text-lg font-bold mb-4">Risk Parameters</h2>
+
+                <form action="{{ url_for('settings.save') }}" method="POST" class="space-y-4">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div>
+                        <label class="block text-sm text-muted mb-1">Risk Per Trade (%)</label>
+                        <input type="number" name="risk_per_trade" value="{{ settings.risk_per_trade }}"
+                               step="0.1" min="0.1" max="10"
+                               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm text-muted mb-1">Default Risk:Reward</label>
+                        <input type="number" name="default_rr" value="{{ settings.default_rr }}"
+                               step="0.5" min="1" max="10"
+                               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2">
+                    </div>
+
+                    <div>
+                        <label class="block text-sm text-muted mb-1">Min Confluence for Signal</label>
+                        <select name="min_confluence" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2">
+                            <option value="1" {% if settings.min_confluence == '1' %}selected{% endif %}>1 TF (Any)</option>
+                            <option value="2" {% if settings.min_confluence == '2' %}selected{% endif %}>2 TFs</option>
+                            <option value="3" {% if settings.min_confluence == '3' %}selected{% endif %}>3 TFs</option>
+                            <option value="4" {% if settings.min_confluence == '4' %}selected{% endif %}>4 TFs</option>
+                        </select>
+                    </div>
+
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">
+                        Save
+                    </button>
+                </form>
+            </div>
+            {% endif %}
+
+            <!-- Symbols Management -->
+            <div class="bg-card rounded-lg p-6 {% if is_premium %}lg:col-span-1{% else %}lg:col-span-2{% endif %}">
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-lg font-bold">Tracked Symbols</h2>
+                    {% if is_pro %}
+                    <span class="text-sm text-gray-400">{{ symbols|selectattr('is_active')|list|length }}/5 slots used</span>
+                    {% endif %}
+                </div>
+
+                {% if is_free %}
+                <!-- Free Tier: Read-only view of BTC only -->
+                <p class="text-sm text-muted mb-4">Your tracked symbol (Free tier: BTC/USDT only)</p>
+                <div class="grid grid-cols-1 gap-2">
+                    <div class="flex items-center justify-between bg-gray-800 rounded p-3">
+                        <span class="font-mono font-medium">BTC/USDT</span>
+                        <div class="flex items-center gap-2">
+                            <span class="text-xs px-2 py-1 rounded bg-green-900 text-green-200">Active</span>
+                            <span class="text-xs px-2 py-1 rounded bg-blue-900 text-blue-200">Notifications On</span>
+                        </div>
+                    </div>
+                </div>
+                <p class="text-xs text-gray-500 mt-3">Upgrade to Pro for up to 5 symbols or Premium for all 22+ symbols.</p>
+
+                {% elif is_pro %}
+                <!-- Pro Tier: 5 symbols, can toggle fetch, cannot mute -->
+                <p class="text-sm text-muted mb-4">Manage your tracked symbols. Pro tier: up to 5 symbols.</p>
+
+                <!-- Add Symbol (if under limit) -->
+                {% set active_count = symbols|selectattr('is_active')|list|length %}
+                {% if active_count < 5 %}
+                <div class="flex flex-wrap items-center gap-2 mb-4">
+                    <select x-model="newSymbol" @change="addSymbol()" class="bg-gray-800 border border-gray-700 rounded px-3 py-2">
+                        <option value="">Add symbol...</option>
+                        {% for sym in available_symbols %}
+                        {% if sym not in symbols|map(attribute='symbol')|list %}
+                        <option value="{{ sym }}">{{ sym }}</option>
+                        {% endif %}
+                        {% endfor %}
+                    </select>
+                </div>
+                {% endif %}
+
+                <!-- Active Symbols -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
+                    {% for symbol in symbols if symbol.is_active %}
+                    <div class="flex items-center justify-between bg-gray-800 rounded p-2 text-sm">
+                        <span class="font-mono">{{ symbol.symbol }}</span>
+                        <div class="flex items-center gap-1">
+                            <span class="text-xs px-2 py-1 rounded bg-green-900 text-green-200">Active</span>
+                            <button @click="toggleSymbol({{ symbol.id }})"
+                                    class="text-xs px-2 py-1 rounded bg-red-900 hover:bg-red-800 text-red-200"
+                                    title="Remove symbol">
+                                Remove
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <p class="text-xs text-gray-500">Pro tier receives notifications for all active symbols. Upgrade to Premium to mute specific symbols.</p>
+
+                {% else %}
+                <!-- Premium Tier: Full access, can mute, cannot add (admin manages) -->
+                <p class="text-sm text-muted mb-4">Manage notification preferences for each symbol. Symbol list is managed by admin.</p>
+
+                <!-- Legend -->
+                <div class="flex items-center gap-4 text-xs text-muted mb-3">
+                    <span><span class="text-green-400">Active</span> = candles are fetched</span>
+                    <span><span class="text-blue-400">Notify</span> / <span class="text-gray-400">Muted</span> = your notification preference</span>
+                </div>
+
+                <!-- Active Symbols with mute toggle -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 mb-4">
+                    {% for symbol in symbols if symbol.is_active %}
+                    <div class="flex items-center justify-between bg-gray-800 rounded p-2 text-sm">
+                        <span class="font-mono">{{ symbol.symbol }}</span>
+                        <div class="flex items-center gap-1">
+                            <button @click="toggleNotify({{ symbol.id }})"
+                                    class="text-xs px-2 py-1 rounded {% if symbol.notify_enabled %}bg-blue-900 text-blue-200{% else %}bg-gray-700 text-gray-400{% endif %}"
+                                    title="Toggle notifications">
+                                {{ 'Notify' if symbol.notify_enabled else 'Muted' }}
+                            </button>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                <p class="text-xs text-gray-500">Muting a symbol only affects your notifications. Other users are unaffected.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== SYSTEM TAB (Admin only) ===================== -->
+    {% if user.is_admin %}
+    <div x-show="activeTab === 'system'" x-cloak>
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <!-- Application Settings -->
+            <div class="bg-card rounded-lg p-6">
+                <h2 class="text-lg font-bold mb-4">Application Settings</h2>
+
+                <form action="{{ url_for('settings.save') }}" method="POST" class="space-y-4">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div>
+                        <label class="block text-sm text-muted mb-1">Log Level</label>
+                        <select name="log_level" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2">
+                            <option value="DEBUG" {% if settings.log_level == 'DEBUG' %}selected{% endif %}>DEBUG (All requests)</option>
+                            <option value="INFO" {% if settings.log_level == 'INFO' or not settings.log_level %}selected{% endif %}>INFO (Medium+ requests)</option>
+                            <option value="WARNING" {% if settings.log_level == 'WARNING' %}selected{% endif %}>WARNING (Slow requests only)</option>
+                            <option value="ERROR" {% if settings.log_level == 'ERROR' %}selected{% endif %}>ERROR (Errors only)</option>
+                        </select>
+                        <p class="text-xs text-muted mt-1">Controls request timing log verbosity. Requires app restart to take effect.</p>
+                    </div>
+
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">
+                        Save
+                    </button>
+                </form>
+            </div>
+
+            <!-- API Security -->
+            <div class="bg-card rounded-lg p-6">
+                <h2 class="text-lg font-bold mb-4">API Security</h2>
+
+                <form action="{{ url_for('settings.save') }}" method="POST" class="space-y-4">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div>
+                        <label class="block text-sm text-muted mb-1">API Key</label>
+                        <input type="text" name="api_key" value="{{ settings.api_key }}"
+                               class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 font-mono"
+                               placeholder="Leave empty to disable API authentication">
+                        <p class="text-xs text-muted mt-1">
+                            If set, POST requests to /api/scan and /api/fetch require this key in the X-API-Key header.
+                        </p>
+                    </div>
+
+                    <div class="flex items-center space-x-4">
+                        <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded">
+                            Save
+                        </button>
+                        <button type="button" @click="generateApiKey()"
+                                class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded">
+                            Generate Random Key
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+    {% endif %}
 </div>
 
 <script>
+function profileApp() {
+    return {
+        activeTab: 'account',
+        newSymbol: '',
+        customSymbol: '',
+        errorMessage: '',
+
+        generateApiKey() {
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            let key = '';
+            for (let i = 0; i < 32; i++) {
+                key += chars.charAt(Math.floor(Math.random() * chars.length));
+            }
+            document.querySelector('input[name="api_key"]').value = key;
+        },
+
+        async addCustomSymbol() {
+            this.errorMessage = '';
+            const symbol = this.customSymbol.trim().toUpperCase();
+
+            if (!symbol) return;
+
+            // Basic validation: should contain /
+            if (!symbol.includes('/')) {
+                this.errorMessage = 'Symbol must be in format BASE/QUOTE (e.g. BTC/USDT)';
+                return;
+            }
+
+            try {
+                const response = await fetch('/settings/symbols', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    },
+                    body: JSON.stringify({ action: 'add', symbol: symbol })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.customSymbol = '';
+                    location.reload();
+                } else {
+                    this.errorMessage = data.error || 'Failed to add symbol';
+                }
+            } catch (e) {
+                this.errorMessage = 'Error: ' + e.message;
+            }
+        },
+
+        async addSymbol() {
+            if (!this.newSymbol) return;
+            try {
+                const response = await fetch('/settings/symbols', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    },
+                    body: JSON.stringify({ action: 'add', symbol: this.newSymbol })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    location.reload();
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        },
+
+        async toggleSymbol(id) {
+            try {
+                const response = await fetch('/settings/symbols', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    },
+                    body: JSON.stringify({ action: 'toggle', id: id })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    location.reload();
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        },
+
+        async toggleNotify(id) {
+            try {
+                const response = await fetch('/settings/symbols', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    },
+                    body: JSON.stringify({ action: 'toggle_notify', id: id })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    location.reload();
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        }
+    }
+}
+
 function copyTopic() {
     navigator.clipboard.writeText('{{ user.ntfy_topic }}');
     alert('Topic copied to clipboard!');
+}
+
+function toggleQuietHours(checkbox) {
+    const settings = document.getElementById('quiet-hours-settings');
+    const selects = settings.querySelectorAll('select');
+
+    if (checkbox.checked) {
+        settings.classList.remove('opacity-50');
+        selects.forEach(s => s.disabled = false);
+    } else {
+        settings.classList.add('opacity-50');
+        selects.forEach(s => s.disabled = true);
+    }
+}
+
+function testNotification() {
+    fetch('{{ url_for("auth.test_user_notification") }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': getCsrfToken()
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Test notification sent! Check your NTFY app.');
+        } else {
+            alert('Failed to send notification: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error);
+    });
 }
 </script>
 {% endblock %}
