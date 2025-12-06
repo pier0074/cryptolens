@@ -172,16 +172,30 @@
             </div>
             <p class="text-xs text-red-400 mb-4" x-show="errorMessage" x-text="errorMessage"></p>
 
+            <!-- Legend -->
+            <div class="flex items-center gap-4 text-xs text-muted mb-3">
+                <span><span class="text-green-400">Fetch</span> = candles are fetched</span>
+                <span><span class="text-blue-400">Notify</span> = send notifications</span>
+            </div>
+
             <!-- Active Symbols -->
             <h3 class="text-sm font-semibold text-muted mb-2">Active ({{ symbols|selectattr('is_active')|list|length }})</h3>
-            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mb-4">
+            <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mb-4">
                 {% for symbol in symbols if symbol.is_active %}
                 <div class="flex items-center justify-between bg-gray-800 rounded p-2 text-sm">
-                    <span>{{ symbol.symbol }}</span>
-                    <button @click="toggleSymbol({{ symbol.id }})"
-                            class="text-xs px-2 py-1 rounded bg-green-900 text-green-200">
-                        ON
-                    </button>
+                    <span class="font-mono">{{ symbol.symbol }}</span>
+                    <div class="flex items-center gap-1">
+                        <button @click="toggleSymbol({{ symbol.id }})"
+                                class="text-xs px-2 py-1 rounded bg-green-900 text-green-200"
+                                title="Fetch candles">
+                            Fetch
+                        </button>
+                        <button @click="toggleNotify({{ symbol.id }})"
+                                class="text-xs px-2 py-1 rounded {% if symbol.notify_enabled %}bg-blue-900 text-blue-200{% else %}bg-gray-700 text-gray-400{% endif %}"
+                                title="Send notifications">
+                            {{ 'Notify' if symbol.notify_enabled else 'Mute' }}
+                        </button>
+                    </div>
                 </div>
                 {% endfor %}
             </div>
@@ -193,14 +207,17 @@
                 <summary class="text-sm text-muted cursor-pointer hover:text-white">
                     Inactive ({{ inactive_symbols|length }}) - click to expand
                 </summary>
-                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mt-2">
+                <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2 mt-2">
                     {% for symbol in inactive_symbols %}
                     <div class="flex items-center justify-between bg-gray-800 rounded p-2 text-sm opacity-60">
-                        <span class="text-muted">{{ symbol.symbol }}</span>
-                        <button @click="toggleSymbol({{ symbol.id }})"
-                                class="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600">
-                            OFF
-                        </button>
+                        <span class="text-muted font-mono">{{ symbol.symbol }}</span>
+                        <div class="flex items-center gap-1">
+                            <button @click="toggleSymbol({{ symbol.id }})"
+                                    class="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600"
+                                    title="Enable fetching">
+                                OFF
+                            </button>
+                        </div>
                     </div>
                     {% endfor %}
                 </div>
@@ -307,6 +324,25 @@ function settingsApp() {
                         'X-CSRFToken': getCsrfToken()
                     },
                     body: JSON.stringify({ action: 'toggle', id: id })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    location.reload();
+                }
+            } catch (e) {
+                alert('Error: ' + e.message);
+            }
+        },
+
+        async toggleNotify(id) {
+            try {
+                const response = await fetch('/settings/symbols', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    },
+                    body: JSON.stringify({ action: 'toggle_notify', id: id })
                 });
                 const data = await response.json();
                 if (data.success) {

@@ -57,7 +57,8 @@ class Symbol(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     symbol = db.Column(db.String(20), unique=True, nullable=False)  # e.g., "BTC/USDT"
     exchange = db.Column(db.String(20), default='kucoin')
-    is_active = db.Column(db.Boolean, default=True)
+    is_active = db.Column(db.Boolean, default=True)  # Whether to fetch candles
+    notify_enabled = db.Column(db.Boolean, default=True)  # Whether to send notifications
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Relationships
@@ -73,7 +74,8 @@ class Symbol(db.Model):
             'id': self.id,
             'symbol': self.symbol,
             'exchange': self.exchange,
-            'is_active': self.is_active
+            'is_active': self.is_active,
+            'notify_enabled': self.notify_enabled
         }
 
 

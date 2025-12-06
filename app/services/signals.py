@@ -242,9 +242,10 @@ def generate_confluence_signal(symbol: str) -> Optional[Signal]:
             df = get_candles_as_dataframe(symbol, '1m', limit=1)
             current_price = float(df['close'].iloc[-1]) if not df.empty else None
 
-            # Notify for high-quality signals
-            from app.services.notifier import notify_signal
-            notify_signal(signal, current_price=current_price)
+            # Notify for high-quality signals (if notifications enabled for this symbol)
+            if sym.notify_enabled:
+                from app.services.notifier import notify_signal
+                notify_signal(signal, current_price=current_price)
         except Exception as e:
             db.session.rollback()
             from app.services.logger import log_error

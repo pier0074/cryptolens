@@ -28,9 +28,9 @@ def index():
         'log_level': Setting.get('log_level', 'INFO'),
     }
 
-    # Filter out already-added symbols from dropdown
-    existing_symbols = {s.symbol for s in symbols}
-    available_symbols = [s for s in Config.SYMBOLS if s not in existing_symbols]
+    # Show all symbols in dropdown, sorted alphabetically
+    # (duplicates are handled by the add action which will reactivate if inactive)
+    available_symbols = sorted(Config.SYMBOLS)
 
     return render_template('settings.html',
                            symbols=symbols,
@@ -73,10 +73,17 @@ def manage_symbols():
             return jsonify({'success': False, 'error': 'Invalid symbol format. Use BASE/QUOTE (e.g., BTC/USDT)'}), 400
 
         # Check if symbol already exists
-        if symbol_name in [s.symbol for s in Symbol.query.all()]:
-            return jsonify({'success': False, 'error': 'Symbol already exists'}), 400
+        existing = Symbol.query.filter_by(symbol=symbol_name).first()
+        if existing:
+            if not existing.is_active:
+                # Reactivate inactive symbol
+                existing.is_active = True
+                db.session.commit()
+                return jsonify({'success': True, 'symbol': existing.to_dict(), 'reactivated': True})
+            else:
+                return jsonify({'success': False, 'error': 'Symbol already active'}), 400
 
-        symbol = Symbol(symbol=symbol_name, exchange='kucoin')
+        symbol = Symbol(symbol=symbol_name, exchange='binance')
         db.session.add(symbol)
         db.session.commit()
         return jsonify({'success': True, 'symbol': symbol.to_dict()})
@@ -86,6 +93,14 @@ def manage_symbols():
         symbol = db.session.get(Symbol, symbol_id)
         if symbol:
             symbol.is_active = not symbol.is_active
+            db.session.commit()
+            return jsonify({'success': True, 'symbol': symbol.to_dict()})
+
+    elif action == 'toggle_notify':
+        symbol_id = data.get('id')
+        symbol = db.session.get(Symbol, symbol_id)
+        if symbol:
+            symbol.notify_enabled = not symbol.notify_enabled
             db.session.commit()
             return jsonify({'success': True, 'symbol': symbol.to_dict()})
 
