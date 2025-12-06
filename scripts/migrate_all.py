@@ -160,6 +160,89 @@ def migrate():
             db.session.execute(text("CREATE INDEX idx_user_notification_sent ON user_notifications (sent_at)"))
             changes.append("Created user_notifications table")
 
+        # 10. User email verification and password reset columns
+        if table_exists('users'):
+            cols = get_table_columns('users')
+
+            # Email verification
+            if 'email_verification_token' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN email_verification_token VARCHAR(64)"))
+                changes.append("Added users.email_verification_token")
+            if 'email_verification_expires' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN email_verification_expires DATETIME"))
+                changes.append("Added users.email_verification_expires")
+
+            # Password reset
+            if 'password_reset_token' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN password_reset_token VARCHAR(64)"))
+                changes.append("Added users.password_reset_token")
+            if 'password_reset_expires' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN password_reset_expires DATETIME"))
+                changes.append("Added users.password_reset_expires")
+
+            # Two-factor authentication (TOTP)
+            if 'totp_secret' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN totp_secret VARCHAR(32)"))
+                changes.append("Added users.totp_secret")
+            if 'totp_enabled' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN totp_enabled BOOLEAN DEFAULT 0"))
+                changes.append("Added users.totp_enabled")
+
+            # Notification preferences
+            if 'notify_enabled' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN notify_enabled BOOLEAN DEFAULT 1"))
+                changes.append("Added users.notify_enabled")
+            if 'notify_signals' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN notify_signals BOOLEAN DEFAULT 1"))
+                changes.append("Added users.notify_signals")
+            if 'notify_patterns' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN notify_patterns BOOLEAN DEFAULT 0"))
+                changes.append("Added users.notify_patterns")
+            if 'notify_priority' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN notify_priority INTEGER DEFAULT 3"))
+                changes.append("Added users.notify_priority")
+            if 'notify_min_confluence' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN notify_min_confluence INTEGER DEFAULT 2"))
+                changes.append("Added users.notify_min_confluence")
+            if 'notify_directions' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN notify_directions VARCHAR(20) DEFAULT 'both'"))
+                changes.append("Added users.notify_directions")
+            if 'quiet_hours_enabled' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN quiet_hours_enabled BOOLEAN DEFAULT 0"))
+                changes.append("Added users.quiet_hours_enabled")
+            if 'quiet_hours_start' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN quiet_hours_start INTEGER DEFAULT 22"))
+                changes.append("Added users.quiet_hours_start")
+            if 'quiet_hours_end' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN quiet_hours_end INTEGER DEFAULT 7"))
+                changes.append("Added users.quiet_hours_end")
+
+        # 11. Payments table
+        if not table_exists('payments'):
+            db.session.execute(text("""
+                CREATE TABLE payments (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    provider VARCHAR(20) NOT NULL,
+                    external_id VARCHAR(100),
+                    plan VARCHAR(20) NOT NULL,
+                    billing_cycle VARCHAR(20) DEFAULT 'monthly',
+                    amount FLOAT NOT NULL,
+                    currency VARCHAR(10) DEFAULT 'USD',
+                    crypto_currency VARCHAR(10),
+                    crypto_amount FLOAT,
+                    status VARCHAR(20) DEFAULT 'pending',
+                    created_at DATETIME,
+                    completed_at DATETIME,
+                    expires_at DATETIME,
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            """))
+            db.session.execute(text("CREATE INDEX idx_payment_user ON payments (user_id)"))
+            db.session.execute(text("CREATE INDEX idx_payment_status ON payments (status)"))
+            db.session.execute(text("CREATE INDEX idx_payment_provider ON payments (provider, external_id)"))
+            changes.append("Created payments table")
+
         db.session.commit()
 
         if changes:

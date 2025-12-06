@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+
+{% block title %}Setup Two-Factor Authentication - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <h1 class="text-3xl font-bold mb-8">Setup Two-Factor Authentication</h1>
+
+    <div class="bg-card rounded-lg p-6">
+        {% if not user.totp_secret %}
+            <!-- Step 1: Generate Secret -->
+            <div class="text-center">
+                <div class="mb-6">
+                    <div class="w-16 h-16 mx-auto bg-blue-600 rounded-full flex items-center justify-center mb-4">
+                        <svg class="w-8 h-8 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                        </svg>
+                    </div>
+                    <h2 class="text-xl font-semibold mb-2">Secure Your Account</h2>
+                    <p class="text-gray-400">
+                        Two-factor authentication adds an extra layer of security by requiring a code from your phone in addition to your password.
+                    </p>
+                </div>
+
+                <form method="POST" action="{{ url_for('auth.setup_2fa') }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit"
+                            class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-lg transition">
+                        Get Started
+                    </button>
+                </form>
+            </div>
+        {% else %}
+            <!-- Step 2: Scan QR Code -->
+            <div class="space-y-6">
+                <div class="text-center">
+                    <h2 class="text-xl font-semibold mb-2">Scan QR Code</h2>
+                    <p class="text-gray-400 mb-4">
+                        Open your authenticator app and scan this QR code:
+                    </p>
+                </div>
+
+                {% if qr_code_data %}
+                <div class="flex justify-center">
+                    <div class="bg-white p-4 rounded-lg">
+                        <img src="data:image/png;base64,{{ qr_code_data }}" alt="QR Code" class="w-48 h-48">
+                    </div>
+                </div>
+                {% endif %}
+
+                <div class="bg-darker rounded-lg p-4">
+                    <p class="text-sm text-gray-400 mb-2">Or enter this code manually:</p>
+                    <div class="flex items-center justify-between">
+                        <code class="text-lg text-blue-400 font-mono">{{ user.totp_secret }}</code>
+                        <button onclick="copySecret()" class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-sm">
+                            Copy
+                        </button>
+                    </div>
+                </div>
+
+                <div class="border-t border-gray-700 pt-6">
+                    <h3 class="font-semibold mb-4">Verify Setup</h3>
+                    <p class="text-gray-400 text-sm mb-4">
+                        Enter the 6-digit code from your authenticator app to complete setup:
+                    </p>
+
+                    <form method="POST" action="{{ url_for('auth.verify_2fa') }}">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                        <div class="mb-4">
+                            <input type="text" id="totp_code" name="totp_code" required
+                                   pattern="[0-9]{6}" maxlength="6" inputmode="numeric"
+                                   class="w-full px-4 py-3 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white text-center text-2xl tracking-widest"
+                                   placeholder="000000">
+                        </div>
+
+                        <button type="submit"
+                                class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 px-4 rounded-lg transition">
+                            Enable Two-Factor Authentication
+                        </button>
+                    </form>
+                </div>
+
+                <div class="text-center pt-4">
+                    <a href="{{ url_for('auth.profile') }}" class="text-gray-400 hover:text-gray-300 text-sm">
+                        Cancel and return to profile
+                    </a>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+
+    <!-- Recommended Apps -->
+    <div class="mt-8 bg-card rounded-lg p-6">
+        <h3 class="font-semibold mb-4">Recommended Authenticator Apps</h3>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-gray-400">
+            <div>
+                <p class="text-white font-medium">Google Authenticator</p>
+                <p>Available for iOS and Android</p>
+            </div>
+            <div>
+                <p class="text-white font-medium">Authy</p>
+                <p>Cross-platform with cloud backup</p>
+            </div>
+            <div>
+                <p class="text-white font-medium">1Password</p>
+                <p>Password manager with TOTP support</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function copySecret() {
+    navigator.clipboard.writeText('{{ user.totp_secret }}');
+    alert('Secret copied to clipboard!');
+}
+</script>
+{% endblock %}

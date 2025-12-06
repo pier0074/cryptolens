@@ -175,8 +175,11 @@ def create_app(config_name=None):
     from app.routes.portfolio import portfolio_bp
     from app.routes.auth import auth_bp
     from app.routes.admin import admin_bp
+    from app.routes.payments import payments_bp
+    from app.routes.main import main_bp
 
     app.register_blueprint(dashboard_bp)
+    app.register_blueprint(main_bp)
     app.register_blueprint(patterns_bp, url_prefix='/patterns')
     app.register_blueprint(signals_bp, url_prefix='/signals')
     app.register_blueprint(backtest_bp, url_prefix='/backtest')
@@ -187,9 +190,11 @@ def create_app(config_name=None):
     app.register_blueprint(portfolio_bp, url_prefix='/portfolio')
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(admin_bp, url_prefix='/admin')
+    app.register_blueprint(payments_bp)
 
-    # Exempt API from CSRF (uses API key authentication instead)
+    # Exempt API and webhook endpoints from CSRF
     csrf.exempt(api_bp)
+    csrf.exempt(payments_bp)
 
     # Create database tables and enable WAL mode for better concurrency
     with app.app_context():

@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}Payment Status - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-lg mx-auto">
+    <div class="text-center mb-8">
+        <h1 class="text-3xl font-bold mb-2">Payment Status</h1>
+    </div>
+
+    <div class="bg-card rounded-xl p-6">
+        <div class="space-y-4">
+            <div class="flex justify-between items-center py-3 border-b border-gray-700">
+                <span class="text-gray-400">Payment ID</span>
+                <span class="font-mono">#{{ payment.id }}</span>
+            </div>
+
+            <div class="flex justify-between items-center py-3 border-b border-gray-700">
+                <span class="text-gray-400">Plan</span>
+                <span>{{ payment.plan.title() }}</span>
+            </div>
+
+            <div class="flex justify-between items-center py-3 border-b border-gray-700">
+                <span class="text-gray-400">Amount</span>
+                <span>${{ payment.amount }} {{ payment.currency }}</span>
+            </div>
+
+            <div class="flex justify-between items-center py-3 border-b border-gray-700">
+                <span class="text-gray-400">Provider</span>
+                <span>{{ payment.provider.title() }}</span>
+            </div>
+
+            <div class="flex justify-between items-center py-3 border-b border-gray-700">
+                <span class="text-gray-400">Status</span>
+                <span class="{% if payment.status == 'completed' %}text-green-400{% elif payment.status == 'pending' %}text-yellow-400{% else %}text-red-400{% endif %}">
+                    {{ payment.status.title() }}
+                </span>
+            </div>
+
+            <div class="flex justify-between items-center py-3">
+                <span class="text-gray-400">Created</span>
+                <span>{{ payment.created_at.strftime('%Y-%m-%d %H:%M') if payment.created_at else 'N/A' }}</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-6 text-center space-y-4">
+        {% if payment.status == 'pending' %}
+        <p class="text-gray-400 text-sm">This page will automatically update when payment is confirmed.</p>
+        {% endif %}
+
+        <a href="{{ url_for('payments.payment_history') }}" class="block text-gray-400 hover:text-gray-300">
+            View All Payments
+        </a>
+    </div>
+</div>
+
+{% if payment.status == 'pending' %}
+<script>
+// Poll for status updates
+setInterval(function() {
+    fetch('{{ url_for("payments.check_payment_status", payment_id=payment.id) }}')
+        .then(response => response.json())
+        .then(data => {
+            if (data.completed) {
+                window.location.href = '{{ url_for("payments.payment_success") }}';
+            }
+        });
+}, 10000);
+</script>
+{% endif %}
+{% endblock %}

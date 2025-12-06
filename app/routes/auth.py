@@ -91,12 +91,45 @@ def login():
     if 'user_id' in session:
         return redirect(url_for('auth.profile'))
 
+    # Check if this is a 2FA verification step
+    pending_2fa_user_id = session.get('pending_2fa_user_id')
+
     if request.method == 'POST':
+        totp_code = request.form.get('totp_code', '').strip()
+
+        # Handle 2FA verification
+        if pending_2fa_user_id and totp_code:
+            user = db.session.get(User, pending_2fa_user_id)
+            if user and user.verify_totp(totp_code):
+                # Clear pending 2FA state
+                session.pop('pending_2fa_user_id', None)
+
+                # Complete login
+                session['user_id'] = user.id
+                session.permanent = True
+
+                flash(f'Welcome back, {user.username}!', 'success')
+
+                next_page = request.args.get('next')
+                if next_page and is_safe_url(next_page):
+                    return redirect(next_page)
+                return redirect(url_for('auth.profile'))
+            else:
+                flash('Invalid authentication code.', 'error')
+                return render_template('auth/login.html', requires_2fa=True)
+
+        # Handle initial login
         email = request.form.get('email', '').strip()
         password = request.form.get('password', '')
 
         user = authenticate_user(email, password)
         if user:
+            # Check if 2FA is enabled
+            if user.totp_enabled:
+                # Store pending 2FA state in session
+                session['pending_2fa_user_id'] = user.id
+                return render_template('auth/login.html', requires_2fa=True)
+
             session['user_id'] = user.id
             session.permanent = True
 
@@ -109,6 +142,10 @@ def login():
             return redirect(url_for('auth.profile'))
         else:
             flash('Invalid email or password.', 'error')
+
+    # Clear any stale pending 2FA state on GET request
+    if request.method == 'GET':
+        session.pop('pending_2fa_user_id', None)
 
     return render_template('auth/login.html')
 
@@ -320,3 +357,163 @@ def reset_password(token):
         return redirect(url_for('auth.login'))
 
     return render_template('auth/reset_password.html', token=token)
+
+
+# =============================================================================
+# TWO-FACTOR AUTHENTICATION (2FA) ROUTES
+# =============================================================================
+
+@auth_bp.route('/2fa/setup', methods=['GET', 'POST'])
+@login_required
+def setup_2fa():
+    """Setup two-factor authentication"""
+    import io
+    import base64
+    import qrcode
+
+    user = get_current_user()
+
+    if user.totp_enabled:
+        flash('Two-factor authentication is already enabled.', 'info')
+        return redirect(url_for('auth.profile'))
+
+    if request.method == 'POST':
+        # Generate new TOTP secret
+        user.generate_totp_secret()
+        db.session.commit()
+
+    # Generate QR code if secret exists
+    qr_code_data = None
+    if user.totp_secret:
+        totp_uri = user.get_totp_uri()
+        if totp_uri:
+            qr = qrcode.QRCode(version=1, box_size=10, border=5)
+            qr.add_data(totp_uri)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white")
+
+            # Convert to base64 for embedding in HTML
+            buffer = io.BytesIO()
+            img.save(buffer, format='PNG')
+            qr_code_data = base64.b64encode(buffer.getvalue()).decode()
+
+    return render_template('auth/2fa_setup.html',
+                           user=user,
+                           qr_code_data=qr_code_data)
+
+
+@auth_bp.route('/2fa/verify', methods=['POST'])
+@login_required
+def verify_2fa():
+    """Verify TOTP code and enable 2FA"""
+    user = get_current_user()
+
+    if user.totp_enabled:
+        flash('Two-factor authentication is already enabled.', 'info')
+        return redirect(url_for('auth.profile'))
+
+    if not user.totp_secret:
+        flash('Please generate a 2FA secret first.', 'error')
+        return redirect(url_for('auth.setup_2fa'))
+
+    totp_code = request.form.get('totp_code', '').strip()
+
+    if not totp_code:
+        flash('Please enter the authentication code.', 'error')
+        return redirect(url_for('auth.setup_2fa'))
+
+    if user.verify_totp(totp_code):
+        user.totp_enabled = True
+        db.session.commit()
+        flash('Two-factor authentication has been enabled!', 'success')
+        return redirect(url_for('auth.profile'))
+    else:
+        flash('Invalid authentication code. Please try again.', 'error')
+        return redirect(url_for('auth.setup_2fa'))
+
+
+@auth_bp.route('/2fa/disable', methods=['POST'])
+@login_required
+def disable_2fa():
+    """Disable two-factor authentication"""
+    user = get_current_user()
+
+    if not user.totp_enabled:
+        flash('Two-factor authentication is not enabled.', 'info')
+        return redirect(url_for('auth.profile'))
+
+    # Require password confirmation
+    password = request.form.get('password', '')
+    if not user.check_password(password):
+        flash('Invalid password.', 'error')
+        return redirect(url_for('auth.profile'))
+
+    # Disable 2FA
+    user.totp_enabled = False
+    user.totp_secret = None
+    db.session.commit()
+
+    flash('Two-factor authentication has been disabled.', 'success')
+    return redirect(url_for('auth.profile'))
+
+
+# =============================================================================
+# NOTIFICATION PREFERENCES ROUTES
+# =============================================================================
+
+@auth_bp.route('/notifications', methods=['GET', 'POST'])
+@login_required
+def notification_preferences():
+    """Manage notification preferences"""
+    user = get_current_user()
+
+    if request.method == 'POST':
+        # Update notification preferences
+        user.notify_enabled = 'notify_enabled' in request.form
+        user.notify_signals = 'notify_signals' in request.form
+        user.notify_patterns = 'notify_patterns' in request.form
+        user.notify_priority = int(request.form.get('notify_priority', 3))
+        user.notify_min_confluence = int(request.form.get('notify_min_confluence', 2))
+        user.notify_directions = request.form.get('notify_directions', 'both')
+        user.quiet_hours_enabled = 'quiet_hours_enabled' in request.form
+        user.quiet_hours_start = int(request.form.get('quiet_hours_start', 22))
+        user.quiet_hours_end = int(request.form.get('quiet_hours_end', 7))
+
+        db.session.commit()
+        flash('Notification preferences saved!', 'success')
+        return redirect(url_for('auth.notification_preferences'))
+
+    return render_template('auth/notifications.html', user=user)
+
+
+@auth_bp.route('/notifications/test', methods=['POST'])
+@login_required
+def test_user_notification():
+    """Send a test notification to the user"""
+    from app.services.notifier import send_notification
+    from datetime import datetime, timezone
+
+    user = get_current_user()
+
+    if not user.can_receive_notifications:
+        return jsonify({
+            'success': False,
+            'error': 'Notifications are disabled or subscription inactive'
+        }), 400
+
+    # Send test notification
+    now = datetime.now(timezone.utc)
+    timestamp_str = now.strftime("%d/%m/%Y %H:%M UTC")
+
+    title = "CryptoLens Test Notification"
+    message = f"{timestamp_str}\n\nThis is a test notification from CryptoLens.\n\nYour notification preferences are working correctly!"
+
+    success = send_notification(
+        topic=user.ntfy_topic,
+        title=title,
+        message=message,
+        priority=user.notify_priority,
+        tags="test,check"
+    )
+
+    return jsonify({'success': success})

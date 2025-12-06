@@ -1,0 +1,218 @@
+{% extends "base.html" %}
+
+{% block title %}Notification Preferences - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <h1 class="text-3xl font-bold mb-8">Notification Preferences</h1>
+
+    <form method="POST" action="{{ url_for('auth.notification_preferences') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <!-- Master Toggle -->
+        <div class="bg-card rounded-lg p-6 mb-6">
+            <div class="flex items-center justify-between">
+                <div>
+                    <h2 class="text-xl font-semibold">Enable Notifications</h2>
+                    <p class="text-gray-400 text-sm mt-1">Master switch for all notifications</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" name="notify_enabled" class="sr-only peer"
+                           {% if user.notify_enabled %}checked{% endif %}>
+                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+            </div>
+
+            <!-- NTFY Topic Info -->
+            <div class="mt-4 pt-4 border-t border-gray-700">
+                <label class="block text-sm text-gray-400 mb-2">Your NTFY Topic</label>
+                <div class="flex items-center space-x-2">
+                    <code class="text-lg text-blue-400 flex-1 bg-darker rounded px-3 py-2">{{ user.ntfy_topic }}</code>
+                    <button type="button" onclick="copyTopic()"
+                            class="bg-gray-700 hover:bg-gray-600 px-3 py-2 rounded text-sm">
+                        Copy
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notification Types -->
+        <div class="bg-card rounded-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Notification Types</h2>
+
+            <div class="space-y-4">
+                <label class="flex items-center justify-between p-3 bg-darker rounded-lg cursor-pointer">
+                    <div>
+                        <span class="font-medium">Signal Notifications</span>
+                        <p class="text-gray-400 text-sm">Receive alerts for new trading signals</p>
+                    </div>
+                    <input type="checkbox" name="notify_signals"
+                           class="w-5 h-5 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                           {% if user.notify_signals %}checked{% endif %}>
+                </label>
+
+                <label class="flex items-center justify-between p-3 bg-darker rounded-lg cursor-pointer">
+                    <div>
+                        <span class="font-medium">Pattern Notifications</span>
+                        <p class="text-gray-400 text-sm">Receive alerts for new detected patterns</p>
+                    </div>
+                    <input type="checkbox" name="notify_patterns"
+                           class="w-5 h-5 text-blue-600 bg-gray-700 border-gray-600 rounded focus:ring-blue-500"
+                           {% if user.notify_patterns %}checked{% endif %}>
+                </label>
+            </div>
+        </div>
+
+        <!-- Filters -->
+        <div class="bg-card rounded-lg p-6 mb-6">
+            <h2 class="text-xl font-semibold mb-4">Filters</h2>
+
+            <div class="space-y-4">
+                <!-- Direction -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Signal Direction</label>
+                    <select name="notify_directions"
+                            class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
+                        <option value="both" {% if user.notify_directions == 'both' %}selected{% endif %}>Both (Long & Short)</option>
+                        <option value="long" {% if user.notify_directions == 'long' %}selected{% endif %}>Long Only</option>
+                        <option value="short" {% if user.notify_directions == 'short' %}selected{% endif %}>Short Only</option>
+                    </select>
+                </div>
+
+                <!-- Min Confluence -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Minimum Confluence Score</label>
+                    <select name="notify_min_confluence"
+                            class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
+                        {% for i in range(1, 7) %}
+                        <option value="{{ i }}" {% if user.notify_min_confluence == i %}selected{% endif %}>
+                            {{ i }} TF{% if i > 1 %}s{% endif %} aligned
+                        </option>
+                        {% endfor %}
+                    </select>
+                    <p class="text-gray-500 text-sm mt-1">Only receive notifications when this many timeframes agree</p>
+                </div>
+
+                <!-- Priority -->
+                <div>
+                    <label class="block text-sm font-medium text-gray-300 mb-2">Notification Priority</label>
+                    <select name="notify_priority"
+                            class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
+                        <option value="1" {% if user.notify_priority == 1 %}selected{% endif %}>1 - Min (no sound)</option>
+                        <option value="2" {% if user.notify_priority == 2 %}selected{% endif %}>2 - Low</option>
+                        <option value="3" {% if user.notify_priority == 3 %}selected{% endif %}>3 - Default</option>
+                        <option value="4" {% if user.notify_priority == 4 %}selected{% endif %}>4 - High</option>
+                        <option value="5" {% if user.notify_priority == 5 %}selected{% endif %}>5 - Max (urgent)</option>
+                    </select>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quiet Hours -->
+        <div class="bg-card rounded-lg p-6 mb-6">
+            <div class="flex items-center justify-between mb-4">
+                <div>
+                    <h2 class="text-xl font-semibold">Quiet Hours</h2>
+                    <p class="text-gray-400 text-sm">Pause notifications during specified hours (UTC)</p>
+                </div>
+                <label class="relative inline-flex items-center cursor-pointer">
+                    <input type="checkbox" name="quiet_hours_enabled" class="sr-only peer"
+                           {% if user.quiet_hours_enabled %}checked{% endif %}
+                           onchange="toggleQuietHours(this)">
+                    <div class="w-11 h-6 bg-gray-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                </label>
+            </div>
+
+            <div id="quiet-hours-settings" class="{% if not user.quiet_hours_enabled %}opacity-50{% endif %}">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Start (UTC)</label>
+                        <select name="quiet_hours_start"
+                                class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white"
+                                {% if not user.quiet_hours_enabled %}disabled{% endif %}>
+                            {% for h in range(24) %}
+                            <option value="{{ h }}" {% if user.quiet_hours_start == h %}selected{% endif %}>
+                                {{ '%02d:00'|format(h) }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">End (UTC)</label>
+                        <select name="quiet_hours_end"
+                                class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white"
+                                {% if not user.quiet_hours_enabled %}disabled{% endif %}>
+                            {% for h in range(24) %}
+                            <option value="{{ h }}" {% if user.quiet_hours_end == h %}selected{% endif %}>
+                                {{ '%02d:00'|format(h) }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="flex items-center justify-between">
+            <button type="submit"
+                    class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-6 rounded-lg transition">
+                Save Preferences
+            </button>
+
+            <button type="button" onclick="testNotification()"
+                    class="bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-6 rounded-lg transition">
+                Send Test
+            </button>
+        </div>
+    </form>
+
+    <!-- Back to Profile -->
+    <div class="mt-8 text-center">
+        <a href="{{ url_for('auth.profile') }}" class="text-gray-400 hover:text-gray-300">
+            Back to Profile
+        </a>
+    </div>
+</div>
+
+<script>
+function copyTopic() {
+    navigator.clipboard.writeText('{{ user.ntfy_topic }}');
+    alert('Topic copied to clipboard!');
+}
+
+function toggleQuietHours(checkbox) {
+    const settings = document.getElementById('quiet-hours-settings');
+    const selects = settings.querySelectorAll('select');
+
+    if (checkbox.checked) {
+        settings.classList.remove('opacity-50');
+        selects.forEach(s => s.disabled = false);
+    } else {
+        settings.classList.add('opacity-50');
+        selects.forEach(s => s.disabled = true);
+    }
+}
+
+function testNotification() {
+    fetch('{{ url_for("auth.test_user_notification") }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token() }}'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Test notification sent! Check your NTFY app.');
+        } else {
+            alert('Failed to send notification: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error);
+    });
+}
+</script>
+{% endblock %}

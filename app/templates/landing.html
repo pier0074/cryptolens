@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CryptoLens - Smart Crypto Trading Signals</title>
+    <meta name="description" content="Automated crypto pattern detection and trading signals. Get notified when high-confluence trading opportunities appear.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            background-color: #0f1419;
+            color: #e7e9ea;
+        }
+        .bg-dark { background-color: #0f1419; }
+        .bg-card { background-color: #1a1f26; }
+        .bg-darker { background-color: #0d1117; }
+        .gradient-text {
+            background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .hero-gradient {
+            background: radial-gradient(ellipse at top, rgba(59, 130, 246, 0.15) 0%, transparent 50%);
+        }
+    </style>
+</head>
+<body class="bg-dark min-h-screen">
+    <!-- Navigation -->
+    <nav class="fixed top-0 left-0 right-0 z-50 bg-dark/80 backdrop-blur-lg border-b border-gray-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-16">
+                <div class="flex items-center">
+                    <a href="{{ url_for('main.landing') }}" class="text-2xl font-bold gradient-text">CryptoLens</a>
+                </div>
+                <div class="hidden md:flex items-center space-x-8">
+                    <a href="#features" class="text-gray-400 hover:text-white transition">Features</a>
+                    <a href="#pricing" class="text-gray-400 hover:text-white transition">Pricing</a>
+                    <a href="#how-it-works" class="text-gray-400 hover:text-white transition">How It Works</a>
+                </div>
+                <div class="flex items-center space-x-4">
+                    {% if user %}
+                    <a href="{{ url_for('dashboard.index') }}" class="text-gray-400 hover:text-white transition">Dashboard</a>
+                    {% else %}
+                    <a href="{{ url_for('auth.login') }}" class="text-gray-400 hover:text-white transition">Login</a>
+                    <a href="{{ url_for('auth.register') }}" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">
+                        Get Started
+                    </a>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="pt-32 pb-20 hero-gradient">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <h1 class="text-5xl md:text-7xl font-bold mb-6">
+                Trade Smarter with<br>
+                <span class="gradient-text">AI-Powered Signals</span>
+            </h1>
+            <p class="text-xl md:text-2xl text-gray-400 max-w-3xl mx-auto mb-10">
+                CryptoLens automatically detects high-probability trading patterns across multiple timeframes
+                and sends you real-time notifications when confluence aligns.
+            </p>
+            <div class="flex flex-col sm:flex-row items-center justify-center gap-4">
+                {% if user %}
+                <a href="{{ url_for('dashboard.index') }}"
+                   class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-lg text-lg transition">
+                    Go to Dashboard
+                </a>
+                {% else %}
+                <a href="{{ url_for('auth.register') }}"
+                   class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-8 rounded-lg text-lg transition">
+                    Start Free Trial
+                </a>
+                <a href="#how-it-works"
+                   class="bg-gray-800 hover:bg-gray-700 text-white font-bold py-4 px-8 rounded-lg text-lg transition">
+                    Learn More
+                </a>
+                {% endif %}
+            </div>
+
+            <!-- Stats -->
+            <div class="mt-20 grid grid-cols-3 gap-8 max-w-2xl mx-auto">
+                <div class="text-center">
+                    <div class="text-4xl font-bold text-blue-400">{{ "{:,}".format(stats.patterns_detected) }}</div>
+                    <div class="text-gray-400 mt-1">Patterns Detected</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-4xl font-bold text-green-400">{{ "{:,}".format(stats.signals_generated) }}</div>
+                    <div class="text-gray-400 mt-1">Signals Generated</div>
+                </div>
+                <div class="text-center">
+                    <div class="text-4xl font-bold text-purple-400">{{ stats.symbols_tracked }}</div>
+                    <div class="text-gray-400 mt-1">Symbols Tracked</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Features Section -->
+    <section id="features" class="py-20 bg-darker">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-4xl font-bold text-center mb-16">Why Choose CryptoLens?</h2>
+
+            <div class="grid md:grid-cols-3 gap-8">
+                <!-- Feature 1 -->
+                <div class="bg-card rounded-xl p-8">
+                    <div class="w-12 h-12 bg-blue-600/20 rounded-lg flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3">Multi-Timeframe Analysis</h3>
+                    <p class="text-gray-400">
+                        Scans 6 timeframes simultaneously (5m to 1D) to find high-confluence setups where multiple timeframes agree.
+                    </p>
+                </div>
+
+                <!-- Feature 2 -->
+                <div class="bg-card rounded-xl p-8">
+                    <div class="w-12 h-12 bg-green-600/20 rounded-lg flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3">Real-Time Notifications</h3>
+                    <p class="text-gray-400">
+                        Get instant push notifications via NTFY when trading signals match your criteria. Never miss an opportunity.
+                    </p>
+                </div>
+
+                <!-- Feature 3 -->
+                <div class="bg-card rounded-xl p-8">
+                    <div class="w-12 h-12 bg-purple-600/20 rounded-lg flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3">Smart Pattern Detection</h3>
+                    <p class="text-gray-400">
+                        Identifies order blocks, fair value gaps, liquidity zones, and imbalances using proven SMC/ICT concepts.
+                    </p>
+                </div>
+
+                <!-- Feature 4 -->
+                <div class="bg-card rounded-xl p-8">
+                    <div class="w-12 h-12 bg-yellow-600/20 rounded-lg flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3">Pay with Crypto</h3>
+                    <p class="text-gray-400">
+                        Subscribe using your favorite cryptocurrency. We accept BTC, ETH, USDT, and 50+ other coins.
+                    </p>
+                </div>
+
+                <!-- Feature 5 -->
+                <div class="bg-card rounded-xl p-8">
+                    <div class="w-12 h-12 bg-red-600/20 rounded-lg flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3">Backtest Signals</h3>
+                    <p class="text-gray-400">
+                        Validate strategy performance with historical backtesting. See win rates and expected returns before trading.
+                    </p>
+                </div>
+
+                <!-- Feature 6 -->
+                <div class="bg-card rounded-xl p-8">
+                    <div class="w-12 h-12 bg-cyan-600/20 rounded-lg flex items-center justify-center mb-6">
+                        <svg class="w-6 h-6 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3">Customizable Filters</h3>
+                    <p class="text-gray-400">
+                        Filter notifications by direction, confluence level, and set quiet hours. Only get the signals you want.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- How It Works -->
+    <section id="how-it-works" class="py-20">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-4xl font-bold text-center mb-16">How It Works</h2>
+
+            <div class="grid md:grid-cols-4 gap-8">
+                <div class="text-center">
+                    <div class="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">1</div>
+                    <h3 class="text-lg font-bold mb-2">Sign Up</h3>
+                    <p class="text-gray-400">Create your account in seconds. No credit card required for the free tier.</p>
+                </div>
+                <div class="text-center">
+                    <div class="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">2</div>
+                    <h3 class="text-lg font-bold mb-2">Connect NTFY</h3>
+                    <p class="text-gray-400">Install the NTFY app and subscribe to your personal topic for notifications.</p>
+                </div>
+                <div class="text-center">
+                    <div class="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">3</div>
+                    <h3 class="text-lg font-bold mb-2">Set Preferences</h3>
+                    <p class="text-gray-400">Configure which signals you want: direction, confluence level, quiet hours.</p>
+                </div>
+                <div class="text-center">
+                    <div class="w-16 h-16 bg-blue-600 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl font-bold">4</div>
+                    <h3 class="text-lg font-bold mb-2">Trade Smarter</h3>
+                    <p class="text-gray-400">Receive real-time alerts when high-confluence setups appear. Never miss a trade.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing Section -->
+    <section id="pricing" class="py-20 bg-darker">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <h2 class="text-4xl font-bold text-center mb-4">Simple, Transparent Pricing</h2>
+            <p class="text-xl text-gray-400 text-center mb-16">Choose the plan that fits your trading needs</p>
+
+            <div class="grid md:grid-cols-3 gap-8 max-w-5xl mx-auto">
+                <!-- Free -->
+                <div class="bg-card rounded-xl p-8">
+                    <h3 class="text-2xl font-bold mb-2">Free</h3>
+                    <div class="mb-6">
+                        <span class="text-4xl font-bold">$0</span>
+                        <span class="text-gray-400">/month</span>
+                    </div>
+                    <ul class="space-y-3 mb-8 text-gray-300">
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+                            View patterns & signals
+                        </li>
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+                            Basic analytics
+                        </li>
+                        <li class="flex items-center text-gray-500">
+                            <svg class="w-5 h-5 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
+                            No notifications
+                        </li>
+                    </ul>
+                    <a href="{{ url_for('auth.register') }}"
+                       class="block w-full py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-lg text-center transition">
+                        Get Started
+                    </a>
+                </div>
+
+                <!-- Pro -->
+                <div class="bg-card rounded-xl p-8 ring-2 ring-blue-500 relative">
+                    <div class="absolute -top-4 left-1/2 transform -translate-x-1/2">
+                        <span class="bg-blue-600 text-white px-4 py-1 rounded-full text-sm font-medium">Popular</span>
+                    </div>
+                    <h3 class="text-2xl font-bold mb-2">Pro</h3>
+                    <div class="mb-6">
+                        <span class="text-4xl font-bold">${{ plans.pro.price }}</span>
+                        <span class="text-gray-400">/month</span>
+                    </div>
+                    <ul class="space-y-3 mb-8 text-gray-300">
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+                            Everything in Free
+                        </li>
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+                            Push notifications
+                        </li>
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+                            Signal filters
+                        </li>
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+                            Backtest signals
+                        </li>
+                    </ul>
+                    <a href="{{ url_for('auth.register') }}"
+                       class="block w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-center transition">
+                        Start Free Trial
+                    </a>
+                </div>
+
+                <!-- Premium -->
+                <div class="bg-card rounded-xl p-8">
+                    <h3 class="text-2xl font-bold mb-2">Premium</h3>
+                    <div class="mb-6">
+                        <span class="text-4xl font-bold">${{ plans.premium.price }}</span>
+                        <span class="text-gray-400">/month</span>
+                    </div>
+                    <ul class="space-y-3 mb-8 text-gray-300">
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+                            Everything in Pro
+                        </li>
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+                            Portfolio tracking
+                        </li>
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+                            API access
+                        </li>
+                        <li class="flex items-center">
+                            <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+                            Priority support
+                        </li>
+                    </ul>
+                    <a href="{{ url_for('auth.register') }}"
+                       class="block w-full py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-bold rounded-lg text-center transition">
+                        Get Premium
+                    </a>
+                </div>
+            </div>
+
+            <p class="text-center text-gray-400 mt-8">
+                All paid plans include a 7-day free trial. Pay with card or crypto.
+            </p>
+        </div>
+    </section>
+
+    <!-- CTA Section -->
+    <section class="py-20">
+        <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
+            <h2 class="text-4xl font-bold mb-6">Ready to Trade Smarter?</h2>
+            <p class="text-xl text-gray-400 mb-10">
+                Join traders who are using CryptoLens to catch high-probability setups.
+            </p>
+            <a href="{{ url_for('auth.register') }}"
+               class="inline-block bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-10 rounded-lg text-lg transition">
+                Get Started for Free
+            </a>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-darker py-12 border-t border-gray-800">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid md:grid-cols-4 gap-8">
+                <div>
+                    <div class="text-2xl font-bold gradient-text mb-4">CryptoLens</div>
+                    <p class="text-gray-400 text-sm">
+                        Automated crypto pattern detection and trading signals.
+                    </p>
+                </div>
+                <div>
+                    <h4 class="font-bold mb-4">Product</h4>
+                    <ul class="space-y-2 text-gray-400 text-sm">
+                        <li><a href="#features" class="hover:text-white">Features</a></li>
+                        <li><a href="#pricing" class="hover:text-white">Pricing</a></li>
+                        <li><a href="#how-it-works" class="hover:text-white">How It Works</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-bold mb-4">Account</h4>
+                    <ul class="space-y-2 text-gray-400 text-sm">
+                        <li><a href="{{ url_for('auth.login') }}" class="hover:text-white">Login</a></li>
+                        <li><a href="{{ url_for('auth.register') }}" class="hover:text-white">Register</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="font-bold mb-4">Legal</h4>
+                    <ul class="space-y-2 text-gray-400 text-sm">
+                        <li><a href="#" class="hover:text-white">Privacy Policy</a></li>
+                        <li><a href="#" class="hover:text-white">Terms of Service</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="mt-12 pt-8 border-t border-gray-800 text-center text-gray-400 text-sm">
+                &copy; 2024 CryptoLens. All rights reserved.
+            </div>
+        </div>
+    </footer>
+</body>
+</html>

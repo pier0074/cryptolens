@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block title %}Crypto Payment - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-lg mx-auto">
+    <div class="text-center mb-8">
+        <h1 class="text-3xl font-bold mb-2">Complete Your Payment</h1>
+        <p class="text-gray-400">Send {{ payment.pay_currency }} to the address below</p>
+    </div>
+
+    <div class="bg-card rounded-xl p-6">
+        <!-- Order Summary -->
+        <div class="bg-darker rounded-lg p-4 mb-6">
+            <div class="flex justify-between items-center mb-2">
+                <span class="text-gray-400">Plan</span>
+                <span class="font-medium">{{ plan.title() }} ({{ billing_cycle }})</span>
+            </div>
+            <div class="flex justify-between items-center">
+                <span class="text-gray-400">Amount</span>
+                <span class="font-bold text-xl">${{ payment.pay_amount }} {{ payment.pay_currency }}</span>
+            </div>
+        </div>
+
+        <!-- Payment Address -->
+        <div class="mb-6">
+            <label class="block text-sm font-medium text-gray-300 mb-2">Send exactly:</label>
+            <div class="bg-darker rounded-lg p-4 text-center">
+                <span class="text-2xl font-bold text-green-400">{{ payment.pay_amount }} {{ payment.pay_currency }}</span>
+            </div>
+        </div>
+
+        <div class="mb-6">
+            <label class="block text-sm font-medium text-gray-300 mb-2">To this address:</label>
+            <div class="bg-darker rounded-lg p-4">
+                <code class="text-sm text-blue-400 break-all">{{ payment.pay_address }}</code>
+            </div>
+            <button onclick="copyAddress()"
+                    class="mt-2 w-full py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition text-sm">
+                Copy Address
+            </button>
+        </div>
+
+        <!-- QR Code would go here if available -->
+
+        <!-- Invoice Link -->
+        {% if payment.invoice_url %}
+        <div class="mb-6">
+            <a href="{{ payment.invoice_url }}" target="_blank"
+               class="block w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition text-center">
+                Open Payment Page
+            </a>
+        </div>
+        {% endif %}
+
+        <!-- Status -->
+        <div class="bg-darker rounded-lg p-4 mb-6">
+            <div class="flex items-center justify-between">
+                <span class="text-gray-400">Status</span>
+                <span id="payment-status" class="text-yellow-400">Waiting for payment...</span>
+            </div>
+            <div class="flex items-center justify-between mt-2">
+                <span class="text-gray-400">Expires</span>
+                <span id="expires-at" class="text-gray-300">{{ payment.expires_at }}</span>
+            </div>
+        </div>
+
+        <!-- Countdown Timer -->
+        <div class="text-center mb-6">
+            <div class="text-gray-400 text-sm mb-1">Time remaining:</div>
+            <div id="countdown" class="text-2xl font-mono text-yellow-400">--:--</div>
+        </div>
+
+        <!-- Warning -->
+        <div class="bg-yellow-900/30 border border-yellow-600 rounded-lg p-4 text-sm">
+            <p class="text-yellow-400 font-medium mb-2">Important:</p>
+            <ul class="text-yellow-200 space-y-1 text-sm">
+                <li>- Send the exact amount shown above</li>
+                <li>- Only send {{ payment.pay_currency }} to this address</li>
+                <li>- Payment must be received within the time limit</li>
+                <li>- This page will update automatically when payment is detected</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="mt-6 text-center">
+        <a href="{{ url_for('payments.upgrade') }}" class="text-gray-400 hover:text-gray-300">
+            Cancel and go back
+        </a>
+    </div>
+</div>
+
+<script>
+const paymentId = {{ payment.payment_id }};
+const expiresAt = new Date('{{ payment.expires_at }}');
+
+function copyAddress() {
+    navigator.clipboard.writeText('{{ payment.pay_address }}');
+    alert('Address copied to clipboard!');
+}
+
+function updateCountdown() {
+    const now = new Date();
+    const diff = expiresAt - now;
+
+    if (diff <= 0) {
+        document.getElementById('countdown').textContent = 'EXPIRED';
+        document.getElementById('countdown').classList.remove('text-yellow-400');
+        document.getElementById('countdown').classList.add('text-red-400');
+        return;
+    }
+
+    const minutes = Math.floor(diff / 60000);
+    const seconds = Math.floor((diff % 60000) / 1000);
+    document.getElementById('countdown').textContent =
+        minutes.toString().padStart(2, '0') + ':' + seconds.toString().padStart(2, '0');
+}
+
+function checkPaymentStatus() {
+    fetch('{{ url_for("payments.check_payment_status", payment_id=payment.payment_id) }}')
+        .then(response => response.json())
+        .then(data => {
+            if (data.completed) {
+                window.location.href = '{{ url_for("payments.payment_success") }}';
+            } else if (data.status === 'expired' || data.status === 'failed') {
+                document.getElementById('payment-status').textContent = 'Payment ' + data.status;
+                document.getElementById('payment-status').classList.remove('text-yellow-400');
+                document.getElementById('payment-status').classList.add('text-red-400');
+            }
+        });
+}
+
+// Update countdown every second
+setInterval(updateCountdown, 1000);
+updateCountdown();
+
+// Check payment status every 10 seconds
+setInterval(checkPaymentStatus, 10000);
+</script>
+{% endblock %}

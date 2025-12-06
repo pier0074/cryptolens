@@ -796,6 +796,17 @@ class User(db.Model):
     totp_secret = db.Column(db.String(32), nullable=True)
     totp_enabled = db.Column(db.Boolean, default=False)
 
+    # Notification preferences
+    notify_enabled = db.Column(db.Boolean, default=True)  # Master toggle
+    notify_signals = db.Column(db.Boolean, default=True)  # Receive signal notifications
+    notify_patterns = db.Column(db.Boolean, default=False)  # Receive pattern notifications
+    notify_priority = db.Column(db.Integer, default=3)  # NTFY priority 1-5 (3=default)
+    notify_min_confluence = db.Column(db.Integer, default=2)  # Min confluence to notify
+    notify_directions = db.Column(db.String(20), default='both')  # 'long', 'short', 'both'
+    quiet_hours_enabled = db.Column(db.Boolean, default=False)
+    quiet_hours_start = db.Column(db.Integer, default=22)  # 0-23 hour UTC
+    quiet_hours_end = db.Column(db.Integer, default=7)  # 0-23 hour UTC
+
     # Timestamps
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     last_login = db.Column(db.DateTime, nullable=True)
@@ -917,8 +928,37 @@ class User(db.Model):
         return (
             self.is_active and
             self.is_verified and
-            self.has_valid_subscription
+            self.has_valid_subscription and
+            self.notify_enabled
         )
+
+    def should_notify_signal(self, signal):
+        """Check if user should receive notification for a specific signal"""
+        if not self.can_receive_notifications:
+            return False
+        if not self.notify_signals:
+            return False
+        # Check direction preference
+        if self.notify_directions != 'both':
+            if self.notify_directions != signal.direction:
+                return False
+        # Check confluence minimum
+        if signal.confluence_score < self.notify_min_confluence:
+            return False
+        # Check quiet hours
+        if self.quiet_hours_enabled:
+            now = datetime.now(timezone.utc)
+            current_hour = now.hour
+            start = self.quiet_hours_start
+            end = self.quiet_hours_end
+            # Handle wrap-around (e.g., 22:00 to 07:00)
+            if start > end:
+                if current_hour >= start or current_hour < end:
+                    return False
+            else:
+                if start <= current_hour < end:
+                    return False
+        return True
 
     @property
     def subscription_tier(self):
@@ -1149,4 +1189,69 @@ class UserNotification(db.Model):
             'sent_at': self.sent_at.isoformat() if self.sent_at else None,
             'success': self.success,
             'error': self.error,
+        }
+
+
+# Payment status options
+PAYMENT_STATUSES = ['pending', 'completed', 'failed', 'refunded', 'expired']
+PAYMENT_PROVIDERS = ['lemonsqueezy', 'nowpayments']
+
+
+class Payment(db.Model):
+    """Payment transactions"""
+    __tablename__ = 'payments'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+
+    # Payment details
+    provider = db.Column(db.String(20), nullable=False)  # 'lemonsqueezy', 'nowpayments'
+    external_id = db.Column(db.String(100), nullable=True)  # Provider's payment ID
+    plan = db.Column(db.String(20), nullable=False)  # 'pro', 'premium', etc.
+    billing_cycle = db.Column(db.String(20), default='monthly')  # 'monthly', 'yearly'
+
+    # Amount
+    amount = db.Column(db.Float, nullable=False)
+    currency = db.Column(db.String(10), default='USD')
+
+    # For crypto payments
+    crypto_currency = db.Column(db.String(10), nullable=True)  # BTC, ETH, USDT, etc.
+    crypto_amount = db.Column(db.Float, nullable=True)
+    wallet_address = db.Column(db.String(100), nullable=True)
+
+    # Status
+    status = db.Column(db.String(20), default='pending')
+
+    # Timestamps
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    completed_at = db.Column(db.DateTime, nullable=True)
+    expires_at = db.Column(db.DateTime, nullable=True)  # For pending crypto payments
+
+    # Relationships
+    user = db.relationship('User', backref='payments')
+
+    __table_args__ = (
+        db.Index('idx_payment_user', 'user_id'),
+        db.Index('idx_payment_status', 'status'),
+        db.Index('idx_payment_external', 'provider', 'external_id'),
+    )
+
+    def __repr__(self):
+        return f'<Payment {self.id} {self.provider} {self.status}>'
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'provider': self.provider,
+            'external_id': self.external_id,
+            'plan': self.plan,
+            'billing_cycle': self.billing_cycle,
+            'amount': self.amount,
+            'currency': self.currency,
+            'crypto_currency': self.crypto_currency,
+            'crypto_amount': self.crypto_amount,
+            'status': self.status,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
         }

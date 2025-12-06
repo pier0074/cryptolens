@@ -10,32 +10,66 @@
         <form method="POST" action="{{ url_for('auth.login') }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-            <div class="mb-4">
-                <label for="email" class="block text-sm font-medium text-gray-300 mb-2">Email</label>
-                <input type="email" id="email" name="email" required
-                       class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white"
-                       placeholder="you@example.com">
-            </div>
+            {% if requires_2fa %}
+                <!-- 2FA Step - Show TOTP code input -->
+                <div class="mb-4 text-center">
+                    <div class="w-12 h-12 mx-auto bg-green-600 rounded-full flex items-center justify-center mb-3">
+                        <svg class="w-6 h-6 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+                        </svg>
+                    </div>
+                    <div class="text-green-400 mb-2">Password verified</div>
+                    <p class="text-gray-400 text-sm">Enter the 6-digit code from your authenticator app</p>
+                </div>
 
-            <div class="mb-4">
-                <label for="password" class="block text-sm font-medium text-gray-300 mb-2">Password</label>
-                <input type="password" id="password" name="password" required
-                       class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white"
-                       placeholder="Your password">
-            </div>
+                <div class="mb-6">
+                    <label for="totp_code" class="block text-sm font-medium text-gray-300 mb-2">Authentication Code</label>
+                    <input type="text" id="totp_code" name="totp_code" required
+                           pattern="[0-9]{6}" maxlength="6" inputmode="numeric" autocomplete="one-time-code"
+                           class="w-full px-4 py-3 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white text-center text-2xl tracking-widest"
+                           placeholder="000000" autofocus>
+                </div>
 
-            <div class="mb-6 text-right">
-                <a href="{{ url_for('auth.forgot_password') }}" class="text-sm text-blue-400 hover:text-blue-300">
-                    Forgot password?
-                </a>
-            </div>
+                <button type="submit"
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">
+                    Verify
+                </button>
 
-            <button type="submit"
-                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">
-                Login
-            </button>
+                <div class="mt-4 text-center">
+                    <a href="{{ url_for('auth.login') }}" class="text-gray-400 hover:text-gray-300 text-sm">
+                        Start over
+                    </a>
+                </div>
+            {% else %}
+                <!-- Normal Login Step -->
+                <div class="mb-4">
+                    <label for="email" class="block text-sm font-medium text-gray-300 mb-2">Email</label>
+                    <input type="email" id="email" name="email" required
+                           class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white"
+                           placeholder="you@example.com">
+                </div>
+
+                <div class="mb-4">
+                    <label for="password" class="block text-sm font-medium text-gray-300 mb-2">Password</label>
+                    <input type="password" id="password" name="password" required
+                           class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white"
+                           placeholder="Your password">
+                </div>
+
+                <div class="mb-6 text-right">
+                    <a href="{{ url_for('auth.forgot_password') }}" class="text-sm text-blue-400 hover:text-blue-300">
+                        Forgot password?
+                    </a>
+                </div>
+
+                <button type="submit"
+                        class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">
+                    Login
+                </button>
+            {% endif %}
         </form>
 
+        {% if not requires_2fa %}
         <div class="mt-6 text-center text-gray-400 space-y-2">
             <p>
                 Don't have an account?
@@ -46,6 +80,7 @@
                 <a href="{{ url_for('auth.resend_verification') }}" class="text-blue-400 hover:text-blue-300">Resend verification</a>
             </p>
         </div>
+        {% endif %}
     </div>
 </div>
 {% endblock %}
