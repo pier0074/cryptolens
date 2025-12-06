@@ -71,24 +71,28 @@
 
         <div class="flex flex-wrap gap-2">
             <form action="{{ url_for('admin.set_view_as') }}" method="POST" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="tier" value="admin">
                 <button type="submit" class="px-4 py-2 rounded-lg text-sm font-medium transition {% if session.get('view_as', 'admin') == 'admin' %}bg-blue-600 text-white{% else %}bg-gray-700 text-gray-300 hover:bg-gray-600{% endif %}">
                     Admin (Full Access)
                 </button>
             </form>
             <form action="{{ url_for('admin.set_view_as') }}" method="POST" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="tier" value="premium">
                 <button type="submit" class="px-4 py-2 rounded-lg text-sm font-medium transition {% if session.get('view_as') == 'premium' %}bg-purple-600 text-white{% else %}bg-gray-700 text-gray-300 hover:bg-gray-600{% endif %}">
                     Premium
                 </button>
             </form>
             <form action="{{ url_for('admin.set_view_as') }}" method="POST" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="tier" value="pro">
                 <button type="submit" class="px-4 py-2 rounded-lg text-sm font-medium transition {% if session.get('view_as') == 'pro' %}bg-green-600 text-white{% else %}bg-gray-700 text-gray-300 hover:bg-gray-600{% endif %}">
                     Pro
                 </button>
             </form>
             <form action="{{ url_for('admin.set_view_as') }}" method="POST" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <input type="hidden" name="tier" value="free">
                 <button type="submit" class="px-4 py-2 rounded-lg text-sm font-medium transition {% if session.get('view_as') == 'free' %}bg-gray-600 text-white{% else %}bg-gray-700 text-gray-300 hover:bg-gray-600{% endif %}">
                     Free
