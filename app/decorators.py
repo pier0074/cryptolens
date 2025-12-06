@@ -14,6 +14,22 @@ TIER_HIERARCHY = {
 }
 
 
+def get_effective_tier(user):
+    """
+    Get the effective tier for a user, respecting admin 'view_as' mode.
+
+    When an admin uses 'View as' to simulate a tier, this returns that tier
+    instead of bypassing restrictions. Returns None if admin should have
+    full access (no view_as or view_as='admin').
+    """
+    if user.is_admin:
+        view_as = session.get('view_as')
+        if view_as and view_as != 'admin':
+            return view_as
+        return None  # Full admin access
+    return user.subscription_tier
+
+
 def get_current_user():
     """Get the current logged-in user"""
     if 'user_id' in session:
@@ -113,12 +129,13 @@ def tier_required(min_tier):
                     return jsonify({'error': 'User not found'}), 401
                 return redirect(url_for('auth.login'))
 
-            # Admins bypass tier restrictions
-            if user.is_admin:
+            # Get effective tier (respects admin 'view_as' mode)
+            effective_tier = get_effective_tier(user)
+            if effective_tier is None:
+                # Admin with full access
                 return f(*args, **kwargs)
 
-            user_tier = user.subscription_tier
-            user_tier_level = TIER_HIERARCHY.get(user_tier, 0)
+            user_tier_level = TIER_HIERARCHY.get(effective_tier, 0)
             required_tier_level = TIER_HIERARCHY.get(min_tier, 0)
 
             if user_tier_level < required_tier_level:
@@ -128,7 +145,7 @@ def tier_required(min_tier):
                 if request.is_json:
                     return jsonify({
                         'error': f'{required_name} subscription required',
-                        'current_tier': user_tier,
+                        'current_tier': effective_tier,
                         'required_tier': min_tier,
                     }), 403
 
@@ -173,18 +190,32 @@ def feature_required(feature_name, redirect_on_fail='auth.subscription'):
                     return jsonify({'error': 'User not found'}), 401
                 return redirect(url_for('auth.login'))
 
-            # Admins bypass feature restrictions (also handled in can_access_feature)
-            if user.is_admin:
+            # Get effective tier (respects admin 'view_as' mode)
+            effective_tier = get_effective_tier(user)
+            if effective_tier is None:
+                # Admin with full access
                 return f(*args, **kwargs)
 
-            if not user.can_access_feature(feature_name):
+            # Check feature access for effective tier
+            from app.models import SUBSCRIPTION_TIERS
+            tier_features = SUBSCRIPTION_TIERS.get(effective_tier, SUBSCRIPTION_TIERS['free'])
+            feature_value = tier_features.get(feature_name)
+
+            # Check if feature is accessible
+            has_access = False
+            if isinstance(feature_value, bool):
+                has_access = feature_value
+            elif feature_value is not None:
+                has_access = True
+
+            if not has_access:
                 feature_display = feature_name.replace('_', ' ').title()
 
                 if request.is_json:
                     return jsonify({
                         'error': f'Access to {feature_display} not available in your plan',
                         'feature': feature_name,
-                        'current_tier': user.subscription_tier,
+                        'current_tier': effective_tier,
                     }), 403
 
                 flash(f'Upgrade your subscription to access {feature_display}.', 'warning')
