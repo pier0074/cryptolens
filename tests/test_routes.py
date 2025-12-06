@@ -11,82 +11,105 @@ from tests.conftest import login_user
 
 
 class TestDashboardRoutes:
-    """Tests for dashboard routes"""
+    """Tests for dashboard routes (requires login)"""
 
-    def test_dashboard_index(self, client, app, sample_symbol):
-        """Test dashboard index page loads"""
+    def test_dashboard_index(self, client, app, sample_user, sample_symbol):
+        """Test dashboard index page loads for authenticated user"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/')
         assert response.status_code == 200
         assert b'BTC/USDT' in response.data or b'Dashboard' in response.data
 
-    def test_dashboard_with_patterns(self, client, app, sample_symbol, sample_pattern):
+    def test_dashboard_redirects_unauthenticated(self, client, app, sample_symbol):
+        """Test dashboard redirects unauthenticated users"""
+        response = client.get('/')
+        assert response.status_code == 302  # Redirect to login
+
+    def test_dashboard_with_patterns(self, client, app, sample_user, sample_symbol, sample_pattern):
         """Test dashboard shows patterns"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/')
         assert response.status_code == 200
 
-    def test_analytics_page(self, client, app, sample_symbol):
-        """Test analytics page loads"""
+    def test_analytics_page(self, client, app, sample_user, sample_symbol):
+        """Test analytics page loads for authenticated user"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/analytics')
         assert response.status_code == 200
 
-    def test_analytics_with_data(self, client, app, sample_symbol, sample_pattern):
+    def test_analytics_with_data(self, client, app, sample_user, sample_symbol, sample_pattern):
         """Test analytics with patterns data"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/analytics')
         assert response.status_code == 200
 
 
 class TestStatsRoutes:
-    """Tests for stats routes"""
+    """Tests for stats routes (requires login)"""
 
-    def test_stats_index_empty(self, client, app):
+    def test_stats_index_empty(self, client, app, sample_user):
         """Test stats page with no data"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/stats/')
         assert response.status_code == 200
 
-    def test_stats_index_with_symbol(self, client, app, sample_symbol):
+    def test_stats_index_with_symbol(self, client, app, sample_user, sample_symbol):
         """Test stats page renders (data loaded via AJAX)"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/stats/')
         assert response.status_code == 200
         # Page loads skeleton, data fetched via /stats/api
         assert b'Database Statistics' in response.data
 
-    def test_stats_api(self, client, app, sample_symbol):
+    def test_stats_api(self, client, app, sample_user, sample_symbol):
         """Test stats API returns data"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/stats/api')
         assert response.status_code == 200
         data = response.get_json()
         # API should return stats structure (may be empty if cache not populated)
         assert 'symbols_count' in data or 'error' in data
 
-    def test_stats_with_candles(self, client, app, sample_candles_bullish_fvg):
+    def test_stats_with_candles(self, client, app, sample_user, sample_candles_bullish_fvg):
         """Test stats page shows candle counts"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/stats/')
         assert response.status_code == 200
 
-    def test_stats_shows_patterns(self, client, app, sample_symbol, sample_pattern):
+    def test_stats_shows_patterns(self, client, app, sample_user, sample_symbol, sample_pattern):
         """Test stats page shows pattern counts"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/stats/')
         assert response.status_code == 200
 
 
 class TestLogsRoutes:
-    """Tests for logs routes"""
+    """Tests for logs routes (requires admin)"""
 
-    def test_logs_index(self, client, app):
-        """Test logs page loads"""
+    def test_logs_index(self, client, app, admin_user):
+        """Test logs page loads for admin user"""
+        login_user(client, 'admin@example.com', 'AdminPass123')
         response = client.get('/logs/')
         assert response.status_code == 200
 
-    def test_logs_api_no_filter(self, client, app):
+    def test_logs_redirects_non_admin(self, client, app, sample_user):
+        """Test logs redirects non-admin users"""
+        login_user(client, 'test@example.com', 'TestPass123')
+        response = client.get('/logs/')
+        assert response.status_code == 302  # Redirect to dashboard
+
+    def test_logs_api_no_filter(self, client, app, admin_user):
         """Test logs API without filters"""
+        login_user(client, 'admin@example.com', 'AdminPass123')
         response = client.get('/logs/api/logs')
         assert response.status_code == 200
         data = response.get_json()
         assert 'logs' in data
         assert 'count' in data
 
-    def test_logs_api_with_category_filter(self, client, app):
+    def test_logs_api_with_category_filter(self, client, app, admin_user):
         """Test logs API with category filter"""
+        login_user(client, 'admin@example.com', 'AdminPass123')
         with app.app_context():
             log = Log(category='FETCH', level='INFO', message='Test log')
             db.session.add(log)
@@ -97,8 +120,9 @@ class TestLogsRoutes:
         data = response.get_json()
         assert 'logs' in data
 
-    def test_logs_api_with_level_filter(self, client, app):
+    def test_logs_api_with_level_filter(self, client, app, admin_user):
         """Test logs API with level filter"""
+        login_user(client, 'admin@example.com', 'AdminPass123')
         with app.app_context():
             log = Log(category='SCAN', level='ERROR', message='Error log')
             db.session.add(log)
@@ -109,15 +133,17 @@ class TestLogsRoutes:
         data = response.get_json()
         assert 'logs' in data
 
-    def test_logs_api_with_limit(self, client, app):
+    def test_logs_api_with_limit(self, client, app, admin_user):
         """Test logs API with limit"""
+        login_user(client, 'admin@example.com', 'AdminPass123')
         response = client.get('/logs/api/logs?limit=10')
         assert response.status_code == 200
         data = response.get_json()
         assert data['limit'] == 10
 
-    def test_logs_stats_api(self, client, app):
+    def test_logs_stats_api(self, client, app, admin_user):
         """Test logs stats API"""
+        login_user(client, 'admin@example.com', 'AdminPass123')
         response = client.get('/logs/api/stats')
         assert response.status_code == 200
         data = response.get_json()

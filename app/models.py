@@ -976,7 +976,10 @@ class User(db.Model):
         return SUBSCRIPTION_TIERS.get(tier, SUBSCRIPTION_TIERS['free'])
 
     def can_access_feature(self, feature_name):
-        """Check if user can access a specific feature"""
+        """Check if user can access a specific feature. Admins have full access."""
+        # Admins bypass all feature restrictions
+        if self.is_admin:
+            return True
         features = self.tier_features
         value = features.get(feature_name)
         # For boolean features, return the value directly

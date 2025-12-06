@@ -43,12 +43,13 @@
     {% block extra_css %}{% endblock %}
 </head>
 <body class="bg-dark text-white min-h-screen">
-    <!-- Navigation -->
+    <!-- Navigation (only shown when logged in) -->
+    {% if g.user %}
     <nav class="bg-darker border-b border-gray-800 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4">
             <div class="flex items-center justify-between h-16">
                 <div class="flex items-center space-x-8">
-                    <a href="/" class="text-xl font-bold text-white flex items-center">
+                    <a href="{{ url_for('main.landing') }}" class="text-xl font-bold text-white flex items-center">
                         <span class="text-2xl mr-2">🔍</span>
                         CryptoLens
                     </a>
@@ -68,9 +69,11 @@
                         <a href="/analytics" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'analytics' in request.endpoint %}bg-gray-800{% endif %}">
                             Analytics
                         </a>
+                        {% if g.user.is_admin %}
                         <a href="/logs" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'logs' in request.endpoint %}bg-gray-800{% endif %}">
                             Logs
                         </a>
+                        {% endif %}
                         <a href="/stats" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'stats' in request.endpoint %}bg-gray-800{% endif %}">
                             Stats
                         </a>
@@ -82,20 +85,79 @@
                         </a>
                     </div>
                 </div>
-                <div class="flex items-center space-x-4" x-data="cronStatus()">
+                <div class="flex items-center space-x-4">
                     <!-- Cron Status -->
-                    <div class="flex items-center space-x-2 text-sm">
+                    <div class="flex items-center space-x-2 text-sm" x-data="cronStatus()">
                         <span :class="statusColor" class="w-2 h-2 rounded-full" :style="isLive && 'animation: pulse 2s infinite'"></span>
                         <span class="text-gray-400" x-text="statusText"></span>
                     </div>
-                    <!-- Manual Scan -->
+                    {% if g.user.is_admin %}
+                    <!-- Manual Scan (Admin only) -->
                     <button onclick="triggerScan()" class="bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded text-sm font-medium">
                         Scan Now
                     </button>
+                    {% endif %}
+                    <!-- Profile Dropdown -->
+                    <div class="relative" x-data="{ open: false }">
+                        <button @click="open = !open" class="flex items-center space-x-2 text-gray-400 hover:text-white transition">
+                            <div class="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center">
+                                <span class="text-sm font-medium">{{ g.user.username[:2].upper() }}</span>
+                            </div>
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
+                            </svg>
+                        </button>
+                        <div x-show="open" @click.away="open = false" x-cloak
+                             class="absolute right-0 mt-2 w-48 bg-gray-800 rounded-md shadow-lg py-1 z-50 border border-gray-700">
+                            <div class="px-4 py-2 border-b border-gray-700">
+                                <p class="text-sm font-medium text-white">{{ g.user.username }}</p>
+                                <p class="text-xs text-gray-400">{{ g.user.email }}</p>
+                                <p class="text-xs text-blue-400 mt-1">{{ g.user.subscription_tier|title }} Plan</p>
+                            </div>
+                            <a href="{{ url_for('auth.profile') }}" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">
+                                Profile
+                            </a>
+                            <a href="{{ url_for('auth.notification_preferences') }}" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">
+                                Notifications
+                            </a>
+                            <a href="{{ url_for('auth.subscription') }}" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">
+                                Subscription
+                            </a>
+                            {% if g.user.is_admin %}
+                            <a href="/admin" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">
+                                Admin
+                            </a>
+                            {% endif %}
+                            <div class="border-t border-gray-700">
+                                <a href="{{ url_for('auth.logout') }}" class="block px-4 py-2 text-sm text-red-400 hover:bg-gray-700 hover:text-red-300">
+                                    Logout
+                                </a>
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
     </nav>
+    {% else %}
+    <!-- Minimal header for auth pages -->
+    <nav class="bg-darker border-b border-gray-800 sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4">
+            <div class="flex items-center justify-between h-16">
+                <a href="{{ url_for('main.landing') }}" class="text-xl font-bold text-white flex items-center">
+                    <span class="text-2xl mr-2">🔍</span>
+                    CryptoLens
+                </a>
+                <div class="flex items-center space-x-4">
+                    <a href="{{ url_for('auth.login') }}" class="text-gray-400 hover:text-white transition">Login</a>
+                    <a href="{{ url_for('auth.register') }}" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-medium">
+                        Register
+                    </a>
+                </div>
+            </div>
+        </div>
+    </nav>
+    {% endif %}
 
     <!-- Flash Messages -->
     {% with messages = get_flashed_messages(with_categories=true) %}

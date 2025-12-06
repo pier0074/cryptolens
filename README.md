@@ -28,14 +28,14 @@ Automated detection of institutional trading patterns across multiple timeframes
 
 | Feature | Free | Pro | Premium |
 |---------|------|-----|---------|
-| Symbols | BTC only | Up to 10 | Unlimited |
-| Dashboard | Limited | Full | Full |
+| Symbols | BTC/USDT only | 5 symbols | Unlimited |
+| Pattern Types | FVG only | All 3 patterns | All 3 patterns |
 | Patterns Page | - | Last 100 | Full history |
 | Signals Page | - | Last 50 | Full history |
-| Portfolio | - | 3 portfolios | Unlimited |
+| Portfolio | - | 1 portfolio, 5tx/day | Unlimited |
 | Backtest | - | - | Full access |
-| Analytics | - | Basic | Full |
-| Daily Notifications | 3 | 100 | Unlimited |
+| Analytics | - | Full | Full |
+| Notifications | 1/day, 10min delay | 20/day | Unlimited |
 | API Access | - | - | Full |
 
 ---
@@ -154,6 +154,9 @@ cp .env.example .env
 # Run database migrations
 python scripts/migrate_all.py
 
+# Create test accounts (admin + one per tier)
+python scripts/create_admin.py
+
 # Fetch historical data
 python scripts/fetch_historical.py -v
 
@@ -161,7 +164,18 @@ python scripts/fetch_historical.py -v
 python run.py
 ```
 
-Visit `http://localhost:5000` and register a new account.
+Visit `http://localhost:5000` and login with a test account:
+
+### Test Accounts
+
+| Tier | Email | Password | Access |
+|------|-------|----------|--------|
+| Admin | `admin@cryptolens.local` | `Admin123` | Full access + admin panel |
+| Free | `free@cryptolens.local` | `Free123` | BTC/USDT, FVG only |
+| Pro | `pro@cryptolens.local` | `Pro123` | 5 symbols, all patterns |
+| Premium | `premium@cryptolens.local` | `Premium123` | Unlimited |
+
+**Important**: Change these passwords after testing!
 
 ---
 
@@ -226,19 +240,38 @@ Patterns auto-expire based on timeframe significance:
 ## Web Interface
 
 | Page | Features | Free | Pro | Premium |
-|------|----------|:----:|:---:|:-------:|
+|------|----------|------|-----|---------|
 | **Landing** | Public marketing page with pricing | ✓ | ✓ | ✓ |
-| **Dashboard** | Pattern matrix, data freshness, quick scan | ✓ | ✓ | ✓ |
-| **Patterns** | TradingView charts, pattern zones, timeframe selector | ✗ | ✓ | ✓ |
-| **Signals** | Symbol search, direction filter, confluence scores | ✗ | ✓ | ✓ |
-| **Portfolio** | Multi-portfolio, trade logging, PnL tracking, journal | ✗ | ✓ | ✓ |
+| **Dashboard** | Pattern matrix, data freshness, quick scan | BTC/USDT only | 5 symbols | ✓ |
+| **Patterns** | TradingView charts, pattern zones, timeframe selector | ✗ | Last 100 | Full |
+| **Signals** | Symbol search, direction filter, confluence scores | ✗ | Last 50 | Full |
+| **Notifications** | Push alerts via NTFY | 1/day, 10min delay | 20/day | Unlimited |
+| **Portfolio** | Multi-portfolio, trade logging, PnL tracking, journal | ✗ | 1 portfolio, 5tx/day | Unlimited |
 | **Backtest** | Strategy backtesting with historical data | ✗ | ✗ | ✓ |
-| **Stats** | Database stats, candle counts, verification status | ✓ | ✓ | ✓ |
+| **Stats** | Database stats, candle counts, verification status | BTC/USDT only | 5 symbols | ✓ |
 | **Analytics** | Performance metrics and analysis | ✗ | ✓ | ✓ |
-| **Logs** | Application logs viewer | ✓ | ✓ | ✓ |
-| **Settings** | Symbols, notifications, risk parameters | ✗ | ✓ | ✓ |
+| **Logs** | Application logs viewer | ✗ | ✗ | Admin |
+| **Settings** | Symbols, notifications, risk parameters | NTFY only | ✓ | ✓ |
 | **Profile** | Account info, 2FA, notification preferences | ✓ | ✓ | ✓ |
 | **Upgrade** | Payment page (card & crypto) | ✓ | ✓ | ✓ |
+| **Admin** | User management, system settings | ✗ | ✗ | Admin |
+
+### Pattern Access by Tier
+
+| Pattern Type | Free | Pro | Premium |
+|--------------|:----:|:---:|:-------:|
+| FVG (Imbalance) | ✓ | ✓ | ✓ |
+| Order Block | ✗ | ✓ | ✓ |
+| Liquidity Sweep | ✗ | ✓ | ✓ |
+
+> **Note**: FVG (Fair Value Gap) and Imbalance refer to the same pattern - a 3-candle gap where price moves so fast it leaves unfilled orders.
+
+**Notes:**
+- **BTC/USDT only**: Free tier limited to Bitcoin and USDT pairs
+- **5 symbols**: Pro tier limited to 5 actively tracked symbols
+- **Last 100/50**: Most recent entries only
+- **10min delay**: Free notifications delayed by 10 minutes
+- **Admin**: Requires admin privileges (separate from subscription tier)
 
 ---
 

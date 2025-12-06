@@ -2,6 +2,7 @@ from flask import Blueprint, render_template, jsonify
 from app.models import Symbol, Pattern, Signal, Candle, Backtest
 from app.config import Config
 from app.services.patterns import PATTERN_TYPES
+from app.decorators import login_required
 from sqlalchemy import func
 from datetime import datetime, timedelta, timezone
 
@@ -9,6 +10,7 @@ dashboard_bp = Blueprint('dashboard', __name__)
 
 
 @dashboard_bp.route('/')
+@login_required
 def index():
     """Main dashboard with symbol/timeframe matrix"""
     symbols = Symbol.query.filter_by(is_active=True).all()
@@ -60,6 +62,7 @@ def index():
 
 
 @dashboard_bp.route('/analytics')
+@login_required
 def analytics():
     """Performance analytics dashboard"""
     # Get statistics

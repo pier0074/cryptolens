@@ -1,15 +1,17 @@
 """
 Logs Routes
-View and filter system logs
+View and filter system logs (Admin only)
 """
 from flask import Blueprint, render_template, request, jsonify
 from app.models import Log, LOG_CATEGORIES, LOG_LEVELS, Symbol
 from app.services.logger import get_recent_logs, get_log_stats
+from app.decorators import admin_required
 
 logs_bp = Blueprint('logs', __name__)
 
 
 @logs_bp.route('/')
+@admin_required
 def index():
     """Logs page with filtering"""
     # Get filter parameters
@@ -34,6 +36,7 @@ def index():
 
 
 @logs_bp.route('/api/logs')
+@admin_required
 def api_logs():
     """API endpoint for logs with filtering"""
     category = request.args.get('category', None)
@@ -67,6 +70,7 @@ def api_logs():
 
 
 @logs_bp.route('/api/stats')
+@admin_required
 def api_stats():
     """API endpoint for log statistics"""
     return jsonify(get_log_stats())

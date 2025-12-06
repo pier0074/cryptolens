@@ -2,9 +2,9 @@ import hmac
 import os
 from functools import wraps
 from typing import Callable, Tuple, Any
-from flask import Blueprint, request, jsonify, Response
+from flask import Blueprint, request, jsonify, Response, session
 from sqlalchemy.orm import joinedload
-from app.models import Symbol, Candle, Pattern, Signal, Setting
+from app.models import Symbol, Candle, Pattern, Signal, Setting, User
 from app.config import Config
 from app import db, csrf, limiter
 
@@ -19,16 +19,27 @@ csrf.exempt(api_bp)
 
 def require_api_key(f: Callable[..., Any]) -> Callable[..., Any]:
     """
-    Decorator to require API key for sensitive endpoints.
+    Decorator to require API key OR admin session for sensitive endpoints.
 
     Security: DENY by default. To allow unauthenticated access (dev only),
     set environment variable: ALLOW_UNAUTHENTICATED_API=true
+
+    Accepts:
+    - API key via X-API-Key header or api_key query param
+    - Admin user session (for UI access)
     """
     @wraps(f)
     def decorated(*args: Any, **kwargs: Any) -> JsonResponse:
         # Check if auth is explicitly disabled (development only)
         if os.getenv('ALLOW_UNAUTHENTICATED_API', 'false').lower() == 'true':
             return f(*args, **kwargs)
+
+        # Check for admin session (UI access)
+        user_id = session.get('user_id')
+        if user_id:
+            user = db.session.get(User, user_id)
+            if user and user.is_admin:
+                return f(*args, **kwargs)
 
         # Get API key from settings
         api_key = Setting.get('api_key')

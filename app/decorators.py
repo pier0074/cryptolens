@@ -113,6 +113,10 @@ def tier_required(min_tier):
                     return jsonify({'error': 'User not found'}), 401
                 return redirect(url_for('auth.login'))
 
+            # Admins bypass tier restrictions
+            if user.is_admin:
+                return f(*args, **kwargs)
+
             user_tier = user.subscription_tier
             user_tier_level = TIER_HIERARCHY.get(user_tier, 0)
             required_tier_level = TIER_HIERARCHY.get(min_tier, 0)
@@ -168,6 +172,10 @@ def feature_required(feature_name, redirect_on_fail='auth.subscription'):
                 if request.is_json:
                     return jsonify({'error': 'User not found'}), 401
                 return redirect(url_for('auth.login'))
+
+            # Admins bypass feature restrictions (also handled in can_access_feature)
+            if user.is_admin:
+                return f(*args, **kwargs)
 
             if not user.can_access_feature(feature_name):
                 feature_display = feature_name.replace('_', ' ').title()

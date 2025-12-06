@@ -4,6 +4,7 @@ Database statistics with pre-computed cache for instant page loads.
 """
 from flask import Blueprint, render_template, jsonify
 from app.models import StatsCache
+from app.decorators import login_required
 import json
 
 stats_bp = Blueprint('stats', __name__)
@@ -18,12 +19,14 @@ def _get_cached_stats():
 
 
 @stats_bp.route('/')
+@login_required
 def index():
     """Stats page - renders skeleton, data loaded via AJAX."""
     return render_template('stats.html')
 
 
 @stats_bp.route('/api')
+@login_required
 def api():
     """JSON API endpoint for stats data."""
     data = _get_cached_stats()
