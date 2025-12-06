@@ -35,7 +35,8 @@ Thumbs.db
 
 # Logs
 *.log
-logs/
+logs/*
+!logs/.gitkeep
 
 # Testing
 .pytest_cache/

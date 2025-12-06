@@ -1,0 +1,70 @@
+# CryptoLens Crontab Configuration
+# ================================
+#
+# To install: crontab /path/to/cryptolens/crontab.txt
+# To view:    crontab -l
+# To edit:    crontab -e
+#
+# Logs are written to /var/log/cryptolens/ (create dir first)
+# Or redirect to project logs: >> /path/to/cryptolens/logs/cron.log 2>&1
+
+# Environment (adjust path as needed)
+CRYPTOLENS_DIR=/Users/PeriePA/Sites/cryptolens
+VENV_PYTHON=/Users/PeriePA/Sites/cryptolens/venv/bin/python
+
+# ============================================================
+# FETCH - Every minute
+# ============================================================
+# Fetches new candles, aggregates timeframes, detects patterns,
+# generates signals, and sends notifications
+* * * * * cd $CRYPTOLENS_DIR && $VENV_PYTHON scripts/fetch.py >> logs/fetch.log 2>&1
+
+# ============================================================
+# STATS - Every 5 minutes
+# ============================================================
+# Computes and caches database statistics for fast page loads
+*/5 * * * * cd $CRYPTOLENS_DIR && $VENV_PYTHON scripts/compute_stats.py >> logs/stats.log 2>&1
+
+# ============================================================
+# DB HEALTH - Daily at 3:00 AM
+# ============================================================
+# Incremental verification of candle data integrity
+# Use --fix to auto-fix issues (delete bad data)
+0 3 * * * cd $CRYPTOLENS_DIR && $VENV_PYTHON scripts/db_health.py --fix >> logs/db_health.log 2>&1
+
+# ============================================================
+# LOG ROTATION - Weekly on Sunday at 4:00 AM
+# ============================================================
+# Keep logs from growing too large (keep last 7 days)
+# 0 4 * * 0 find $CRYPTOLENS_DIR/logs -name "*.log" -mtime +7 -delete
+
+# ============================================================
+# OPTIONAL JOBS (uncomment as needed)
+# ============================================================
+
+# Historical data refetch - Weekly on Monday at 2:00 AM
+# Fetches last 30 days to fill any gaps
+# 0 2 * * 1 cd $CRYPTOLENS_DIR && $VENV_PYTHON scripts/fetch_historical.py --days=30 >> logs/historical.log 2>&1
+
+# Database backup - Daily at 1:00 AM
+# 0 1 * * * cp $CRYPTOLENS_DIR/data/cryptolens.db $CRYPTOLENS_DIR/data/backups/cryptolens_$(date +\%Y\%m\%d).db
+
+# ============================================================
+# NOTES
+# ============================================================
+#
+# Cron Expression Format:
+#   ┌───────────── minute (0 - 59)
+#   │ ┌───────────── hour (0 - 23)
+#   │ │ ┌───────────── day of month (1 - 31)
+#   │ │ │ ┌───────────── month (1 - 12)
+#   │ │ │ │ ┌───────────── day of week (0 - 6) (Sunday = 0)
+#   │ │ │ │ │
+#   * * * * * command
+#
+# Script purposes:
+#   fetch.py           - Real-time candle fetching + pattern detection
+#   compute_stats.py   - Cache stats for dashboard performance
+#   db_health.py       - Data integrity verification
+#   fetch_historical.py - Backfill historical data (manual/optional)
+#   migrate_all.py     - Database migrations (run manually)
