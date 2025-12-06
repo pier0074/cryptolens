@@ -1,193 +1,101 @@
-# CryptoLens v2.0 - Development Roadmap
+# CryptoLens - Future Enhancements
 
-> **Current Version**: v2.0.0 (Released 2025-12-05)
-> **Status**: All core phases complete, Phase 5 contains optional enhancements
-
----
-
-## v2.0 Roadmap
-
-| Version | Focus | Status |
-|---------|-------|--------|
-| v2.0.0 | API Auth + Rate Limiting | **Done** |
-| v2.1.0 | Input Validation + CSRF Fix | **Done** |
-| v2.2.0 | Health Check + Logging | **Done** |
-| v2.3.0 | Gunicorn + Connection Pooling | **Done** |
-| v2.4.0 | Performance (DB Index, Query Opt) | **Done** |
-| v2.5.0 | Code Quality (Coverage, Types) | **Done** |
+> **Current Version**: v2.0.0
+> **Status**: Core features complete, enhancements below are optional
 
 ---
 
-## Phase 1: Critical Security Fixes (v2.0.x - v2.1.x)
+## Trading Features
 
-### 1.1 Fix API Authentication Default ✅
-- [x] **File**: `app/routes/api.py`
-- [x] Change `require_api_key` to deny by default
-- [x] Add `ALLOW_UNAUTHENTICATED_API` env var for dev mode
-- [x] Use `hmac.compare_digest()` for timing-safe comparison
-- [x] Test: Verify API returns 503 when no key configured
+### Additional SMC Patterns
+- [ ] Breaker Block detection
+- [ ] Mitigation Block detection
+- [ ] Equal Highs/Lows detection
+- [ ] Swing-based pattern invalidation
+- [ ] ATR-based expiry (more dynamic than time-based)
+- [ ] Pattern ML scoring (train on historical fill rates)
 
-### 1.2 Add Rate Limiting ✅
-- [x] Install `flask-limiter`: `pip install flask-limiter`
-- [x] **File**: `app/__init__.py` - Initialize limiter
-- [x] **File**: `app/routes/api.py` - Add limits to expensive endpoints:
-  - `/api/scan` - 1/minute
-  - `/api/fetch` - 5/minute
-  - `/api/scheduler/*` - 2/minute
-- [x] Test: Verify rate limiting is active
-
-### 1.3 Add Input Validation ✅
-- [x] **File**: `app/routes/portfolio.py`
-- [x] Add validation for `new_trade()`:
-  - entry_price > 0
-  - entry_quantity > 0
-  - symbol length 3-20 chars
-- [x] Add validation for `create()` portfolio:
-  - initial_balance > 0, < 1_000_000_000
-- [x] Return proper error messages on validation failure
-- [x] Test: 14 new validation tests added
-
-### 1.4 Fix CSRF Exemption on Settings ✅
-- [x] **File**: `app/__init__.py`
-- [x] Remove `csrf.exempt(settings_bp)`
-- [x] **File**: `app/routes/settings.py` - CSRF tokens already in forms
-- [x] **File**: `app/templates/settings.html` - Already has `{{ csrf_token() }}`
-- [x] Test: All 6 settings tests pass
+### Automatic Trading
+- [ ] API integration for automated trade execution
+- [ ] Exchange API connection (read-only first, then trading)
+- [ ] Position sizing based on risk parameters
+- [ ] Stop-loss and take-profit automation
 
 ---
 
-## Phase 2: Production Readiness
+## Payment & Monetization
 
-### 2.1 Add Health Check Endpoint ✅
-- [x] **File**: `app/routes/api.py`
-- [x] Add `/api/health` endpoint
-- [x] Check database connectivity
-- [x] Return JSON with status, db state, timestamp
-- [x] Test: 5 new health check tests added
-
-### 2.2 Replace print() with Logging ✅
-- [x] **File**: `app/__init__.py`
-- [x] Configure Python `logging` module with `setup_logging()` function
-- [x] Replace `print()` in request timing middleware with logger.debug/info/warning
-- [x] Add log level configuration via `LOG_LEVEL` env var (DEBUG/INFO/WARNING/ERROR)
-- [x] Add `LOG_FORMAT` env var support (colored or json)
-
-### 2.3 Add Gunicorn Configuration ✅
-- [x] Create `gunicorn.conf.py`:
-  - workers = min(cpu_count * 2 + 1, 4) (capped for SQLite)
-  - bind = "0.0.0.0:5000"
-  - timeout = 120
-- [x] Update `requirements.txt` with gunicorn (already present)
-- [x] Create `start.sh` script for production
-
-### 2.4 Add Connection Pooling Config ✅
-- [x] **File**: `app/config.py`
-- [x] Add `get_engine_options()` method that detects database type:
-  - SQLite: timeout=30, pool_pre_ping=True
-  - PostgreSQL/MySQL: pool_size=10, pool_recycle=300, pool_pre_ping=True, max_overflow=20
+### European/Swiss Payment Methods
+- [ ] Stripe CH integration (Swiss cards)
+- [ ] PostFinance integration
+- [ ] TWINT support (Swiss mobile payment)
+- [ ] Evaluate free/low-cost options for private accounts
 
 ---
 
-## Phase 3: Performance Improvements
+## Notifications
 
-### 3.1 Add Missing Database Index ✅
-- [x] **File**: `app/models.py`
-- [x] Add index: `db.Index('idx_pattern_list', 'status', 'detected_at')`
-- [x] Create migration script: `scripts/migrate_add_pattern_index.py`
+### Admin Broadcast System
+- [ ] Send notifications to all users at once
+- [ ] Notification templates (promotion, downtime, updates)
+- [ ] Admin UI for composing and sending broadcasts
+- [ ] Template storage in dedicated folder
 
-### 3.2 Optimize Portfolio Stats Query ✅
-- [x] **File**: `app/routes/portfolio.py`
-- [x] Replace Python loops with SQL aggregation in `api_portfolio_stats()`
-- [x] Uses COUNT, SUM, CASE WHEN, GROUP BY for 2 queries instead of loading all trades
-
-### 3.3 Optimize Pattern Detector DataFrame Loading ✅
-- [x] **File**: `app/services/patterns/__init__.py`
-- [x] Modify `scan_all_patterns()` to load DataFrame once per symbol/timeframe
-- [x] Pass DataFrame to each detector's `detect()` method
-- [x] Update detector signatures to accept optional DataFrame
-- [x] Updated base.py, imbalance.py, order_block.py, liquidity.py
+### Multi-Channel Support
+- [ ] Admin can send to multiple NTFY topics
+- [ ] Channel grouping (by tier, by preference)
+- [ ] Scheduled notifications
 
 ---
 
-## Phase 4: Code Quality
+## SEO & Marketing
 
-### 4.1 Add Test Coverage Reporting ✅
-- [x] Install `pytest-cov`: already available
-- [x] Add to pytest command: `--cov=app --cov-report=html`
-- [x] Run tests and check coverage percentage
-- [x] Current coverage: 68% (below 80% target due to untested backtester/portfolio routes)
-- [x] Coverage HTML report generated in `htmlcov/`
-
-### 4.2 Add Type Hints to Critical Files ✅
-- [x] **File**: `app/services/patterns/base.py` - Type hints already present
-- [x] **File**: `app/routes/api.py` - Added return type hints to all endpoints
-- [x] Installed mypy for type checking
-- [x] Note: Existing code has implicit Optional patterns (pre-existing, not blocking)
+### Improve Google Ranking
+- [ ] Add meta tags (description, keywords, OpenGraph)
+- [ ] Create sitemap.xml
+- [ ] Add robots.txt
+- [ ] Structured data (JSON-LD) for rich snippets
+- [ ] Optimize page load speed
+- [ ] Add canonical URLs
 
 ---
 
-## Phase 5: Future Enhancements (Optional)
+## Infrastructure (Optional)
 
-### PostgreSQL Migration (if scale requires)
+### PostgreSQL Migration
 - [ ] Only if SQLite becomes a bottleneck
 - [ ] Install `psycopg2-binary`
 - [ ] Update `DATABASE_URL` in config
 - [ ] Consider TimescaleDB for candles table
-
-### Pattern Improvements
-- [ ] Swing-based pattern invalidation
-- [ ] ATR-based expiry (more dynamic than time-based)
-- [ ] Pattern ML scoring (train on historical fill rates)
 
 ### Real-time Features
 - [ ] WebSocket for live price updates
 - [ ] Real-time pattern notifications in UI
 - [ ] Signal alerts without page refresh
 
-### Symbol/Currency Management (Settings) ✅
-- [x] Symbol management UI in Settings page
-- [x] **File**: `app/routes/settings.py` - Symbol CRUD endpoints (add/toggle/delete)
-- [x] **File**: `app/templates/settings.html` - Symbol selector UI:
-  - Text input for custom symbol entry (e.g. DOGE/USDT)
-  - Dropdown for quick symbol selection
-  - List all symbols with ON/OFF toggle
-  - Delete symbol button with confirmation
-- [x] Symbol model uses `is_active` field
-- [x] `fetch.py` filters by `is_active=True`
-
 ### Multi-Exchange Support
 - [ ] Abstract exchange interface
 - [ ] Add Coinbase, Kraken, Bybit adapters
 - [ ] Exchange selector in settings
 
-### Redis Integration (for scaling)
-- [ ] Install `redis`: `pip install redis`
-- [ ] Configure `REDIS_URL` env var (default: `redis://localhost:6379/0`)
-- [ ] **File**: `app/__init__.py` - Update limiter storage backend:
-  ```python
-  from flask_limiter.util import get_remote_address
-  limiter = Limiter(
-      key_func=get_remote_address,
-      storage_uri=os.getenv('REDIS_URL', 'memory://')
-  )
-  ```
-- [ ] Add Redis for session storage (optional)
-- [ ] Add Redis for caching pattern results (optional)
-- [ ] Docker Compose service for Redis
+### Redis Integration
+- [ ] Configure `REDIS_URL` env var
+- [ ] Update rate limiter storage backend
+- [ ] Session storage (optional)
+- [ ] Pattern result caching (optional)
 
 ---
 
-## Progress Summary
+## Mobile & Integrations
 
-All phases 1-4 complete. Test coverage at 68%.
+### Mobile App
+- [ ] iOS app
+- [ ] Android app
+- [ ] React Native or Flutter
 
-| Phase | Focus | Tasks |
-|-------|-------|-------|
-| 1 | Security | API Auth, Rate Limiting, Input Validation, CSRF |
-| 2 | Production | Health Check, Logging, Gunicorn, Connection Pool |
-| 3 | Performance | DB Index, Portfolio Query, DataFrame Optimization |
-| 4 | Quality | Test Coverage (68%), Type Hints |
-| 5 | Future | Optional enhancements (see above) |
+### Bot Integrations
+- [ ] Discord bot
+- [ ] Telegram bot
 
 ---
 
@@ -205,7 +113,4 @@ pip install bandit && bandit -r app/
 
 # Type checking
 pip install mypy && mypy app/
-
-# Test rate limiting
-for i in {1..10}; do curl -X POST http://localhost:5000/api/scan; done
 ```
