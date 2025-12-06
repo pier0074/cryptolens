@@ -14,10 +14,12 @@ Automated detection of institutional trading patterns across multiple timeframes
 - **Multi-TF Confluence**: Signals generated when patterns align across timeframes
 - **Interactive Charts**: TradingView-style charts with pattern visualization
 - **Smart Price Formatting**: Auto-adjusts decimals for micro-cap to large-cap tokens
-- **Push Notifications**: Per-user unique topics via NTFY.sh
+- **Push Notifications**: Per-user unique topics via NTFY.sh with customizable filters
 - **Portfolio & Journal**: Trade logging with PnL tracking and journal entries
-- **User Authentication**: Registration, login, email verification, password reset
+- **User Authentication**: Registration, login, email verification, password reset, 2FA (TOTP)
 - **3-Tier Subscriptions**: Free, Pro, and Premium plans with feature restrictions
+- **Payment Integration**: LemonSqueezy (card) and NOWPayments (50+ cryptocurrencies)
+- **Notification Preferences**: Direction filter, confluence threshold, quiet hours
 - **Event-Driven**: Each symbol processed immediately after fetch
 
 ---
@@ -223,17 +225,20 @@ Patterns auto-expire based on timeframe significance:
 
 ## Web Interface
 
-| Page | Features | Access |
-|------|----------|--------|
-| **Dashboard** | Pattern matrix, data freshness, quick scan | All users |
-| **Patterns** | TradingView charts, pattern zones, timeframe selector | Pro+ |
-| **Signals** | Symbol search, direction filter, confluence scores | Pro+ |
-| **Portfolio** | Multi-portfolio, trade logging, PnL tracking, journal | Pro+ |
-| **Backtest** | Strategy backtesting with historical data | Premium |
-| **Stats** | Database stats, candle counts, verification status | All users |
-| **Analytics** | Performance metrics and analysis | Pro+ |
-| **Logs** | Application logs viewer | All users |
-| **Settings** | Symbols, notifications, risk parameters | Subscribers |
+| Page | Features | Free | Pro | Premium |
+|------|----------|:----:|:---:|:-------:|
+| **Landing** | Public marketing page with pricing | ✓ | ✓ | ✓ |
+| **Dashboard** | Pattern matrix, data freshness, quick scan | ✓ | ✓ | ✓ |
+| **Patterns** | TradingView charts, pattern zones, timeframe selector | ✗ | ✓ | ✓ |
+| **Signals** | Symbol search, direction filter, confluence scores | ✗ | ✓ | ✓ |
+| **Portfolio** | Multi-portfolio, trade logging, PnL tracking, journal | ✗ | ✓ | ✓ |
+| **Backtest** | Strategy backtesting with historical data | ✗ | ✗ | ✓ |
+| **Stats** | Database stats, candle counts, verification status | ✓ | ✓ | ✓ |
+| **Analytics** | Performance metrics and analysis | ✗ | ✓ | ✓ |
+| **Logs** | Application logs viewer | ✓ | ✓ | ✓ |
+| **Settings** | Symbols, notifications, risk parameters | ✗ | ✓ | ✓ |
+| **Profile** | Account info, 2FA, notification preferences | ✓ | ✓ | ✓ |
+| **Upgrade** | Payment page (card & crypto) | ✓ | ✓ | ✓ |
 
 ---
 
@@ -312,10 +317,17 @@ cryptolens/
 
 ## Roadmap
 
-- [ ] Two-factor authentication (TOTP)
-- [ ] User notification preferences
-- [ ] Payment integration (LemonSqueezy, NOWPayments)
-- [ ] Public landing page
+- [x] Two-factor authentication (TOTP)
+- [x] User notification preferences
+- [x] Payment integration (LemonSqueezy, NOWPayments)
+- [x] Public landing page
+
+### Future Enhancements
+- [ ] Mobile app (iOS/Android)
+- [ ] Additional exchanges (Binance, Bybit)
+- [ ] Advanced backtesting strategies
+- [ ] Social trading features
+- [ ] Discord/Telegram bot integration
 
 ---
 
