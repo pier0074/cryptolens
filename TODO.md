@@ -144,16 +144,16 @@
 - [ ] Real-time pattern notifications in UI
 - [ ] Signal alerts without page refresh
 
-### Symbol/Currency Management (Settings)
-- [ ] Add symbols management page in Settings
-- [ ] **File**: `app/routes/settings.py` - Add symbol CRUD endpoints
-- [ ] **File**: `app/templates/settings.html` - Add symbol selector UI:
-  - List all symbols with active/inactive toggle
-  - Search bar to find symbols from exchange
-  - Add new symbol button (fetches from Binance)
-  - Delete symbol (with confirmation)
-- [ ] Symbol model already has `is_active` field - use it
-- [ ] Update `fetch.py` to only fetch active symbols
+### Symbol/Currency Management (Settings) ✅
+- [x] Symbol management UI in Settings page
+- [x] **File**: `app/routes/settings.py` - Symbol CRUD endpoints (add/toggle/delete)
+- [x] **File**: `app/templates/settings.html` - Symbol selector UI:
+  - Text input for custom symbol entry (e.g. DOGE/USDT)
+  - Dropdown for quick symbol selection
+  - List all symbols with ON/OFF toggle
+  - Delete symbol button with confirmation
+- [x] Symbol model uses `is_active` field
+- [x] `fetch.py` filters by `is_active=True`
 
 ### Multi-Exchange Support
 - [ ] Abstract exchange interface

@@ -149,19 +149,28 @@
         <!-- Symbols Management -->
         <div class="bg-card rounded-lg p-6 lg:col-span-2">
             <h2 class="text-lg font-bold mb-4">Symbols</h2>
+            <p class="text-sm text-muted mb-4">Manage which symbols are tracked. Only active symbols are fetched.</p>
 
             <!-- Add Symbol -->
-            <div class="flex items-center space-x-4 mb-4">
-                <select x-model="newSymbol" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 flex-grow">
-                    <option value="">Select symbol to add...</option>
+            <div class="flex flex-wrap items-center gap-2 mb-4">
+                <!-- Manual input -->
+                <input type="text" x-model="customSymbol"
+                       placeholder="Enter symbol (e.g. DOGE/USDT)"
+                       class="bg-gray-800 border border-gray-700 rounded px-3 py-2 w-48 uppercase"
+                       @keyup.enter="addCustomSymbol()">
+                <button @click="addCustomSymbol()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded">
+                    Add
+                </button>
+                <span class="text-muted mx-2">or</span>
+                <!-- Quick select -->
+                <select x-model="newSymbol" @change="addSymbol()" class="bg-gray-800 border border-gray-700 rounded px-3 py-2">
+                    <option value="">Quick add...</option>
                     {% for sym in available_symbols %}
                     <option value="{{ sym }}">{{ sym }}</option>
                     {% endfor %}
                 </select>
-                <button @click="addSymbol()" class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded">
-                    Add Symbol
-                </button>
             </div>
+            <p class="text-xs text-red-400 mb-4" x-show="errorMessage" x-text="errorMessage"></p>
 
             <!-- Symbol List -->
             <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
@@ -193,6 +202,8 @@
 function settingsApp() {
     return {
         newSymbol: '',
+        customSymbol: '',
+        errorMessage: '',
 
         generateApiKey() {
             const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -217,6 +228,39 @@ function settingsApp() {
                 }
             } catch (e) {
                 alert('Error: ' + e.message);
+            }
+        },
+
+        async addCustomSymbol() {
+            this.errorMessage = '';
+            const symbol = this.customSymbol.trim().toUpperCase();
+
+            if (!symbol) return;
+
+            // Basic validation: should contain /
+            if (!symbol.includes('/')) {
+                this.errorMessage = 'Symbol must be in format BASE/QUOTE (e.g. BTC/USDT)';
+                return;
+            }
+
+            try {
+                const response = await fetch('/settings/symbols', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    },
+                    body: JSON.stringify({ action: 'add', symbol: symbol })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.customSymbol = '';
+                    location.reload();
+                } else {
+                    this.errorMessage = data.error || 'Failed to add symbol';
+                }
+            } catch (e) {
+                this.errorMessage = 'Error: ' + e.message;
             }
         },
 
