@@ -101,6 +101,65 @@ def migrate():
             ))
             changes.append("Added idx_candle_timeframe index")
 
+        # 7. Users table
+        if not table_exists('users'):
+            db.session.execute(text("""
+                CREATE TABLE users (
+                    id INTEGER PRIMARY KEY,
+                    email VARCHAR(255) UNIQUE NOT NULL,
+                    username VARCHAR(50) UNIQUE NOT NULL,
+                    password_hash VARCHAR(255) NOT NULL,
+                    is_active BOOLEAN DEFAULT 1,
+                    is_verified BOOLEAN DEFAULT 0,
+                    is_admin BOOLEAN DEFAULT 0,
+                    ntfy_topic VARCHAR(64) UNIQUE NOT NULL,
+                    created_at DATETIME,
+                    last_login DATETIME
+                )
+            """))
+            db.session.execute(text("CREATE INDEX idx_user_email ON users (email)"))
+            db.session.execute(text("CREATE INDEX idx_user_active ON users (is_active, is_verified)"))
+            changes.append("Created users table")
+
+        # 8. Subscriptions table
+        if not table_exists('subscriptions'):
+            db.session.execute(text("""
+                CREATE TABLE subscriptions (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER UNIQUE NOT NULL,
+                    plan VARCHAR(20) DEFAULT 'free',
+                    starts_at DATETIME NOT NULL,
+                    expires_at DATETIME,
+                    status VARCHAR(20) DEFAULT 'active',
+                    grace_period_days INTEGER DEFAULT 3,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    cancelled_at DATETIME,
+                    FOREIGN KEY (user_id) REFERENCES users (id)
+                )
+            """))
+            db.session.execute(text("CREATE INDEX idx_subscription_status ON subscriptions (status)"))
+            db.session.execute(text("CREATE INDEX idx_subscription_expires ON subscriptions (expires_at)"))
+            changes.append("Created subscriptions table")
+
+        # 9. User notifications table
+        if not table_exists('user_notifications'):
+            db.session.execute(text("""
+                CREATE TABLE user_notifications (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    signal_id INTEGER NOT NULL,
+                    sent_at DATETIME,
+                    success BOOLEAN DEFAULT 1,
+                    error TEXT,
+                    FOREIGN KEY (user_id) REFERENCES users (id),
+                    FOREIGN KEY (signal_id) REFERENCES signals (id)
+                )
+            """))
+            db.session.execute(text("CREATE INDEX idx_user_notification_lookup ON user_notifications (user_id, signal_id)"))
+            db.session.execute(text("CREATE INDEX idx_user_notification_sent ON user_notifications (sent_at)"))
+            changes.append("Created user_notifications table")
+
         db.session.commit()
 
         if changes:

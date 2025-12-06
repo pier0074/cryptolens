@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+
+{% block title %}Profile - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <h1 class="text-3xl font-bold mb-8">Your Profile</h1>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Account Info -->
+        <div class="bg-card rounded-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Account Information</h2>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-400">Email</label>
+                    <p class="text-lg">{{ user.email }}</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400">Username</label>
+                    <p class="text-lg">{{ user.username }}</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400">Account Status</label>
+                    <p class="text-lg">
+                        {% if user.is_verified %}
+                            <span class="text-green-400">Verified</span>
+                        {% else %}
+                            <span class="text-yellow-400">Pending Verification</span>
+                        {% endif %}
+                    </p>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400">Member Since</label>
+                    <p class="text-lg">{{ user.created_at.strftime('%d %B %Y') }}</p>
+                </div>
+
+                {% if user.is_admin %}
+                <div>
+                    <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-900 text-purple-200">
+                        Admin
+                    </span>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Subscription Info -->
+        <div class="bg-card rounded-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Subscription</h2>
+
+            {% if subscription %}
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-400">Plan</label>
+                        <p class="text-lg font-medium">{{ subscription.plan_name }}</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm text-gray-400">Status</label>
+                        <p class="text-lg">
+                            {% if subscription.is_valid %}
+                                <span class="text-green-400">{{ subscription.status_display }}</span>
+                            {% else %}
+                                <span class="text-red-400">{{ subscription.status_display }}</span>
+                            {% endif %}
+                        </p>
+                    </div>
+
+                    {% if not subscription.is_lifetime %}
+                    <div>
+                        <label class="block text-sm text-gray-400">Expires</label>
+                        <p class="text-lg">
+                            {% if subscription.expires_at %}
+                                {{ subscription.expires_at[:10] }}
+                                {% if subscription.days_remaining <= 7 and subscription.days_remaining > 0 %}
+                                    <span class="text-yellow-400">({{ subscription.days_remaining }} days left)</span>
+                                {% endif %}
+                            {% else %}
+                                Never
+                            {% endif %}
+                        </p>
+                    </div>
+                    {% endif %}
+
+                    <div>
+                        <label class="block text-sm text-gray-400">Notifications</label>
+                        <p class="text-lg">
+                            {% if subscription.is_valid and user.is_verified %}
+                                <span class="text-green-400">Active</span>
+                            {% else %}
+                                <span class="text-red-400">Inactive</span>
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+            {% else %}
+                <p class="text-gray-400">No active subscription.</p>
+            {% endif %}
+
+            <a href="{{ url_for('auth.subscription') }}"
+               class="mt-4 inline-block text-blue-400 hover:text-blue-300">
+                View Subscription Details
+            </a>
+        </div>
+
+        <!-- NTFY Topic -->
+        <div class="bg-card rounded-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Push Notifications</h2>
+
+            <p class="text-gray-400 mb-4">
+                Subscribe to your personal NTFY topic to receive trading signals on your phone.
+            </p>
+
+            <div class="bg-darker rounded-lg p-4">
+                <label class="block text-sm text-gray-400 mb-2">Your NTFY Topic</label>
+                <div class="flex items-center space-x-2">
+                    <code class="text-lg text-blue-400 flex-1">{{ user.ntfy_topic }}</code>
+                    <button onclick="copyTopic()"
+                            class="bg-gray-700 hover:bg-gray-600 px-3 py-1 rounded text-sm">
+                        Copy
+                    </button>
+                </div>
+            </div>
+
+            <div class="mt-4 space-y-2 text-sm text-gray-400">
+                <p>1. Install the <a href="https://ntfy.sh" target="_blank" class="text-blue-400">NTFY app</a> on your phone</p>
+                <p>2. Subscribe to your topic: <code class="text-blue-400">{{ user.ntfy_topic }}</code></p>
+                <p>3. You'll receive trading signals when you have an active subscription</p>
+            </div>
+        </div>
+
+        <!-- Change Password -->
+        <div class="bg-card rounded-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Change Password</h2>
+
+            <form method="POST" action="{{ url_for('auth.change_password_route') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+                <div class="mb-4">
+                    <label for="old_password" class="block text-sm font-medium text-gray-300 mb-2">Current Password</label>
+                    <input type="password" id="old_password" name="old_password" required
+                           class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
+                </div>
+
+                <div class="mb-4">
+                    <label for="new_password" class="block text-sm font-medium text-gray-300 mb-2">New Password</label>
+                    <input type="password" id="new_password" name="new_password" required
+                           minlength="8"
+                           class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
+                </div>
+
+                <div class="mb-4">
+                    <label for="confirm_password" class="block text-sm font-medium text-gray-300 mb-2">Confirm New Password</label>
+                    <input type="password" id="confirm_password" name="confirm_password" required
+                           class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
+                </div>
+
+                <button type="submit"
+                        class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">
+                    Update Password
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Logout -->
+    <div class="mt-8 text-center">
+        <a href="{{ url_for('auth.logout') }}"
+           class="text-red-400 hover:text-red-300">
+            Logout
+        </a>
+    </div>
+</div>
+
+<script>
+function copyTopic() {
+    navigator.clipboard.writeText('{{ user.ntfy_topic }}');
+    alert('Topic copied to clipboard!');
+}
+</script>
+{% endblock %}

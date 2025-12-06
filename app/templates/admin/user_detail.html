@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+
+{% block title %}User: {{ user.username }} - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <div class="flex justify-between items-center mb-8">
+        <h1 class="text-3xl font-bold">User: {{ user.username }}</h1>
+        <a href="{{ url_for('admin.users') }}" class="text-blue-400 hover:text-blue-300">
+            &larr; Back to Users
+        </a>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- Account Info -->
+        <div class="bg-card rounded-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Account Information</h2>
+
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm text-gray-400">User ID</label>
+                    <p class="text-lg font-mono">{{ user.id }}</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400">Email</label>
+                    <p class="text-lg">{{ user.email }}</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400">Username</label>
+                    <p class="text-lg">{{ user.username }}</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400">NTFY Topic</label>
+                    <p class="text-lg font-mono text-blue-400">{{ user.ntfy_topic }}</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400">Member Since</label>
+                    <p class="text-lg">{{ user.created_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400">Last Login</label>
+                    <p class="text-lg">
+                        {% if user.last_login %}
+                            {{ user.last_login.strftime('%Y-%m-%d %H:%M') }}
+                        {% else %}
+                            Never
+                        {% endif %}
+                    </p>
+                </div>
+            </div>
+
+            <!-- Status Badges -->
+            <div class="mt-6 flex flex-wrap gap-2">
+                {% if user.is_admin %}
+                    <span class="px-3 py-1 text-sm rounded bg-purple-900 text-purple-200">Admin</span>
+                {% endif %}
+                {% if user.is_verified %}
+                    <span class="px-3 py-1 text-sm rounded bg-green-900 text-green-200">Verified</span>
+                {% else %}
+                    <span class="px-3 py-1 text-sm rounded bg-yellow-900 text-yellow-200">Unverified</span>
+                {% endif %}
+                {% if user.is_active %}
+                    <span class="px-3 py-1 text-sm rounded bg-blue-900 text-blue-200">Active</span>
+                {% else %}
+                    <span class="px-3 py-1 text-sm rounded bg-red-900 text-red-200">Inactive</span>
+                {% endif %}
+            </div>
+        </div>
+
+        <!-- Subscription Info -->
+        <div class="bg-card rounded-lg p-6">
+            <h2 class="text-xl font-semibold mb-4">Subscription</h2>
+
+            {% if subscription %}
+                <div class="space-y-4">
+                    <div>
+                        <label class="block text-sm text-gray-400">Plan</label>
+                        <p class="text-lg font-medium">{{ subscription.plan_name }}</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm text-gray-400">Status</label>
+                        <p class="text-lg">
+                            {% if subscription.is_valid %}
+                                <span class="text-green-400">{{ subscription.status_display }}</span>
+                            {% else %}
+                                <span class="text-red-400">{{ subscription.status_display }}</span>
+                            {% endif %}
+                        </p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm text-gray-400">Started</label>
+                        <p class="text-lg">{{ subscription.starts_at.strftime('%Y-%m-%d') }}</p>
+                    </div>
+
+                    {% if not subscription.is_lifetime %}
+                    <div>
+                        <label class="block text-sm text-gray-400">Expires</label>
+                        <p class="text-lg">
+                            {% if subscription.expires_at %}
+                                {{ subscription.expires_at.strftime('%Y-%m-%d') }}
+                                {% if subscription.days_remaining > 0 %}
+                                    <span class="text-gray-400">({{ subscription.days_remaining }} days)</span>
+                                {% endif %}
+                            {% else %}
+                                Never
+                            {% endif %}
+                        </p>
+                    </div>
+                    {% endif %}
+
+                    <div>
+                        <label class="block text-sm text-gray-400">Grace Period</label>
+                        <p class="text-lg">{{ subscription.grace_period_days }} days</p>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm text-gray-400">Can Receive Notifications</label>
+                        <p class="text-lg">
+                            {% if user.can_receive_notifications %}
+                                <span class="text-green-400">Yes</span>
+                            {% else %}
+                                <span class="text-red-400">No</span>
+                            {% endif %}
+                        </p>
+                    </div>
+                </div>
+            {% else %}
+                <p class="text-gray-400">No subscription found.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Actions -->
+    <div class="mt-8 bg-card rounded-lg p-6">
+        <h2 class="text-xl font-semibold mb-4">Actions</h2>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <!-- Verify/Unverify -->
+            <form method="POST" action="{{ url_for('admin.user_action', user_id=user.id, action='verify' if not user.is_verified else 'unverify') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="w-full px-4 py-2 rounded-lg text-sm
+                    {% if user.is_verified %}bg-yellow-700 hover:bg-yellow-600{% else %}bg-green-700 hover:bg-green-600{% endif %}">
+                    {% if user.is_verified %}Unverify{% else %}Verify{% endif %}
+                </button>
+            </form>
+
+            <!-- Activate/Deactivate -->
+            <form method="POST" action="{{ url_for('admin.user_action', user_id=user.id, action='activate' if not user.is_active else 'deactivate') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="w-full px-4 py-2 rounded-lg text-sm
+                    {% if user.is_active %}bg-red-700 hover:bg-red-600{% else %}bg-blue-700 hover:bg-blue-600{% endif %}">
+                    {% if user.is_active %}Deactivate{% else %}Activate{% endif %}
+                </button>
+            </form>
+
+            <!-- Admin Toggle -->
+            <form method="POST" action="{{ url_for('admin.user_action', user_id=user.id, action='make-admin' if not user.is_admin else 'revoke-admin') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="w-full px-4 py-2 rounded-lg text-sm
+                    {% if user.is_admin %}bg-gray-700 hover:bg-gray-600{% else %}bg-purple-700 hover:bg-purple-600{% endif %}">
+                    {% if user.is_admin %}Revoke Admin{% else %}Make Admin{% endif %}
+                </button>
+            </form>
+
+            <!-- Reset Password -->
+            <form method="POST" action="{{ url_for('admin.user_action', user_id=user.id, action='reset-password') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="w-full px-4 py-2 rounded-lg text-sm bg-orange-700 hover:bg-orange-600"
+                        onclick="return confirm('Reset password to a random value?');">
+                    Reset Password
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Subscription Management -->
+    <div class="mt-6 bg-card rounded-lg p-6">
+        <h2 class="text-xl font-semibold mb-4">Manage Subscription</h2>
+
+        <form method="POST" action="{{ url_for('admin.modify_subscription', user_id=user.id) }}" class="space-y-4">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2">Plan</label>
+                    <select name="plan" class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
+                        <option value="free">Free Trial (7 days)</option>
+                        <option value="monthly">Monthly (30 days)</option>
+                        <option value="yearly">Yearly (365 days)</option>
+                        <option value="lifetime">Lifetime</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2">Action</label>
+                    <select name="action" class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
+                        <option value="create">Create New</option>
+                        <option value="extend">Extend Current</option>
+                        <option value="cancel">Cancel</option>
+                        <option value="suspend">Suspend</option>
+                        <option value="reactivate">Reactivate</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2">Custom Days (optional)</label>
+                    <input type="number" name="custom_days" min="1" max="3650"
+                           class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white"
+                           placeholder="Override plan days">
+                </div>
+            </div>
+
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg">
+                Apply Changes
+            </button>
+        </form>
+    </div>
+
+    <!-- Notification History -->
+    <div class="mt-6 bg-card rounded-lg p-6">
+        <h2 class="text-xl font-semibold mb-4">Recent Notifications</h2>
+
+        {% if notifications %}
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-darker">
+                        <tr>
+                            <th class="px-4 py-2 text-left text-sm text-gray-400">Signal ID</th>
+                            <th class="px-4 py-2 text-left text-sm text-gray-400">Sent At</th>
+                            <th class="px-4 py-2 text-left text-sm text-gray-400">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-800">
+                        {% for notif in notifications %}
+                        <tr>
+                            <td class="px-4 py-2 font-mono text-sm">{{ notif.signal_id }}</td>
+                            <td class="px-4 py-2 text-sm">{{ notif.sent_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td class="px-4 py-2">
+                                {% if notif.success %}
+                                    <span class="text-green-400">Success</span>
+                                {% else %}
+                                    <span class="text-red-400">Failed: {{ notif.error }}</span>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <p class="text-gray-400">No notifications sent yet.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

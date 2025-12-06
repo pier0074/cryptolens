@@ -173,6 +173,8 @@ def create_app(config_name=None):
     from app.routes.logs import logs_bp
     from app.routes.stats import stats_bp
     from app.routes.portfolio import portfolio_bp
+    from app.routes.auth import auth_bp
+    from app.routes.admin import admin_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(patterns_bp, url_prefix='/patterns')
@@ -183,6 +185,8 @@ def create_app(config_name=None):
     app.register_blueprint(logs_bp, url_prefix='/logs')
     app.register_blueprint(stats_bp, url_prefix='/stats')
     app.register_blueprint(portfolio_bp, url_prefix='/portfolio')
+    app.register_blueprint(auth_bp, url_prefix='/auth')
+    app.register_blueprint(admin_bp, url_prefix='/admin')
 
     # Exempt API from CSRF (uses API key authentication instead)
     csrf.exempt(api_bp)

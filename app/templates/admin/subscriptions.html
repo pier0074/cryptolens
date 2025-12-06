@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+
+{% block title %}Manage Subscriptions - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto">
+    <div class="flex justify-between items-center mb-8">
+        <h1 class="text-3xl font-bold">Manage Subscriptions</h1>
+        <a href="{{ url_for('admin.index') }}" class="text-blue-400 hover:text-blue-300">
+            &larr; Back to Dashboard
+        </a>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
+        <div class="bg-card rounded-lg p-4">
+            <p class="text-gray-400 text-sm">Active</p>
+            <p class="text-2xl font-bold text-green-400">{{ stats.active }}</p>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <p class="text-gray-400 text-sm">Expiring Soon</p>
+            <p class="text-2xl font-bold text-yellow-400">{{ stats.expiring_soon }}</p>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <p class="text-gray-400 text-sm">Grace Period</p>
+            <p class="text-2xl font-bold text-orange-400">{{ stats.in_grace_period }}</p>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <p class="text-gray-400 text-sm">Expired</p>
+            <p class="text-2xl font-bold text-red-400">{{ stats.expired }}</p>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <p class="text-gray-400 text-sm">Cancelled</p>
+            <p class="text-2xl font-bold text-gray-400">{{ stats.cancelled }}</p>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="bg-card rounded-lg p-4 mb-6">
+        <form method="GET" class="flex flex-wrap gap-4">
+            <select name="status" class="px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
+                <option value="all" {% if status == 'all' %}selected{% endif %}>All Status</option>
+                <option value="active" {% if status == 'active' %}selected{% endif %}>Active</option>
+                <option value="expiring" {% if status == 'expiring' %}selected{% endif %}>Expiring Soon</option>
+                <option value="grace" {% if status == 'grace' %}selected{% endif %}>In Grace Period</option>
+                <option value="expired" {% if status == 'expired' %}selected{% endif %}>Expired</option>
+                <option value="cancelled" {% if status == 'cancelled' %}selected{% endif %}>Cancelled</option>
+                <option value="suspended" {% if status == 'suspended' %}selected{% endif %}>Suspended</option>
+            </select>
+
+            <select name="plan" class="px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
+                <option value="all" {% if plan == 'all' %}selected{% endif %}>All Plans</option>
+                <option value="free" {% if plan == 'free' %}selected{% endif %}>Free Trial</option>
+                <option value="monthly" {% if plan == 'monthly' %}selected{% endif %}>Monthly</option>
+                <option value="yearly" {% if plan == 'yearly' %}selected{% endif %}>Yearly</option>
+                <option value="lifetime" {% if plan == 'lifetime' %}selected{% endif %}>Lifetime</option>
+            </select>
+
+            <button type="submit" class="bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded-lg">Filter</button>
+        </form>
+    </div>
+
+    <!-- Subscriptions Table -->
+    <div class="bg-card rounded-lg overflow-hidden">
+        <table class="w-full">
+            <thead class="bg-darker">
+                <tr>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">User</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">Plan</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">Status</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">Expires</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">Days Left</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-800">
+                {% for sub in subscriptions %}
+                <tr>
+                    <td class="px-4 py-3">
+                        <div>
+                            <p class="font-medium">{{ sub.user.username }}</p>
+                            <p class="text-sm text-gray-400">{{ sub.user.email }}</p>
+                        </div>
+                    </td>
+                    <td class="px-4 py-3">
+                        <span class="px-2 py-1 text-xs rounded
+                            {% if sub.plan == 'lifetime' %}bg-purple-900 text-purple-200
+                            {% elif sub.plan == 'yearly' %}bg-blue-900 text-blue-200
+                            {% elif sub.plan == 'monthly' %}bg-green-900 text-green-200
+                            {% else %}bg-gray-700 text-gray-300{% endif %}">
+                            {{ sub.plan_name }}
+                        </span>
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if sub.is_valid %}
+                            {% if sub.is_in_grace_period %}
+                                <span class="text-orange-400">Grace Period</span>
+                            {% elif sub.days_remaining <= 7 and sub.days_remaining > 0 %}
+                                <span class="text-yellow-400">Expiring Soon</span>
+                            {% else %}
+                                <span class="text-green-400">{{ sub.status_display }}</span>
+                            {% endif %}
+                        {% else %}
+                            <span class="text-red-400">{{ sub.status_display }}</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3 text-sm">
+                        {% if sub.is_lifetime %}
+                            <span class="text-green-400">Never</span>
+                        {% elif sub.expires_at %}
+                            {{ sub.expires_at.strftime('%Y-%m-%d') }}
+                        {% else %}
+                            -
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        {% if sub.is_lifetime %}
+                            <span class="text-green-400">∞</span>
+                        {% elif sub.days_remaining > 0 %}
+                            <span class="{% if sub.days_remaining <= 7 %}text-yellow-400{% else %}text-white{% endif %}">
+                                {{ sub.days_remaining }}
+                            </span>
+                        {% elif sub.is_in_grace_period %}
+                            <span class="text-orange-400">Grace</span>
+                        {% else %}
+                            <span class="text-red-400">0</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        <div class="flex space-x-2">
+                            <a href="{{ url_for('admin.user_detail', user_id=sub.user.id) }}"
+                               class="text-blue-400 hover:text-blue-300 text-sm">
+                                Manage
+                            </a>
+                            {% if sub.status == 'active' %}
+                            <form method="POST" action="{{ url_for('admin.quick_subscription_action', sub_id=sub.id, action='extend') }}" class="inline">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="text-green-400 hover:text-green-300 text-sm">
+                                    +30d
+                                </button>
+                            </form>
+                            {% endif %}
+                        </div>
+                    </td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="6" class="px-4 py-8 text-center text-gray-400">
+                        No subscriptions found.
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    {% if pagination.pages > 1 %}
+    <div class="mt-4 flex justify-center space-x-2">
+        {% for page in pagination.iter_pages() %}
+            {% if page %}
+                <a href="{{ url_for('admin.subscriptions', page=page, status=status, plan=plan) }}"
+                   class="px-3 py-1 rounded {% if page == pagination.page %}bg-blue-600{% else %}bg-gray-700 hover:bg-gray-600{% endif %}">
+                    {{ page }}
+                </a>
+            {% else %}
+                <span class="px-3 py-1">...</span>
+            {% endif %}
+        {% endfor %}
+    </div>
+    {% endif %}
+
+    <!-- Bulk Actions -->
+    <div class="mt-8 bg-card rounded-lg p-6">
+        <h2 class="text-xl font-semibold mb-4">Bulk Actions</h2>
+
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <form method="POST" action="{{ url_for('admin.bulk_subscription_action') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="expire_overdue">
+                <button type="submit" class="w-full px-4 py-2 bg-red-700 hover:bg-red-600 rounded-lg text-sm"
+                        onclick="return confirm('Mark all overdue subscriptions as expired?');">
+                    Expire Overdue Subscriptions
+                </button>
+            </form>
+
+            <form method="POST" action="{{ url_for('admin.bulk_subscription_action') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="send_warnings">
+                <button type="submit" class="w-full px-4 py-2 bg-yellow-700 hover:bg-yellow-600 rounded-lg text-sm">
+                    Send Expiry Warnings
+                </button>
+            </form>
+
+            <form method="POST" action="{{ url_for('admin.bulk_subscription_action') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <input type="hidden" name="action" value="cleanup_expired">
+                <button type="submit" class="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm"
+                        onclick="return confirm('Remove expired subscriptions older than 90 days?');">
+                    Cleanup Old Expired
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -39,6 +39,27 @@ VENV_PYTHON=/Users/PeriePA/Sites/cryptolens/venv/bin/python
 # 0 4 * * 0 find $CRYPTOLENS_DIR/logs -name "*.log" -mtime +7 -delete
 
 # ============================================================
+# SUBSCRIPTION MANAGEMENT - Daily at 6:00 AM
+# ============================================================
+# Expire overdue subscriptions and send expiry warnings
+0 6 * * * cd $CRYPTOLENS_DIR && $VENV_PYTHON -c "
+from app import create_app
+from app.services.subscription import expire_subscriptions, send_expiry_warnings
+
+app = create_app()
+with app.app_context():
+    # Expire subscriptions past grace period
+    expired = expire_subscriptions()
+    if expired:
+        print(f'Expired {expired} subscriptions')
+
+    # Send warnings to users expiring within 7 days
+    warned = send_expiry_warnings(days_before=7)
+    if warned:
+        print(f'Sent {warned} expiry warnings')
+" >> logs/subscriptions.log 2>&1
+
+# ============================================================
 # OPTIONAL JOBS (uncomment as needed)
 # ============================================================
 
@@ -68,3 +89,7 @@ VENV_PYTHON=/Users/PeriePA/Sites/cryptolens/venv/bin/python
 #   db_health.py       - Data integrity verification
 #   fetch_historical.py - Backfill historical data (manual/optional)
 #   migrate_all.py     - Database migrations (run manually)
+#
+# Subscription management (inline Python):
+#   expire_subscriptions()  - Mark overdue subs as expired
+#   send_expiry_warnings()  - Notify users before expiry

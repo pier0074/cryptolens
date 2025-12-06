@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+
+{% block title %}Create User - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-xl mx-auto">
+    <div class="flex justify-between items-center mb-8">
+        <h1 class="text-3xl font-bold">Create User</h1>
+        <a href="{{ url_for('admin.users') }}" class="text-blue-400 hover:text-blue-300">
+            &larr; Back to Users
+        </a>
+    </div>
+
+    <div class="bg-card rounded-lg p-6">
+        <form method="POST" action="{{ url_for('admin.create_user') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <!-- Account Information -->
+            <h2 class="text-lg font-semibold mb-4">Account Information</h2>
+
+            <div class="mb-4">
+                <label for="email" class="block text-sm font-medium text-gray-300 mb-2">Email</label>
+                <input type="email" id="email" name="email" required
+                       value="{{ email|default('') }}"
+                       class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white"
+                       placeholder="user@example.com">
+            </div>
+
+            <div class="mb-4">
+                <label for="username" class="block text-sm font-medium text-gray-300 mb-2">Username</label>
+                <input type="text" id="username" name="username" required
+                       value="{{ username|default('') }}"
+                       pattern="[a-zA-Z0-9_]{3,30}"
+                       class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white"
+                       placeholder="username">
+                <p class="text-xs text-gray-500 mt-1">3-30 characters, letters, numbers, and underscores only</p>
+            </div>
+
+            <div class="mb-4">
+                <label for="password" class="block text-sm font-medium text-gray-300 mb-2">Password</label>
+                <input type="password" id="password" name="password" required
+                       minlength="8"
+                       class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white"
+                       placeholder="At least 8 characters">
+                <p class="text-xs text-gray-500 mt-1">Uppercase, lowercase, and a digit required</p>
+            </div>
+
+            <!-- Account Options -->
+            <h2 class="text-lg font-semibold mb-4 mt-6">Account Options</h2>
+
+            <div class="space-y-3 mb-6">
+                <label class="flex items-center">
+                    <input type="checkbox" name="is_verified" value="1" checked
+                           class="mr-3 w-4 h-4 rounded bg-darker border-gray-600">
+                    <span class="text-gray-300">Mark as verified</span>
+                </label>
+
+                <label class="flex items-center">
+                    <input type="checkbox" name="is_admin" value="1"
+                           class="mr-3 w-4 h-4 rounded bg-darker border-gray-600">
+                    <span class="text-gray-300">Grant admin access</span>
+                </label>
+            </div>
+
+            <!-- Subscription -->
+            <h2 class="text-lg font-semibold mb-4">Initial Subscription</h2>
+
+            <div class="mb-4">
+                <label for="plan" class="block text-sm font-medium text-gray-300 mb-2">Subscription Plan</label>
+                <select id="plan" name="plan"
+                        class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
+                    <option value="">No subscription</option>
+                    <option value="free">Free Trial (7 days)</option>
+                    <option value="monthly">Monthly (30 days)</option>
+                    <option value="yearly">Yearly (365 days)</option>
+                    <option value="lifetime">Lifetime</option>
+                </select>
+            </div>
+
+            <div class="mb-6">
+                <label for="custom_days" class="block text-sm font-medium text-gray-300 mb-2">Custom Days (optional)</label>
+                <input type="number" id="custom_days" name="custom_days"
+                       min="1" max="3650"
+                       class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white"
+                       placeholder="Override plan duration">
+                <p class="text-xs text-gray-500 mt-1">Leave empty to use default plan duration</p>
+            </div>
+
+            <div class="flex space-x-4">
+                <button type="submit"
+                        class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">
+                    Create User
+                </button>
+                <a href="{{ url_for('admin.users') }}"
+                   class="flex-1 text-center bg-gray-700 hover:bg-gray-600 text-white font-bold py-2 px-4 rounded-lg transition">
+                    Cancel
+                </a>
+            </div>
+        </form>
+    </div>
+
+    <!-- Batch Import -->
+    <div class="mt-8 bg-card rounded-lg p-6">
+        <h2 class="text-lg font-semibold mb-4">Batch Import</h2>
+        <p class="text-gray-400 text-sm mb-4">
+            Import multiple users from a CSV file. Format: email,username,password,plan
+        </p>
+
+        <form method="POST" action="{{ url_for('admin.batch_import_users') }}" enctype="multipart/form-data">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+            <div class="mb-4">
+                <input type="file" name="csv_file" accept=".csv"
+                       class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
+            </div>
+
+            <button type="submit"
+                    class="w-full bg-gray-700 hover:bg-gray-600 text-white py-2 px-4 rounded-lg transition">
+                Import Users
+            </button>
+        </form>
+    </div>
+</div>
+{% endblock %}

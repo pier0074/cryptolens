@@ -1,11 +1,12 @@
 """
 Notification Service
 Sends push notifications via NTFY.sh
+Supports both single-topic mode (legacy) and per-user topic mode
 """
 import time
 import requests
 from datetime import datetime, timezone
-from app.models import Signal, Symbol, Pattern, Notification, Setting
+from app.models import Signal, Symbol, Pattern, Notification, Setting, User, UserNotification
 import json
 from app.config import Config
 from app import db
@@ -264,3 +265,338 @@ def notify_confluence(symbol: str, direction: str, aligned_timeframes: list,
         priority=priority,
         tags=tags
     )
+
+
+def get_eligible_subscribers():
+    """
+    Get all users who are eligible to receive notifications.
+    A user is eligible if:
+    - Account is active
+    - Account is verified
+    - Has a valid subscription (active or in grace period)
+
+    Returns:
+        List of User objects
+    """
+    eligible_users = []
+
+    # Get all active and verified users
+    users = User.query.filter_by(is_active=True, is_verified=True).all()
+
+    for user in users:
+        if user.can_receive_notifications:
+            eligible_users.append(user)
+
+    return eligible_users
+
+
+def send_notification_to_user(user: User, signal_id: int, title: str, message: str,
+                               priority: int = 3, tags: str = "chart,money") -> bool:
+    """
+    Send notification to a specific user and track delivery.
+
+    Args:
+        user: User object to send to
+        signal_id: ID of the signal being notified
+        title: Notification title
+        message: Notification body
+        priority: NTFY priority level
+        tags: Comma-separated tags
+
+    Returns:
+        True if successful
+    """
+    success = send_notification(
+        topic=user.ntfy_topic,
+        title=title,
+        message=message,
+        priority=priority,
+        tags=tags
+    )
+
+    # Track notification delivery
+    user_notification = UserNotification(
+        user_id=user.id,
+        signal_id=signal_id,
+        success=success,
+        error=None if success else "Failed to send"
+    )
+    db.session.add(user_notification)
+
+    return success
+
+
+def notify_all_subscribers(signal: Signal, test_mode: bool = False,
+                          current_price: float = None) -> dict:
+    """
+    Send notification to all eligible subscribers.
+
+    Args:
+        signal: The signal to notify about
+        test_mode: If True, adds 'Test' prefix
+        current_price: Current market price
+
+    Returns:
+        Dict with 'total', 'success', 'failed' counts
+    """
+    # Check if notifications are enabled
+    if Setting.get('notifications_enabled', 'true') != 'true':
+        return {'total': 0, 'success': 0, 'failed': 0, 'skipped': True}
+
+    # Check if per-user mode is enabled
+    per_user_mode = Setting.get('per_user_notifications', 'false') == 'true'
+
+    if not per_user_mode:
+        # Fall back to legacy single-topic mode
+        success = notify_signal(signal, test_mode, current_price)
+        return {'total': 1, 'success': 1 if success else 0, 'failed': 0 if success else 1}
+
+    # Get eligible subscribers
+    subscribers = get_eligible_subscribers()
+
+    if not subscribers:
+        log_notify("No eligible subscribers for notification", level='WARNING')
+        return {'total': 0, 'success': 0, 'failed': 0}
+
+    # Build notification content once
+    priority = int(Setting.get('ntfy_priority', str(Config.NTFY_PRIORITY)))
+
+    # Get symbol
+    symbol = db.session.get(Symbol, signal.symbol_id)
+    symbol_name = symbol.symbol if symbol else 'Unknown'
+
+    # Get pattern info
+    pattern = db.session.get(Pattern, signal.pattern_id) if signal.pattern_id else None
+    pattern_type = 'Unknown'
+    pattern_abbrev = 'SIG'
+    pattern_tf = ''
+    if pattern:
+        pattern_types = {
+            'imbalance': 'FVG',
+            'order_block': 'OB',
+            'liquidity_sweep': 'LS'
+        }
+        pattern_type = pattern_types.get(pattern.pattern_type, pattern.pattern_type)
+        pattern_abbrev = pattern_type
+        pattern_tf = pattern.timeframe
+
+    # Get aligned timeframes
+    aligned_tfs = []
+    if signal.timeframes_aligned:
+        try:
+            aligned_tfs = json.loads(signal.timeframes_aligned)
+        except:
+            pass
+    tfs_str = ', '.join(aligned_tfs) if aligned_tfs else pattern_tf
+
+    # Build notification content
+    direction_emoji = "🟢" if signal.direction == 'long' else "🔴"
+    direction_text = "LONG" if signal.direction == 'long' else "SHORT"
+
+    test_prefix = "[TEST] " if test_mode else ""
+    title = f"{test_prefix}{direction_emoji} {direction_text}: {symbol_name} | {pattern_type} [{pattern_tf}]"
+
+    base_symbol = symbol_name.split('/')[0] if '/' in symbol_name else symbol_name
+    tags = f"{signal.direction},{base_symbol},{pattern_abbrev}"
+    if test_mode:
+        tags = f"test,{tags}"
+
+    now = datetime.now(timezone.utc)
+    timestamp_str = now.strftime("%d/%m/%Y %H:%M UTC")
+    tfs_bracketed = f"[{tfs_str}]" if tfs_str else ""
+
+    entry = signal.entry_price
+    sl = signal.stop_loss
+    tp1 = signal.take_profit_1
+
+    entry_pct = ""
+    if current_price and current_price > 0:
+        pct_diff = ((entry - current_price) / current_price) * 100
+        entry_pct = f" ({pct_diff:+.2f}%)"
+
+    sl_pct = ((sl - entry) / entry * 100) if entry > 0 else 0
+    tp1_pct = ((tp1 - entry) / entry * 100) if entry > 0 else 0
+
+    current_price_line = f"Current: ${current_price:,.4f}\n" if current_price else ""
+
+    message = (
+        f"{timestamp_str}\n"
+        f"{current_price_line}"
+        f"Limit Entry: ${entry:,.4f}{entry_pct}\n"
+        f"Stop Loss: ${sl:,.4f} ({sl_pct:+.2f}%)\n"
+        f"TP1: ${tp1:,.4f} ({tp1_pct:+.2f}%)\n"
+        f"R:R: {signal.risk_reward:.1f}\n"
+        f"Confluence: {signal.confluence_score}/6 {tfs_bracketed}"
+    )
+
+    # Send to all subscribers
+    success_count = 0
+    failed_count = 0
+
+    for user in subscribers:
+        success = send_notification_to_user(
+            user=user,
+            signal_id=signal.id,
+            title=title,
+            message=message,
+            priority=priority,
+            tags=tags
+        )
+        if success:
+            success_count += 1
+        else:
+            failed_count += 1
+
+    # Log general notification record
+    notification = Notification(
+        signal_id=signal.id,
+        channel='ntfy',
+        success=success_count > 0,
+        error_message=None if success_count > 0 else f"Failed for all {failed_count} subscribers"
+    )
+    db.session.add(notification)
+
+    # Update signal status
+    if success_count > 0:
+        signal.status = 'notified'
+        signal.notified_at = datetime.now(timezone.utc)
+        log_notify(
+            f"Sent {direction_text} signal to {success_count}/{len(subscribers)} subscribers: "
+            f"{pattern_type} [{pattern_tf}] Entry ${entry:,.4f}{entry_pct}",
+            symbol=symbol_name,
+            details={
+                'direction': direction_text,
+                'pattern': pattern_type,
+                'tf': pattern_tf,
+                'entry': entry,
+                'confluence': signal.confluence_score,
+                'subscribers': len(subscribers),
+                'success': success_count,
+                'failed': failed_count
+            }
+        )
+    else:
+        log_notify(
+            f"Failed to send notification to any subscriber",
+            symbol=symbol_name,
+            level='ERROR'
+        )
+
+    db.session.commit()
+
+    return {
+        'total': len(subscribers),
+        'success': success_count,
+        'failed': failed_count
+    }
+
+
+def notify_subscribers_confluence(symbol: str, direction: str, aligned_timeframes: list,
+                                  entry: float, stop_loss: float, take_profits: list,
+                                  risk_reward: float = 3.0, signal_id: int = None) -> dict:
+    """
+    Send high confluence notification to all eligible subscribers.
+
+    Args:
+        symbol: Trading pair
+        direction: 'long' or 'short'
+        aligned_timeframes: List of aligned timeframe strings
+        entry: Entry price
+        stop_loss: Stop loss price
+        take_profits: List of take profit prices
+        risk_reward: Risk/reward ratio
+        signal_id: Optional signal ID for tracking
+
+    Returns:
+        Dict with 'total', 'success', 'failed' counts
+    """
+    per_user_mode = Setting.get('per_user_notifications', 'false') == 'true'
+
+    if not per_user_mode:
+        # Fall back to legacy mode
+        success = notify_confluence(symbol, direction, aligned_timeframes,
+                                   entry, stop_loss, take_profits, risk_reward)
+        return {'total': 1, 'success': 1 if success else 0, 'failed': 0 if success else 1}
+
+    subscribers = get_eligible_subscribers()
+
+    if not subscribers:
+        return {'total': 0, 'success': 0, 'failed': 0}
+
+    priority = 5  # Urgent for high confluence
+
+    now = datetime.now(timezone.utc)
+    timestamp_str = now.strftime("%d/%m/%Y %H:%M UTC")
+
+    direction_emoji = "🟢" if direction == 'long' else "🔴"
+    direction_text = "LONG" if direction == 'long' else "SHORT"
+
+    confluence = len(aligned_timeframes)
+    tfs_bracketed = f"[{', '.join(aligned_timeframes)}]"
+
+    title = f"{direction_emoji} HIGH CONFLUENCE: {symbol} {direction_text}"
+
+    base_symbol = symbol.split('/')[0] if '/' in symbol else symbol
+    tags = f"{direction},{base_symbol},confluence"
+
+    sl_pct = abs((stop_loss - entry) / entry * 100)
+
+    message = (
+        f"{timestamp_str}\n"
+        f"Entry: ${entry:,.2f}\n"
+        f"SL: ${stop_loss:,.2f} ({sl_pct:.2f}%)\n"
+    )
+
+    for i, tp in enumerate(take_profits[:3], 1):
+        tp_pct = abs((tp - entry) / entry * 100)
+        message += f"TP{i}: ${tp:,.2f} ({tp_pct:.2f}%)\n"
+
+    message += f"R:R: {risk_reward:.1f}\n"
+    message += f"Confluence: {confluence}/6 {tfs_bracketed}"
+
+    success_count = 0
+    failed_count = 0
+
+    for user in subscribers:
+        success = send_notification(
+            topic=user.ntfy_topic,
+            title=title,
+            message=message,
+            priority=priority,
+            tags=tags
+        )
+
+        if signal_id:
+            user_notification = UserNotification(
+                user_id=user.id,
+                signal_id=signal_id,
+                success=success,
+                error=None if success else "Failed to send"
+            )
+            db.session.add(user_notification)
+
+        if success:
+            success_count += 1
+        else:
+            failed_count += 1
+
+    if signal_id:
+        db.session.commit()
+
+    log_notify(
+        f"Sent HIGH CONFLUENCE {direction_text} to {success_count}/{len(subscribers)} subscribers",
+        symbol=symbol,
+        details={
+            'confluence': confluence,
+            'timeframes': aligned_timeframes,
+            'subscribers': len(subscribers),
+            'success': success_count,
+            'failed': failed_count
+        }
+    )
+
+    return {
+        'total': len(subscribers),
+        'success': success_count,
+        'failed': failed_count
+    }

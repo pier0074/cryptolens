@@ -4,13 +4,13 @@ Test Configuration and Fixtures
 import pytest
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 # Set test environment before importing app
 os.environ['FLASK_ENV'] = 'testing'
 
 from app import create_app, db
-from app.models import Symbol, Candle, Pattern, Signal
+from app.models import Symbol, Candle, Pattern, Signal, User, Subscription, SUBSCRIPTION_PLANS
 
 
 @pytest.fixture(scope='function')
@@ -221,3 +221,248 @@ def sample_signal(app, sample_symbol, sample_pattern):
         db.session.add(signal)
         db.session.commit()
         return signal.id
+
+
+# ========================================
+# User and Subscription Fixtures
+# ========================================
+
+@pytest.fixture
+def sample_user(app):
+    """Create a basic verified user with active subscription"""
+    with app.app_context():
+        user = User(
+            email='test@example.com',
+            username='testuser',
+            is_active=True,
+            is_verified=True,
+            is_admin=False,
+            ntfy_topic='cl_test123456789a'
+        )
+        user.set_password('TestPass123')
+        db.session.add(user)
+        db.session.commit()
+
+        # Add active subscription
+        sub = Subscription(
+            user_id=user.id,
+            plan='monthly',
+            starts_at=datetime.now(timezone.utc),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+            status='active'
+        )
+        db.session.add(sub)
+        db.session.commit()
+
+        return user.id
+
+
+@pytest.fixture
+def unverified_user(app):
+    """Create an unverified user"""
+    with app.app_context():
+        user = User(
+            email='unverified@example.com',
+            username='unverified',
+            is_active=True,
+            is_verified=False,
+            is_admin=False,
+            ntfy_topic='cl_unverified12345'
+        )
+        user.set_password('TestPass123')
+        db.session.add(user)
+        db.session.commit()
+        return user.id
+
+
+@pytest.fixture
+def inactive_user(app):
+    """Create an inactive (deactivated) user"""
+    with app.app_context():
+        user = User(
+            email='inactive@example.com',
+            username='inactive',
+            is_active=False,
+            is_verified=True,
+            is_admin=False,
+            ntfy_topic='cl_inactive123456'
+        )
+        user.set_password('TestPass123')
+        db.session.add(user)
+        db.session.commit()
+        return user.id
+
+
+@pytest.fixture
+def user_no_subscription(app):
+    """Create a verified user with no subscription"""
+    with app.app_context():
+        user = User(
+            email='nosub@example.com',
+            username='nosub',
+            is_active=True,
+            is_verified=True,
+            is_admin=False,
+            ntfy_topic='cl_nosub1234567890'
+        )
+        user.set_password('TestPass123')
+        db.session.add(user)
+        db.session.commit()
+        return user.id
+
+
+@pytest.fixture
+def user_expired_subscription(app):
+    """Create a user with an expired subscription (past grace period)"""
+    with app.app_context():
+        user = User(
+            email='expired@example.com',
+            username='expired',
+            is_active=True,
+            is_verified=True,
+            is_admin=False,
+            ntfy_topic='cl_expired12345678'
+        )
+        user.set_password('TestPass123')
+        db.session.add(user)
+        db.session.commit()
+
+        # Subscription expired 10 days ago (past 3-day grace period)
+        sub = Subscription(
+            user_id=user.id,
+            plan='monthly',
+            starts_at=datetime.now(timezone.utc) - timedelta(days=40),
+            expires_at=datetime.now(timezone.utc) - timedelta(days=10),
+            status='expired',
+            grace_period_days=3
+        )
+        db.session.add(sub)
+        db.session.commit()
+
+        return user.id
+
+
+@pytest.fixture
+def user_grace_period(app):
+    """Create a user in grace period (expired but within grace)"""
+    with app.app_context():
+        user = User(
+            email='grace@example.com',
+            username='graceuser',
+            is_active=True,
+            is_verified=True,
+            is_admin=False,
+            ntfy_topic='cl_grace123456789'
+        )
+        user.set_password('TestPass123')
+        db.session.add(user)
+        db.session.commit()
+
+        # Subscription expired 1 day ago (within 3-day grace period)
+        sub = Subscription(
+            user_id=user.id,
+            plan='monthly',
+            starts_at=datetime.now(timezone.utc) - timedelta(days=31),
+            expires_at=datetime.now(timezone.utc) - timedelta(days=1),
+            status='active',
+            grace_period_days=3
+        )
+        db.session.add(sub)
+        db.session.commit()
+
+        return user.id
+
+
+@pytest.fixture
+def user_lifetime(app):
+    """Create a user with lifetime subscription"""
+    with app.app_context():
+        user = User(
+            email='lifetime@example.com',
+            username='lifetime',
+            is_active=True,
+            is_verified=True,
+            is_admin=False,
+            ntfy_topic='cl_lifetime123456'
+        )
+        user.set_password('TestPass123')
+        db.session.add(user)
+        db.session.commit()
+
+        sub = Subscription(
+            user_id=user.id,
+            plan='lifetime',
+            starts_at=datetime.now(timezone.utc),
+            expires_at=None,
+            status='active'
+        )
+        db.session.add(sub)
+        db.session.commit()
+
+        return user.id
+
+
+@pytest.fixture
+def admin_user(app):
+    """Create an admin user"""
+    with app.app_context():
+        user = User(
+            email='admin@example.com',
+            username='admin',
+            is_active=True,
+            is_verified=True,
+            is_admin=True,
+            ntfy_topic='cl_admin123456789'
+        )
+        user.set_password('AdminPass123')
+        db.session.add(user)
+        db.session.commit()
+
+        sub = Subscription(
+            user_id=user.id,
+            plan='lifetime',
+            starts_at=datetime.now(timezone.utc),
+            expires_at=None,
+            status='active'
+        )
+        db.session.add(sub)
+        db.session.commit()
+
+        return user.id
+
+
+@pytest.fixture
+def user_expiring_soon(app):
+    """Create a user with subscription expiring in 3 days"""
+    with app.app_context():
+        user = User(
+            email='expiring@example.com',
+            username='expiring',
+            is_active=True,
+            is_verified=True,
+            is_admin=False,
+            ntfy_topic='cl_expiring123456'
+        )
+        user.set_password('TestPass123')
+        db.session.add(user)
+        db.session.commit()
+
+        sub = Subscription(
+            user_id=user.id,
+            plan='monthly',
+            starts_at=datetime.now(timezone.utc) - timedelta(days=27),
+            expires_at=datetime.now(timezone.utc) + timedelta(days=3),
+            status='active'
+        )
+        db.session.add(sub)
+        db.session.commit()
+
+        return user.id
+
+
+def login_user(client, email, password):
+    """Helper function to log in a user"""
+    return client.post('/auth/login', data={
+        'email': email,
+        'password': password
+    }, follow_redirects=True)
