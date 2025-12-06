@@ -54,14 +54,38 @@ class Config:
     # Scanner Settings
     SCAN_INTERVAL_MINUTES = int(os.getenv('SCAN_INTERVAL_MINUTES', 5))
 
-    # Default Symbols
+    # Available Symbols (for quick-add dropdown in Settings)
+    # Top 100+ cryptocurrencies by market cap, sorted alphabetically
     SYMBOLS = [
-        'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT', 'ADA/USDT',
-        'DOGE/USDT', 'SOL/USDT', 'DOT/USDT', 'POL/USDT', 'LTC/USDT',
-        'SHIB/USDT', 'TRX/USDT', 'AVAX/USDT', 'LINK/USDT', 'ATOM/USDT',
-        'UNI/USDT', 'XMR/USDT', 'ETC/USDT', 'XLM/USDT', 'BCH/USDT',
-        'APT/USDT', 'FIL/USDT', 'LDO/USDT', 'ARB/USDT', 'OP/USDT',
-        'NEAR/USDT', 'INJ/USDT', 'RUNE/USDT', 'AAVE/USDT', 'GRT/USDT'
+        # Top 10
+        'BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'XRP/USDT', 'SOL/USDT',
+        'ADA/USDT', 'DOGE/USDT', 'TRX/USDT', 'AVAX/USDT', 'LINK/USDT',
+        # 11-30
+        'TON/USDT', 'SHIB/USDT', 'DOT/USDT', 'BCH/USDT', 'LTC/USDT',
+        'NEAR/USDT', 'UNI/USDT', 'PEPE/USDT', 'APT/USDT', 'ICP/USDT',
+        'POL/USDT', 'ETC/USDT', 'RENDER/USDT', 'FET/USDT', 'STX/USDT',
+        'TAO/USDT', 'ATOM/USDT', 'XMR/USDT', 'IMX/USDT', 'FIL/USDT',
+        # 31-60
+        'ARB/USDT', 'OP/USDT', 'INJ/USDT', 'HBAR/USDT', 'VET/USDT',
+        'MKR/USDT', 'GRT/USDT', 'AAVE/USDT', 'RUNE/USDT', 'THETA/USDT',
+        'WIF/USDT', 'BONK/USDT', 'FLOKI/USDT', 'SEI/USDT', 'SUI/USDT',
+        'TIA/USDT', 'JUP/USDT', 'PYTH/USDT', 'STRK/USDT', 'WLD/USDT',
+        'LDO/USDT', 'XLM/USDT', 'ALGO/USDT', 'FTM/USDT', 'SAND/USDT',
+        'MANA/USDT', 'AXS/USDT', 'GALA/USDT', 'ENJ/USDT', 'CHZ/USDT',
+        # 61-90
+        'FLOW/USDT', 'NEO/USDT', 'EOS/USDT', 'XTZ/USDT', 'IOTA/USDT',
+        'KAVA/USDT', 'ZEC/USDT', 'QTUM/USDT', 'DASH/USDT', 'WAVES/USDT',
+        'SNX/USDT', 'CRV/USDT', 'COMP/USDT', 'YFI/USDT', 'SUSHI/USDT',
+        '1INCH/USDT', 'BAL/USDT', 'ZRX/USDT', 'ENS/USDT', 'KSM/USDT',
+        'ROSE/USDT', 'CELO/USDT', 'ONE/USDT', 'ANKR/USDT', 'SKL/USDT',
+        'STORJ/USDT', 'ICX/USDT', 'ZIL/USDT', 'ONT/USDT', 'IOST/USDT',
+        # 91-120 (DeFi, Gaming, Layer 2)
+        'CAKE/USDT', 'DYDX/USDT', 'GMX/USDT', 'BLUR/USDT', 'MAGIC/USDT',
+        'MEME/USDT', 'ORDI/USDT', 'SATS/USDT', 'RATS/USDT', 'PIXEL/USDT',
+        'PORTAL/USDT', 'AEVO/USDT', 'BOME/USDT', 'SLERF/USDT', 'ONDO/USDT',
+        'ENA/USDT', 'ETHFI/USDT', 'W/USDT', 'OMNI/USDT', 'REZ/USDT',
+        'BB/USDT', 'NOT/USDT', 'IO/USDT', 'ZK/USDT', 'LISTA/USDT',
+        'ZRO/USDT', 'BLAST/USDT', 'DOGS/USDT', 'NEIRO/USDT', 'TURBO/USDT'
     ]
 
     # Timeframes

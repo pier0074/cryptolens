@@ -25,12 +25,17 @@ def index():
         'min_confluence': Setting.get('min_confluence', '2'),
         'notifications_enabled': Setting.get('notifications_enabled', 'true'),
         'api_key': Setting.get('api_key', ''),
+        'log_level': Setting.get('log_level', 'INFO'),
     }
+
+    # Filter out already-added symbols from dropdown
+    existing_symbols = {s.symbol for s in symbols}
+    available_symbols = [s for s in Config.SYMBOLS if s not in existing_symbols]
 
     return render_template('settings.html',
                            symbols=symbols,
                            settings=settings,
-                           available_symbols=Config.SYMBOLS)
+                           available_symbols=available_symbols)
 
 
 @settings_bp.route('/save', methods=['POST'])
