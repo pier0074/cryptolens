@@ -6,7 +6,7 @@ Automated detection of institutional trading patterns across multiple timeframes
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
 ![Flask](https://img.shields.io/badge/Flask-3.0-green.svg)
-![Tests](https://img.shields.io/badge/Tests-164%20passing-brightgreen.svg)
+![SQLite](https://img.shields.io/badge/SQLite-3-lightgrey.svg)
 
 ## Features
 
@@ -140,19 +140,21 @@ Visit `http://localhost:5000`
 
 ## Background Processing (Cron)
 
-```bash
-crontab -e
+A ready-to-use `crontab.txt` is included. Install with:
 
-# All-in-one: Fetch (with auto gap-fill) → Aggregate → Detect → Expire → Notify
-* * * * * cd /path/to/cryptolens && venv/bin/python scripts/fetch.py
+```bash
+crontab crontab.txt
 ```
 
 ### Scripts
 
 | Script | Purpose | Frequency |
 |--------|---------|-----------|
-| `fetch.py` | Fetch + aggregate + detect + expire + notify (handles any gap) | Every 1 min |
-| `fetch_historical.py` | Initial data load for new symbols | Manual (once) |
+| `fetch.py` | Fetch + aggregate + detect + expire + notify | Every 1 min |
+| `compute_stats.py` | Cache stats for fast page loads | Every 5 min |
+| `db_health.py` | Verify data integrity, fix issues | Daily (3 AM) |
+| `fetch_historical.py` | Initial data load / backfill gaps | Manual |
+| `migrate_all.py` | Database migrations (idempotent) | Manual |
 
 ---
 
@@ -173,28 +175,17 @@ Patterns auto-expire based on timeframe significance:
 
 ## Web Interface
 
-### Dashboard
-- Real-time pattern matrix (symbol × timeframe)
-- Data freshness indicator
-- Quick scan button
-
-### Patterns Page
-- Interactive TradingView charts
-- Pattern zones drawn from detection timestamp
-- Timeframe selector with dynamic candle loading
-- Smart price formatting for all token sizes
-
-### Signals Page
-- Symbol search with autocomplete
-- Direction filter (Long/Short/All)
-- Pattern type indicator
-- Confluence score with aligned timeframes
-
-### Portfolio
-- Multiple portfolios support
-- Trade creation from signals/patterns
-- PnL tracking with R-multiple
-- Journal entries per trade
+| Page | Features |
+|------|----------|
+| **Dashboard** | Pattern matrix, data freshness, quick scan |
+| **Patterns** | TradingView charts, pattern zones, timeframe selector |
+| **Signals** | Symbol search, direction filter, confluence scores |
+| **Portfolio** | Multi-portfolio, trade logging, PnL tracking, journal |
+| **Backtest** | Strategy backtesting with historical data |
+| **Stats** | Database stats, candle counts, verification status |
+| **Analytics** | Performance metrics and analysis |
+| **Logs** | Application logs viewer |
+| **Settings** | Symbols, notifications, risk parameters |
 
 ---
 
@@ -232,15 +223,19 @@ python -m pytest --cov=app          # With coverage
 ```
 cryptolens/
 ├── app/
-│   ├── routes/          # Web routes
-│   ├── services/        # Business logic
+│   ├── routes/          # Web routes (api, dashboard, patterns, signals, etc.)
+│   ├── services/        # Business logic (aggregator, notifier, signals, etc.)
 │   │   └── patterns/    # FVG, OB, Sweep detectors
-│   └── templates/       # HTML templates
+│   ├── templates/       # Jinja2 HTML templates
+│   └── models.py        # SQLAlchemy models
 ├── scripts/
 │   ├── fetch.py         # Real-time fetch + detection
 │   ├── fetch_historical.py
-│   └── cleanup_patterns.py
-├── tests/               # 164 tests
+│   ├── compute_stats.py # Cache stats
+│   ├── db_health.py     # Data verification
+│   └── migrate_all.py   # DB migrations
+├── tests/               # Test suite
+├── crontab.txt          # Cron configuration
 └── run.py
 ```
 
