@@ -172,26 +172,40 @@
             </div>
             <p class="text-xs text-red-400 mb-4" x-show="errorMessage" x-text="errorMessage"></p>
 
-            <!-- Symbol List -->
-            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2">
-                {% for symbol in symbols %}
+            <!-- Active Symbols -->
+            <h3 class="text-sm font-semibold text-muted mb-2">Active ({{ symbols|selectattr('is_active')|list|length }})</h3>
+            <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mb-4">
+                {% for symbol in symbols if symbol.is_active %}
                 <div class="flex items-center justify-between bg-gray-800 rounded p-2 text-sm">
-                    <span class="{% if not symbol.is_active %}text-muted line-through{% endif %}">
-                        {{ symbol.symbol }}
-                    </span>
-                    <div class="flex items-center space-x-1">
-                        <button @click="toggleSymbol({{ symbol.id }})"
-                                class="text-xs px-2 py-1 rounded {% if symbol.is_active %}bg-green-900 text-green-200{% else %}bg-gray-700{% endif %}">
-                            {{ 'ON' if symbol.is_active else 'OFF' }}
-                        </button>
-                        <button @click="deleteSymbol({{ symbol.id }})"
-                                class="text-xs px-2 py-1 rounded bg-red-900 text-red-200 hover:bg-red-800">
-                            ×
-                        </button>
-                    </div>
+                    <span>{{ symbol.symbol }}</span>
+                    <button @click="toggleSymbol({{ symbol.id }})"
+                            class="text-xs px-2 py-1 rounded bg-green-900 text-green-200">
+                        ON
+                    </button>
                 </div>
                 {% endfor %}
             </div>
+
+            <!-- Inactive Symbols (collapsed by default) -->
+            {% set inactive_symbols = symbols|rejectattr('is_active')|list %}
+            {% if inactive_symbols %}
+            <details class="mt-4">
+                <summary class="text-sm text-muted cursor-pointer hover:text-white">
+                    Inactive ({{ inactive_symbols|length }}) - click to expand
+                </summary>
+                <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-2 mt-2">
+                    {% for symbol in inactive_symbols %}
+                    <div class="flex items-center justify-between bg-gray-800 rounded p-2 text-sm opacity-60">
+                        <span class="text-muted">{{ symbol.symbol }}</span>
+                        <button @click="toggleSymbol({{ symbol.id }})"
+                                class="text-xs px-2 py-1 rounded bg-gray-700 hover:bg-gray-600">
+                            OFF
+                        </button>
+                    </div>
+                    {% endfor %}
+                </div>
+            </details>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -293,26 +307,6 @@ function settingsApp() {
                         'X-CSRFToken': getCsrfToken()
                     },
                     body: JSON.stringify({ action: 'toggle', id: id })
-                });
-                const data = await response.json();
-                if (data.success) {
-                    location.reload();
-                }
-            } catch (e) {
-                alert('Error: ' + e.message);
-            }
-        },
-
-        async deleteSymbol(id) {
-            if (!confirm('Are you sure you want to delete this symbol?')) return;
-            try {
-                const response = await fetch('/settings/symbols', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRFToken': getCsrfToken()
-                    },
-                    body: JSON.stringify({ action: 'delete', id: id })
                 });
                 const data = await response.json();
                 if (data.success) {

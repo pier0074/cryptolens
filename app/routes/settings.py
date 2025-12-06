@@ -90,12 +90,13 @@ def manage_symbols():
             return jsonify({'success': True, 'symbol': symbol.to_dict()})
 
     elif action == 'delete':
+        # Soft delete: just deactivate the symbol to preserve candle data
         symbol_id = data.get('id')
         symbol = db.session.get(Symbol, symbol_id)
         if symbol:
-            db.session.delete(symbol)
+            symbol.is_active = False
             db.session.commit()
-            return jsonify({'success': True})
+            return jsonify({'success': True, 'message': 'Symbol deactivated (candles preserved)'})
 
     return jsonify({'success': False, 'error': 'Invalid action'})
 
