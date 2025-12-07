@@ -20,7 +20,7 @@
         <button @click="selectedPattern = 'imbalance'"
                 :class="selectedPattern === 'imbalance' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'"
                 class="px-4 py-2 rounded-t text-sm font-medium transition-colors">
-            Imbalance (FVG)
+            Fair Value Gap (FVG)
         </button>
         <button @click="selectedPattern = 'order_block'"
                 :class="selectedPattern === 'order_block' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'"
@@ -90,7 +90,7 @@
                             {# Show individual pattern types with Alpine filtering #}
                             {% for ptype, pattern in cell_data.patterns.items() %}
                             {% set pattern_name = 'FVG' if ptype == 'imbalance' else ('OB' if ptype == 'order_block' else 'Sweep') %}
-                            {% set pattern_full = 'Imbalance (FVG)' if ptype == 'imbalance' else ('Order Block' if ptype == 'order_block' else 'Liquidity Sweep') %}
+                            {% set pattern_full = 'Fair Value Gap' if ptype == 'imbalance' else ('Order Block' if ptype == 'order_block' else 'Liquidity Sweep') %}
                             <a href="/patterns?symbol={{ symbol.symbol }}&timeframe={{ tf }}&type={{ ptype }}"
                                x-show="selectedPattern === 'all' || selectedPattern === '{{ ptype }}'"
                                x-cloak

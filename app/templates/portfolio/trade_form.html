@@ -61,7 +61,7 @@
                         <select name="pattern_type"
                                 class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
                             <option value="">Select...</option>
-                            <option value="imbalance" {% if trade and trade.pattern_type == 'imbalance' %}selected{% endif %}>FVG/Imbalance</option>
+                            <option value="imbalance" {% if trade and trade.pattern_type == 'imbalance' %}selected{% endif %}>Fair Value Gap (FVG)</option>
                             <option value="order_block" {% if trade and trade.pattern_type == 'order_block' %}selected{% endif %}>Order Block</option>
                             <option value="liquidity_sweep" {% if trade and trade.pattern_type == 'liquidity_sweep' %}selected{% endif %}>Liquidity Sweep</option>
                             <option value="breaker" {% if trade and trade.pattern_type == 'breaker' %}selected{% endif %}>Breaker</option>
