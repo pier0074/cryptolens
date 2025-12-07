@@ -5,9 +5,10 @@ Brute force protection for user accounts
 from datetime import datetime, timezone, timedelta
 from app import db
 from app.models import User
+from app.constants import LOCKOUT_MAX_ATTEMPTS, LOCKOUT_DURATION_MINUTES
 
-MAX_ATTEMPTS = 5
-LOCKOUT_DURATION = timedelta(minutes=15)
+MAX_ATTEMPTS = LOCKOUT_MAX_ATTEMPTS
+LOCKOUT_DURATION = timedelta(minutes=LOCKOUT_DURATION_MINUTES)
 
 
 def record_failed_attempt(email: str) -> None:

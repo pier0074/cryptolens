@@ -12,12 +12,15 @@ import json
 from app.config import Config
 from app import db
 from app.services.logger import log_notify, log_error
+from app.constants import (
+    CIRCUIT_BREAKER_FAIL_MAX, CIRCUIT_BREAKER_RESET_TIMEOUT,
+    HTTP_TIMEOUT_DEFAULT, PRIORITY_URGENT
+)
 
 # Circuit breaker for NTFY service
-# Opens after 5 failures, resets after 30 seconds
 ntfy_breaker = pybreaker.CircuitBreaker(
-    fail_max=5,
-    reset_timeout=30,
+    fail_max=CIRCUIT_BREAKER_FAIL_MAX,
+    reset_timeout=CIRCUIT_BREAKER_RESET_TIMEOUT,
     name='ntfy'
 )
 
@@ -34,7 +37,7 @@ def _send_ntfy_request(topic: str, title: str, message: str, priority: int, tags
             "priority": priority,
             "tags": tags
         },
-        timeout=10
+        timeout=HTTP_TIMEOUT_DEFAULT
     )
     if response.status_code == 200:
         return True

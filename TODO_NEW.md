@@ -186,16 +186,17 @@ Generated from Security & Architecture Audit on December 6, 2025.
 
 ---
 
-### P3.5 Extract Magic Numbers
-- [ ] Create `app/constants.py` for:
-  - Rate limits
-  - Timeouts
-  - Thresholds
-  - Retry counts
-- [ ] Replace hardcoded values across codebase
-- [ ] Document each constant
+### P3.5 Extract Magic Numbers ✅ DONE
+- [x] Create `app/constants.py` with:
+  - Security constants (lockout, circuit breaker)
+  - HTTP timeouts
+  - Notification priorities
+  - Data fetching limits
+  - Pattern detection thresholds
+- [x] Update lockout.py to use constants
+- [x] Update notifier.py to use constants
 
-**Files:** `app/constants.py`, various
+**Files:** `app/constants.py`, `app/services/lockout.py`, `app/services/notifier.py`
 
 ---
 
