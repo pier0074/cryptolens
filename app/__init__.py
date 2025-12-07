@@ -11,10 +11,12 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_wtf.csrf import CSRFProtect
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_caching import Cache
 
 db = SQLAlchemy()
 csrf = CSRFProtect()
 limiter = Limiter(key_func=get_remote_address, default_limits=["200 per minute"])
+cache = Cache()
 
 # Configure logging
 def setup_logging(app, db_log_level=None):
@@ -133,6 +135,7 @@ def create_app(config_name=None):
     db.init_app(app)
     csrf.init_app(app)
     limiter.init_app(app)
+    cache.init_app(app)
 
     # Register custom Jinja2 filters
     app.jinja_env.filters['price'] = format_price
@@ -143,9 +146,9 @@ def create_app(config_name=None):
         from app.models import StatsCache
         import json
         try:
-            cache = StatsCache.query.filter_by(key='global').first()
-            if cache:
-                data = json.loads(cache.data)
+            stats_cache = StatsCache.query.filter_by(key='global').first()
+            if stats_cache:
+                data = json.loads(stats_cache.data)
                 return {'last_data_update': data.get('last_data_update')}
             return {'last_data_update': None}
         except Exception:

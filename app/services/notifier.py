@@ -5,6 +5,7 @@ Supports both single-topic mode (legacy) and per-user topic mode
 """
 import time
 import requests
+import pybreaker
 from datetime import datetime, timezone
 from app.models import Signal, Symbol, Pattern, Notification, Setting, User, UserNotification
 import json
@@ -12,11 +13,38 @@ from app.config import Config
 from app import db
 from app.services.logger import log_notify, log_error
 
+# Circuit breaker for NTFY service
+# Opens after 5 failures, resets after 30 seconds
+ntfy_breaker = pybreaker.CircuitBreaker(
+    fail_max=5,
+    reset_timeout=30,
+    name='ntfy'
+)
+
+
+@ntfy_breaker
+def _send_ntfy_request(topic: str, title: str, message: str, priority: int, tags: list) -> bool:
+    """Internal function wrapped by circuit breaker."""
+    response = requests.post(
+        f"{Config.NTFY_URL}",
+        json={
+            "topic": topic,
+            "title": title,
+            "message": message,
+            "priority": priority,
+            "tags": tags
+        },
+        timeout=10
+    )
+    if response.status_code == 200:
+        return True
+    raise Exception(f"HTTP {response.status_code}")
+
 
 def send_notification(topic: str, title: str, message: str, priority: int = 3,
                       tags: str = "chart,money", max_retries: int = 3) -> bool:
     """
-    Send a push notification via ntfy.sh with exponential backoff retry
+    Send a push notification via ntfy.sh with circuit breaker and retry
 
     Args:
         topic: NTFY topic to send to
@@ -30,25 +58,15 @@ def send_notification(topic: str, title: str, message: str, priority: int = 3,
         True if successful
     """
     last_error = None
+    tags_list = tags.split(",")
 
     for attempt in range(max_retries):
         try:
-            # Use JSON API to properly handle UTF-8 titles with emojis
-            response = requests.post(
-                f"{Config.NTFY_URL}",
-                json={
-                    "topic": topic,
-                    "title": title,
-                    "message": message,
-                    "priority": priority,
-                    "tags": tags.split(",")
-                },
-                timeout=10
-            )
-            if response.status_code == 200:
-                return True
-
-            last_error = f"HTTP {response.status_code}"
+            return _send_ntfy_request(topic, title, message, priority, tags_list)
+        except pybreaker.CircuitBreakerError:
+            # Circuit is open, don't retry
+            log_error("NTFY circuit breaker is open - notifications temporarily disabled")
+            return False
         except requests.exceptions.Timeout:
             last_error = "Request timeout"
         except requests.exceptions.ConnectionError:

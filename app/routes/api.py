@@ -5,7 +5,7 @@ from flask import Blueprint, request, jsonify, Response, session
 from sqlalchemy.orm import joinedload
 from app.models import Symbol, Candle, Pattern, Signal, Setting, User
 from app.config import Config
-from app import db, csrf, limiter
+from app import db, csrf, limiter, cache
 from app.services.auth import verify_api_key
 
 api_bp = Blueprint('api', __name__)
@@ -179,6 +179,7 @@ def get_signals() -> Response:
 
 
 @api_bp.route('/matrix')
+@cache.cached(timeout=Config.CACHE_TTL_PATTERN_MATRIX, key_prefix='pattern_matrix')
 def get_matrix() -> Response:
     """Get the symbol/timeframe pattern matrix (optimized: 1 query instead of 180)"""
     from sqlalchemy import func

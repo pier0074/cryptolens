@@ -3,6 +3,16 @@ Flask>=3.0.0
 Flask-SQLAlchemy>=3.1.1
 python-dotenv>=1.0.0
 
+# Database
+psycopg2-binary>=2.9.9  # PostgreSQL adapter for production
+
+# Caching
+redis>=5.0.0
+Flask-Caching>=2.3.0
+
+# Reliability
+pybreaker>=1.2.0  # Circuit breaker for external service calls
+
 # Data & Exchange
 ccxt>=4.1.0
 pandas>=2.2.0

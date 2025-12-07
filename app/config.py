@@ -136,6 +136,17 @@ class Config:
     EMAIL_VERIFICATION_EXPIRY_HOURS = 24
     PASSWORD_RESET_EXPIRY_HOURS = 1
 
+    # Cache Configuration
+    # Uses Redis if REDIS_URL is set, otherwise falls back to simple in-memory cache
+    CACHE_TYPE = 'RedisCache' if os.getenv('REDIS_URL') else 'SimpleCache'
+    CACHE_REDIS_URL = os.getenv('REDIS_URL')
+    CACHE_DEFAULT_TIMEOUT = 300  # 5 minutes default
+
+    # Cache TTLs for specific data types
+    CACHE_TTL_PATTERN_MATRIX = 60      # 1 minute - changes frequently
+    CACHE_TTL_STATS = 300              # 5 minutes - moderate update frequency
+    CACHE_TTL_USER_TIER = 3600         # 1 hour - rarely changes
+
     # Application URL (for email links)
     APP_URL = os.getenv('APP_URL', 'http://localhost:5000')
 
@@ -166,6 +177,17 @@ class ProductionConfig(Config):
     def __init__(self):
         if not os.getenv('SECRET_KEY'):
             raise ValueError("SECRET_KEY environment variable is required in production")
+
+        # Warn if using SQLite in production (not recommended for concurrent users)
+        db_url = os.getenv('DATABASE_URL', '')
+        if db_url.startswith('sqlite') or not db_url:
+            import warnings
+            warnings.warn(
+                "SQLite is not recommended for production. "
+                "Set DATABASE_URL to a PostgreSQL connection string for better performance. "
+                "Example: DATABASE_URL=postgresql://user:pass@localhost/cryptolens",
+                UserWarning
+            )
 
 
 class TestingConfig(Config):
