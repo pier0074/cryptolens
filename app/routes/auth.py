@@ -175,12 +175,31 @@ def profile():
     """User profile and subscription status (unified with settings)"""
     from app.models import Symbol, Setting, UserSymbolPreference
     from app.config import Config
+    from app.decorators import get_effective_tier
 
     user = get_current_user()
     sub_status = check_subscription_status(user.id)
+    tier = get_effective_tier(user)
 
     # Settings data (for Trading and System tabs)
-    symbols = Symbol.query.all()
+    all_symbols = Symbol.query.all()
+
+    # Filter symbols based on tier for trading tab display
+    if tier == 'free':
+        # Free: Only BTC/USDT
+        symbols = [s for s in all_symbols if s.symbol == 'BTC/USDT']
+    elif tier == 'pro':
+        # Pro: Default to 5 main symbols (BTC, ETH, XRP, BNB, SOL)
+        pro_default_symbols = ['BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'BNB/USDT', 'SOL/USDT']
+        symbols = [s for s in all_symbols if s.symbol in pro_default_symbols and s.is_active]
+        # If user has fewer than 5, fill in from other active symbols
+        if len(symbols) < 5:
+            other_active = [s for s in all_symbols if s.symbol not in pro_default_symbols and s.is_active]
+            symbols.extend(other_active[:5 - len(symbols)])
+    else:
+        # Premium/Admin: All symbols
+        symbols = all_symbols
+
     settings = {
         'ntfy_topic': Setting.get('ntfy_topic', Config.NTFY_TOPIC),
         'ntfy_priority': Setting.get('ntfy_priority', str(Config.NTFY_PRIORITY)),

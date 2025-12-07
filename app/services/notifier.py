@@ -61,7 +61,7 @@ def send_notification(topic: str, title: str, message: str, priority: int = 3,
         True if successful
     """
     last_error = None
-    tags_list = tags.split(",")
+    tags_list = tags.split(",") if isinstance(tags, str) else (tags or [])
 
     for attempt in range(max_retries):
         try:
@@ -72,10 +72,10 @@ def send_notification(topic: str, title: str, message: str, priority: int = 3,
             return False
         except requests.exceptions.Timeout:
             last_error = "Request timeout"
-        except requests.exceptions.ConnectionError:
-            last_error = "Connection error"
+        except requests.exceptions.ConnectionError as e:
+            last_error = f"Connection error: {str(e)[:100]}"
         except Exception as e:
-            last_error = str(e)
+            last_error = str(e)[:200]
 
         # Exponential backoff: 1s, 2s, 4s
         if attempt < max_retries - 1:
@@ -84,6 +84,56 @@ def send_notification(topic: str, title: str, message: str, priority: int = 3,
 
     log_error(f"NTFY notification failed after {max_retries} attempts: {last_error}")
     return False
+
+
+def test_ntfy_connection(topic: str = None) -> dict:
+    """
+    Test NTFY connectivity.
+
+    Args:
+        topic: Optional topic to test with (defaults to a test topic)
+
+    Returns:
+        Dict with 'success', 'error', 'url', 'status_code'
+    """
+    test_topic = topic or 'cl_test_connection'
+
+    try:
+        response = requests.post(
+            f"{Config.NTFY_URL}",
+            json={
+                "topic": test_topic,
+                "title": "CryptoLens Connection Test",
+                "message": f"Test at {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+                "priority": 1,  # Minimum priority for test
+                "tags": ["test"]
+            },
+            timeout=10
+        )
+        return {
+            'success': response.status_code == 200,
+            'status_code': response.status_code,
+            'url': Config.NTFY_URL,
+            'response': response.text[:200] if response.text else None
+        }
+    except requests.exceptions.ConnectionError as e:
+        return {
+            'success': False,
+            'error': f'Connection error: {str(e)[:100]}',
+            'url': Config.NTFY_URL
+        }
+    except requests.exceptions.Timeout:
+        return {
+            'success': False,
+            'error': 'Request timeout',
+            'url': Config.NTFY_URL
+        }
+    except Exception as e:
+        return {
+            'success': False,
+            'error': str(e)[:200],
+            'url': Config.NTFY_URL
+        }
 
 
 def notify_signal(signal: Signal, test_mode: bool = False, current_price: float = None) -> bool:

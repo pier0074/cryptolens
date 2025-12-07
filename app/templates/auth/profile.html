@@ -457,7 +457,7 @@
                 <div class="flex items-center justify-between mb-4">
                     <h2 class="text-lg font-bold">Tracked Symbols</h2>
                     {% if is_pro %}
-                    <span class="text-sm text-gray-400">{{ symbols|selectattr('is_active')|list|length }}/5 slots used</span>
+                    <span class="text-sm text-gray-400">{{ symbols|length }}/5 symbols</span>
                     {% endif %}
                 </div>
 
@@ -476,41 +476,26 @@
                 <p class="text-xs text-gray-500 mt-3">Upgrade to Pro for up to 5 symbols or Premium for all 22+ symbols.</p>
 
                 {% elif is_pro %}
-                <!-- Pro Tier: 5 symbols, can toggle fetch, cannot mute -->
-                <p class="text-sm text-muted mb-4">Manage your tracked symbols. Pro tier: up to 5 symbols.</p>
-
-                <!-- Add Symbol (if under limit) -->
-                {% set active_count = symbols|selectattr('is_active')|list|length %}
-                {% if active_count < 5 %}
-                <div class="flex flex-wrap items-center gap-2 mb-4">
-                    <select x-model="newSymbol" @change="addSymbol()" class="bg-gray-800 border border-gray-700 rounded px-3 py-2">
-                        <option value="">Add symbol...</option>
-                        {% for sym in available_symbols %}
-                        {% if sym not in symbols|map(attribute='symbol')|list %}
-                        <option value="{{ sym }}">{{ sym }}</option>
-                        {% endif %}
-                        {% endfor %}
-                    </select>
-                </div>
-                {% endif %}
+                <!-- Pro Tier: 5 default symbols -->
+                <p class="text-sm text-muted mb-4">Your tracked symbols (Pro tier: 5 symbols - BTC, ETH, XRP, BNB, SOL)</p>
 
                 <!-- Active Symbols -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
-                    {% for symbol in symbols if symbol.is_active %}
+                    {% for symbol in symbols %}
                     <div class="flex items-center justify-between bg-gray-800 rounded p-2 text-sm">
                         <span class="font-mono">{{ symbol.symbol }}</span>
                         <div class="flex items-center gap-1">
+                            {% if symbol.is_active %}
                             <span class="text-xs px-2 py-1 rounded bg-green-900 text-green-200">Active</span>
-                            <button @click="toggleSymbol({{ symbol.id }})"
-                                    class="text-xs px-2 py-1 rounded bg-red-900 hover:bg-red-800 text-red-200"
-                                    title="Remove symbol">
-                                Remove
-                            </button>
+                            <span class="text-xs px-2 py-1 rounded bg-blue-900 text-blue-200">Notify</span>
+                            {% else %}
+                            <span class="text-xs px-2 py-1 rounded bg-gray-700 text-gray-400">Inactive</span>
+                            {% endif %}
                         </div>
                     </div>
                     {% endfor %}
                 </div>
-                <p class="text-xs text-gray-500">Pro tier receives notifications for all active symbols. Upgrade to Premium to mute specific symbols.</p>
+                <p class="text-xs text-gray-500">Pro tier receives notifications for your 5 tracked symbols. Upgrade to Premium for all 22+ symbols and mute control.</p>
 
                 {% else %}
                 <!-- Premium Tier: Full access, can mute, cannot add (admin manages) -->

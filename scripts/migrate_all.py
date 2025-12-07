@@ -381,6 +381,89 @@ def migrate():
             db.session.execute(text("CREATE INDEX idx_user_symbol_pref ON user_symbol_preferences (user_id, symbol_id)"))
             changes.append("Created user_symbol_preferences table")
 
+        # Seed default notification templates
+        if table_exists('notification_templates'):
+            # Check if templates already exist
+            result = db.session.execute(text("SELECT COUNT(*) FROM notification_templates"))
+            count = result.fetchone()[0]
+
+            if count == 0:
+                # Get admin user ID (first admin or user ID 1)
+                result = db.session.execute(text(
+                    "SELECT id FROM users WHERE is_admin = 1 LIMIT 1"
+                ))
+                admin_row = result.fetchone()
+                admin_id = admin_row[0] if admin_row else 1
+
+                # Default templates
+                templates = [
+                    {
+                        'name': 'Welcome Message',
+                        'template_type': 'welcome',
+                        'title': 'Welcome to CryptoLens!',
+                        'message': 'Thank you for joining CryptoLens! Your account is now active and you will start receiving trading signals based on your subscription tier. Happy trading!',
+                        'priority': 3,
+                        'tags': 'white_check_mark,rocket'
+                    },
+                    {
+                        'name': 'System Maintenance',
+                        'template_type': 'downtime',
+                        'title': 'Scheduled Maintenance',
+                        'message': 'CryptoLens will undergo scheduled maintenance on {date} from {start_time} to {end_time} UTC. Signal notifications may be delayed during this period.',
+                        'priority': 4,
+                        'tags': 'warning,wrench'
+                    },
+                    {
+                        'name': 'New Feature Announcement',
+                        'template_type': 'update',
+                        'title': 'New Feature Available!',
+                        'message': 'We have added a new feature: {feature_name}. {description}. Check it out in your dashboard!',
+                        'priority': 3,
+                        'tags': 'sparkles,gift'
+                    },
+                    {
+                        'name': 'Subscription Expiring',
+                        'template_type': 'reminder',
+                        'title': 'Subscription Expiring Soon',
+                        'message': 'Your CryptoLens subscription will expire in {days} days. Renew now to keep receiving uninterrupted trading signals!',
+                        'priority': 4,
+                        'tags': 'hourglass,bell'
+                    },
+                    {
+                        'name': 'Market Alert',
+                        'template_type': 'alert',
+                        'title': 'Market Alert',
+                        'message': '{message}',
+                        'priority': 5,
+                        'tags': 'rotating_light,chart_with_upwards_trend'
+                    },
+                    {
+                        'name': 'Weekly Summary',
+                        'template_type': 'report',
+                        'title': 'Your Weekly Trading Summary',
+                        'message': 'This week: {total_signals} signals sent, {bullish} bullish, {bearish} bearish. Top performing symbol: {top_symbol}. Keep up the good work!',
+                        'priority': 2,
+                        'tags': 'bar_chart,calendar'
+                    }
+                ]
+
+                for t in templates:
+                    db.session.execute(text("""
+                        INSERT INTO notification_templates
+                        (name, template_type, title, message, priority, tags, created_by, created_at, is_active, times_used)
+                        VALUES (:name, :template_type, :title, :message, :priority, :tags, :created_by, datetime('now'), 1, 0)
+                    """), {
+                        'name': t['name'],
+                        'template_type': t['template_type'],
+                        'title': t['title'],
+                        'message': t['message'],
+                        'priority': t['priority'],
+                        'tags': t['tags'],
+                        'created_by': admin_id
+                    })
+
+                changes.append(f"Created {len(templates)} default notification templates")
+
         db.session.commit()
 
         if changes:

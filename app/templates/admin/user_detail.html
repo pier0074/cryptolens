@@ -6,9 +6,14 @@
 <div class="max-w-4xl mx-auto">
     <div class="flex justify-between items-center mb-8">
         <h1 class="text-3xl font-bold">User: {{ user.username }}</h1>
-        <a href="{{ url_for('admin.users') }}" class="text-blue-400 hover:text-blue-300">
-            &larr; Back to Users
-        </a>
+        <div class="flex gap-4">
+            <a href="{{ url_for('admin.users') }}" class="text-blue-400 hover:text-blue-300">
+                &larr; Back to Users
+            </a>
+            <a href="{{ url_for('admin.subscriptions') }}" class="text-blue-400 hover:text-blue-300">
+                &larr; Back to Subscriptions
+            </a>
+        </div>
     </div>
 
     <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -219,41 +224,60 @@
 
         <form method="POST" action="{{ url_for('admin.modify_subscription', user_id=user.id) }}" class="space-y-4">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="action" value="create">
 
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div>
-                    <label class="block text-sm text-gray-400 mb-2">Plan</label>
+                    <label class="block text-sm text-gray-400 mb-2">Tier</label>
                     <select name="plan" class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
-                        <option value="free">Free Trial (7 days)</option>
-                        <option value="monthly">Monthly (30 days)</option>
-                        <option value="yearly">Yearly (365 days)</option>
+                        <option value="free" {% if subscription and subscription.plan == 'free' %}selected{% endif %}>Free</option>
+                        <option value="pro" {% if subscription and subscription.plan == 'pro' %}selected{% endif %}>Pro ($19/mo)</option>
+                        <option value="premium" {% if subscription and subscription.plan == 'premium' %}selected{% endif %}>Premium ($49/mo)</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-sm text-gray-400 mb-2">Duration</label>
+                    <select name="custom_days" class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
+                        <option value="30">30 days</option>
+                        <option value="90">90 days</option>
+                        <option value="365">1 year</option>
                         <option value="lifetime">Lifetime</option>
                     </select>
                 </div>
 
-                <div>
-                    <label class="block text-sm text-gray-400 mb-2">Action</label>
-                    <select name="action" class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
-                        <option value="create">Create New</option>
-                        <option value="extend">Extend Current</option>
-                        <option value="cancel">Cancel</option>
-                        <option value="suspend">Suspend</option>
-                        <option value="reactivate">Reactivate</option>
-                    </select>
-                </div>
-
-                <div>
-                    <label class="block text-sm text-gray-400 mb-2">Custom Days (optional)</label>
-                    <input type="number" name="custom_days" min="1" max="3650"
-                           class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white"
-                           placeholder="Override plan days">
+                <div class="flex items-end">
+                    <button type="submit" class="w-full bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg">
+                        Set Subscription
+                    </button>
                 </div>
             </div>
 
-            <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-6 py-2 rounded-lg">
-                Apply Changes
-            </button>
+            <p class="text-xs text-gray-500">This will replace the current subscription with a new one.</p>
         </form>
+
+        {% if subscription and subscription.status == 'active' %}
+        <div class="mt-4 pt-4 border-t border-gray-700">
+            <div class="flex gap-2">
+                <form method="POST" action="{{ url_for('admin.modify_subscription', user_id=user.id) }}" class="inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="cancel">
+                    <button type="submit" class="px-4 py-2 bg-red-700 hover:bg-red-600 rounded-lg text-sm"
+                            onclick="return confirm('Cancel this subscription?');">
+                        Cancel Subscription
+                    </button>
+                </form>
+                <form method="POST" action="{{ url_for('admin.modify_subscription', user_id=user.id) }}" class="inline">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="action" value="extend">
+                    <input type="hidden" name="custom_days" value="30">
+                    <button type="submit" class="px-4 py-2 bg-green-700 hover:bg-green-600 rounded-lg text-sm">
+                        +30 Days
+                    </button>
+                </form>
+            </div>
+        </div>
+        {% endif %}
     </div>
 
     <!-- Notification History -->

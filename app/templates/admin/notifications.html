@@ -43,7 +43,7 @@
                 <h2 class="text-xl font-semibold">Recent Broadcasts</h2>
             </div>
             {% if recent_broadcasts %}
-            <div class="space-y-3">
+            <div class="space-y-3 max-h-72 overflow-y-auto">
                 {% for broadcast in recent_broadcasts %}
                 <div class="p-3 bg-darker rounded-lg">
                     <div class="flex justify-between items-start">

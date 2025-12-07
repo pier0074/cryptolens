@@ -63,18 +63,16 @@
                         <a href="/signals" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'signals' in request.endpoint %}bg-gray-800{% endif %}">
                             Signals
                         </a>
-                        {% set view_tier = session.get('view_as', 'admin') if g.user.is_admin else g.user.subscription_tier %}
-                        {% set is_viewing_admin = g.user.is_admin and view_tier == 'admin' %}
-                        {% set is_viewing_premium = is_viewing_admin or view_tier == 'premium' %}
-                        {% if is_viewing_premium %}
+                        <a href="/portfolio" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'portfolio' in request.endpoint %}bg-gray-800{% endif %}">
+                            Portfolio
+                        </a>
                         <a href="/backtest" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'backtest' in request.endpoint %}bg-gray-800{% endif %}">
                             Backtest
                         </a>
                         <a href="/analytics" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'analytics' in request.endpoint %}bg-gray-800{% endif %}">
                             Analytics
                         </a>
-                        {% endif %}
-                        {% if is_viewing_admin %}
+                        {% if g.user.is_admin %}
                         <a href="/logs" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'logs' in request.endpoint %}bg-gray-800{% endif %}">
                             Logs
                         </a>
@@ -82,9 +80,6 @@
                             Stats
                         </a>
                         {% endif %}
-                        <a href="/portfolio" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'portfolio' in request.endpoint %}bg-gray-800{% endif %}">
-                            Portfolio
-                        </a>
                     </div>
                 </div>
                 <div class="flex items-center space-x-4">

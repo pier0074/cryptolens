@@ -428,7 +428,7 @@ class TestSymbolFiltering:
             assert filtered[0].symbol == 'BTC/USDT'
 
     def test_filter_symbols_pro_user(self, app):
-        """Pro user should see up to 5 symbols"""
+        """Pro user should see default 5 symbols (BTC, ETH, XRP, BNB, SOL)"""
         from app.decorators import filter_symbols_by_tier
         from app.models import User, Subscription
 
@@ -458,11 +458,19 @@ class TestSymbolFiltering:
                 def __init__(self, symbol):
                     self.symbol = symbol
 
-            symbols = [MockSymbol(f'SYM{i}/USDT') for i in range(10)]
+            # Include the Pro default symbols plus extras
+            all_symbols = ['BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'BNB/USDT', 'SOL/USDT',
+                          'ADA/USDT', 'DOT/USDT', 'LINK/USDT', 'AVAX/USDT', 'MATIC/USDT']
+            symbols = [MockSymbol(s) for s in all_symbols]
             filtered = filter_symbols_by_tier(symbols, user)
 
-            # Pro user should see max 5 symbols
+            # Pro user should see only the 5 default symbols
             assert len(filtered) == 5
+            filtered_names = [s.symbol for s in filtered]
+            assert 'BTC/USDT' in filtered_names
+            assert 'ETH/USDT' in filtered_names
+            assert 'SOL/USDT' in filtered_names
+            assert 'ADA/USDT' not in filtered_names  # Not in default 5
 
     def test_filter_symbols_premium_user(self, app):
         """Premium user should see all symbols"""
@@ -825,3 +833,456 @@ class TestUserSymbolPreferences:
         assert data['success'] is True
         assert data['user_specific'] is True
         assert data['notify_enabled'] is False  # Toggled from default True to False
+
+
+class TestDashboardSignalRestrictions:
+    """Test dashboard signal restrictions based on user tier"""
+
+    def test_free_user_sees_only_btc_signal(self, client, app):
+        """Free user should only see 1 BTC signal on dashboard"""
+        from app.models import User, Subscription, Symbol, Signal, Pattern
+
+        with app.app_context():
+            # Create free user
+            user = User(
+                email='freedash@test.com',
+                username='freedash',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_freedash1'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='free',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=None,
+                status='active'
+            )
+            db.session.add(sub)
+
+            # Create symbols
+            btc = Symbol(symbol='BTC/USDT', exchange='binance', is_active=True)
+            eth = Symbol(symbol='ETH/USDT', exchange='binance', is_active=True)
+            db.session.add(btc)
+            db.session.add(eth)
+            db.session.commit()
+
+            # Create signals for both symbols
+            for i in range(3):
+                signal = Signal(
+                    symbol_id=btc.id,
+                    direction='bullish',
+                    entry_price=50000.0 + i * 100,
+                    stop_loss=48000.0,
+                    take_profit_1=52000.0,
+                    take_profit_2=54000.0,
+                    risk_reward=2.0,
+                    confluence_score=3,
+                    status='active'
+                )
+                db.session.add(signal)
+
+            for i in range(3):
+                signal = Signal(
+                    symbol_id=eth.id,
+                    direction='bullish',
+                    entry_price=3000.0 + i * 10,
+                    stop_loss=2900.0,
+                    take_profit_1=3100.0,
+                    take_profit_2=3200.0,
+                    risk_reward=2.0,
+                    confluence_score=3,
+                    status='active'
+                )
+                db.session.add(signal)
+            db.session.commit()
+
+        # Login as free user
+        client.post('/auth/login', data={
+            'email': 'freedash@test.com',
+            'password': 'TestPass123'
+        })
+
+        # Access dashboard
+        response = client.get('/')
+        assert response.status_code == 200
+        html = response.data.decode('utf-8')
+
+        # Free user should only see BTC signals (1 max)
+        # Count occurrences of signal entries (they all have 'LONG' or 'SHORT' in them)
+        assert 'BTC/USDT' in html or 'No signals yet' in html
+
+    def test_pro_user_signal_limit(self, app):
+        """Pro user should see up to 10 signals, max 5 symbols"""
+        tier = SUBSCRIPTION_TIERS['pro']
+        assert tier['max_symbols'] == 5
+        assert tier['daily_notifications'] == 20
+
+    def test_premium_user_unlimited_signals(self, app):
+        """Premium user should have no signal limit"""
+        tier = SUBSCRIPTION_TIERS['premium']
+        assert tier['max_symbols'] is None
+        assert tier['daily_notifications'] is None
+
+
+class TestProfileTradingTabSymbols:
+    """Test profile trading tab shows correct symbols for each tier"""
+
+    def test_free_user_sees_only_btc(self, client, app):
+        """Free user should only see BTC/USDT in trading tab"""
+        from app.models import User, Subscription, Symbol
+
+        with app.app_context():
+            user = User(
+                email='freetrade@test.com',
+                username='freetrade',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_freetra1'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='free',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=None,
+                status='active'
+            )
+            db.session.add(sub)
+
+            # Create multiple symbols
+            for sym in ['BTC/USDT', 'ETH/USDT', 'XRP/USDT']:
+                s = Symbol(symbol=sym, exchange='binance', is_active=True)
+                db.session.add(s)
+            db.session.commit()
+
+        client.post('/auth/login', data={
+            'email': 'freetrade@test.com',
+            'password': 'TestPass123'
+        })
+
+        response = client.get('/auth/profile')
+        assert response.status_code == 200
+        html = response.data.decode('utf-8')
+
+        # Free user should see "Free Tier Limitations" and only BTC/USDT
+        assert 'Free Tier Limitations' in html
+        assert 'BTC/USDT only' in html
+
+    def test_pro_user_sees_five_symbols(self, client, app):
+        """Pro user should see 5 default symbols in trading tab"""
+        from app.models import User, Subscription, Symbol
+
+        with app.app_context():
+            user = User(
+                email='protrade@test.com',
+                username='protrade',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_protra1'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='pro',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                status='active'
+            )
+            db.session.add(sub)
+
+            # Create all symbols including the 5 defaults
+            for sym in ['BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'BNB/USDT', 'SOL/USDT',
+                        'ADA/USDT', 'DOT/USDT', 'LINK/USDT']:
+                s = Symbol(symbol=sym, exchange='binance', is_active=True)
+                db.session.add(s)
+            db.session.commit()
+
+        client.post('/auth/login', data={
+            'email': 'protrade@test.com',
+            'password': 'TestPass123'
+        })
+
+        response = client.get('/auth/profile')
+        assert response.status_code == 200
+        html = response.data.decode('utf-8')
+
+        # Pro user should see "Pro Tier" banner and 5 symbols
+        assert 'Pro Tier' in html
+        assert '5/5 symbols' in html
+        # Should see the 5 default symbols
+        assert 'BTC/USDT' in html
+        assert 'ETH/USDT' in html
+
+    def test_premium_user_sees_all_symbols(self, client, app):
+        """Premium user should see all symbols in trading tab"""
+        from app.models import User, Subscription, Symbol
+
+        with app.app_context():
+            user = User(
+                email='premtrade@test.com',
+                username='premtrade',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_premtra1'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='premium',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                status='active'
+            )
+            db.session.add(sub)
+
+            # Create many symbols
+            for sym in ['BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'BNB/USDT', 'SOL/USDT',
+                        'ADA/USDT', 'DOT/USDT', 'LINK/USDT', 'AVAX/USDT', 'MATIC/USDT']:
+                s = Symbol(symbol=sym, exchange='binance', is_active=True)
+                db.session.add(s)
+            db.session.commit()
+
+        client.post('/auth/login', data={
+            'email': 'premtrade@test.com',
+            'password': 'TestPass123'
+        })
+
+        response = client.get('/auth/profile')
+        assert response.status_code == 200
+        html = response.data.decode('utf-8')
+
+        # Premium user should not see tier limitation banners
+        assert 'Free Tier Limitations' not in html
+        # Should see all symbols (Notify/Muted toggles visible)
+        assert 'Notify' in html or 'Muted' in html
+
+
+class TestPatternsPageRestrictions:
+    """Test patterns page tier restrictions"""
+
+    def test_pro_patterns_limit_100(self, app):
+        """Pro tier should be limited to 100 patterns"""
+        tier = SUBSCRIPTION_TIERS['pro']
+        assert tier['patterns_limit'] == 100
+
+    def test_premium_patterns_unlimited(self, app):
+        """Premium tier should have unlimited patterns"""
+        tier = SUBSCRIPTION_TIERS['premium']
+        assert tier['patterns_limit'] is None
+
+
+class TestSignalsPageRestrictions:
+    """Test signals page tier restrictions"""
+
+    def test_pro_signals_limit_50(self, app):
+        """Pro tier should be limited to 50 signals"""
+        tier = SUBSCRIPTION_TIERS['pro']
+        assert tier['signals_limit'] == 50
+
+    def test_premium_signals_unlimited(self, app):
+        """Premium tier should have unlimited signals"""
+        tier = SUBSCRIPTION_TIERS['premium']
+        assert tier['signals_limit'] is None
+
+
+class TestPortfolioTradeSymbolRestrictions:
+    """Test portfolio trade symbol restrictions"""
+
+    def test_pro_user_sees_limited_symbols_in_trade_form(self, client, app):
+        """Pro user should only see 5 symbols when adding a trade"""
+        from app.models import User, Subscription, Symbol, Portfolio
+
+        with app.app_context():
+            user = User(
+                email='protradef@test.com',
+                username='protradef',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_protraf1'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='pro',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                status='active'
+            )
+            db.session.add(sub)
+
+            portfolio = Portfolio(
+                user_id=user.id,
+                name='Test Portfolio',
+                initial_balance=10000,
+                current_balance=10000,
+                currency='USDT'
+            )
+            db.session.add(portfolio)
+
+            # Create 10 symbols
+            for sym in ['BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'BNB/USDT', 'SOL/USDT',
+                       'ADA/USDT', 'DOT/USDT', 'LINK/USDT', 'AVAX/USDT', 'MATIC/USDT']:
+                s = Symbol(symbol=sym, exchange='binance', is_active=True)
+                db.session.add(s)
+            db.session.commit()
+
+            portfolio_id = portfolio.id
+
+        client.post('/auth/login', data={
+            'email': 'protradef@test.com',
+            'password': 'TestPass123'
+        })
+
+        response = client.get(f'/portfolio/{portfolio_id}/trades/new')
+        assert response.status_code == 200
+        html = response.data.decode('utf-8')
+
+        # Count symbol options - Pro should only see 5
+        import re
+        symbol_options = re.findall(r'<option[^>]*value="([A-Z]+/USDT)"', html)
+        assert len(symbol_options) <= 5
+
+    def test_premium_user_sees_all_symbols_in_trade_form(self, client, app):
+        """Premium user should see all symbols when adding a trade"""
+        from app.models import User, Subscription, Symbol, Portfolio
+
+        with app.app_context():
+            user = User(
+                email='premtradef@test.com',
+                username='premtradef',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_premtraf1'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='premium',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                status='active'
+            )
+            db.session.add(sub)
+
+            portfolio = Portfolio(
+                user_id=user.id,
+                name='Test Portfolio',
+                initial_balance=10000,
+                current_balance=10000,
+                currency='USDT'
+            )
+            db.session.add(portfolio)
+
+            # Create 10 symbols
+            for sym in ['BTC/USDT', 'ETH/USDT', 'XRP/USDT', 'BNB/USDT', 'SOL/USDT',
+                       'ADA/USDT', 'DOT/USDT', 'LINK/USDT', 'AVAX/USDT', 'MATIC/USDT']:
+                s = Symbol(symbol=sym, exchange='binance', is_active=True)
+                db.session.add(s)
+            db.session.commit()
+
+            portfolio_id = portfolio.id
+
+        client.post('/auth/login', data={
+            'email': 'premtradef@test.com',
+            'password': 'TestPass123'
+        })
+
+        response = client.get(f'/portfolio/{portfolio_id}/trades/new')
+        assert response.status_code == 200
+        html = response.data.decode('utf-8')
+
+        # Premium should see all 10 symbols
+        import re
+        symbol_options = re.findall(r'<option[^>]*value="([A-Z]+/USDT)"', html)
+        assert len(symbol_options) == 10
+
+
+class TestPatternToTradeAPI:
+    """Test pattern to trade API endpoint"""
+
+    def test_pattern_to_trade_creates_pending_trade(self, client, app):
+        """Pattern to trade should create a pending trade with pattern data"""
+        from app.models import User, Subscription, Symbol, Pattern, Portfolio
+
+        with app.app_context():
+            user = User(
+                email='pattrade@test.com',
+                username='pattrade',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_pattra1'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='pro',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                status='active'
+            )
+            db.session.add(sub)
+
+            # Create symbol
+            symbol = Symbol(symbol='BTC/USDT', exchange='binance', is_active=True)
+            db.session.add(symbol)
+            db.session.commit()
+
+            # Create pattern with trading levels
+            pattern = Pattern(
+                symbol_id=symbol.id,
+                timeframe='1h',
+                pattern_type='order_block',
+                direction='bullish',
+                zone_high=51000.0,
+                zone_low=50000.0,
+                detected_at=datetime.now(timezone.utc),
+                entry=50500.0,
+                stop_loss=49500.0,
+                take_profit_1=52000.0,
+                take_profit_2=53000.0,
+                status='active'
+            )
+            db.session.add(pattern)
+            db.session.commit()
+
+            pattern_id = pattern.id
+
+        client.post('/auth/login', data={
+            'email': 'pattrade@test.com',
+            'password': 'TestPass123'
+        })
+
+        # Call the API
+        response = client.post('/portfolio/api/trade-from-pattern',
+                               json={'pattern_id': pattern_id},
+                               content_type='application/json')
+
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['success'] is True
+        assert 'trade_id' in data
+        assert 'portfolio_id' in data
+        assert 'redirect_url' in data

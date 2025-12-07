@@ -188,6 +188,11 @@
                         {% if signal.direction == 'bullish' %}🟢 LONG{% else %}🔴 SHORT{% endif %}
                     </span>
                     <span class="font-medium">{{ signal.symbol_obj.symbol if signal.symbol_obj else 'N/A' }}</span>
+                    {% if signal.pattern_obj %}
+                    <span class="text-xs px-2 py-1 rounded bg-purple-900/50 text-purple-200">
+                        {{ signal.pattern_obj.pattern_type|replace('_', ' ')|title }}
+                    </span>
+                    {% endif %}
                     <span class="text-xs text-muted">{{ signal.created_at.strftime('%Y-%m-%d %H:%M') if signal.created_at else '' }}</span>
                 </div>
                 <div class="text-sm text-muted">

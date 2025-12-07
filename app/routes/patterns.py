@@ -3,7 +3,7 @@ import json
 from app.models import Symbol, Pattern, Candle, StatsCache
 from app.config import Config
 from app import db
-from app.decorators import feature_required, login_required, limit_query_results, get_current_user, check_feature_limit
+from app.decorators import feature_required, login_required, limit_query_results, get_current_user, check_feature_limit, filter_symbols_by_tier
 
 
 def _get_cached_prices():
@@ -26,16 +26,26 @@ PATTERNS_PER_PAGE = 50
 @feature_required('patterns_page')
 def index():
     """Pattern list and visualization with pagination (Pro+ required)"""
+    user = get_current_user()
     symbol_filter = request.args.get('symbol', None)
     timeframe_filter = request.args.get('timeframe', None)
     status_filter = request.args.get('status', 'active')
     page = request.args.get('page', 1, type=int)
 
+    # Get symbols filtered by tier (Pro: 5, Premium: all)
+    all_symbols = Symbol.query.filter_by(is_active=True).all()
+    allowed_symbols = filter_symbols_by_tier(all_symbols, user)
+    allowed_symbol_ids = [s.id for s in allowed_symbols]
+
     query = Pattern.query
+
+    # Filter patterns to only allowed symbols
+    if allowed_symbol_ids:
+        query = query.filter(Pattern.symbol_id.in_(allowed_symbol_ids))
 
     if symbol_filter:
         symbol = Symbol.query.filter_by(symbol=symbol_filter).first()
-        if symbol:
+        if symbol and symbol.id in allowed_symbol_ids:
             query = query.filter_by(symbol_id=symbol.id)
 
     if timeframe_filter:
@@ -59,7 +69,10 @@ def index():
         page = min(page, max_pages) if max_pages > 0 else 1
 
         # Paginate normally but only return items within the limit
-        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+        orig_pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+        # Cap the total to the tier limit for display (create wrapper since properties are read-only)
+        actual_total = min(orig_pagination.total, patterns_limit)
 
         # Ensure we don't exceed the tier limit
         total_offset = (page - 1) * per_page
@@ -67,12 +80,38 @@ def index():
             patterns = []
         else:
             remaining = patterns_limit - total_offset
-            patterns = pagination.items[:remaining]
+            patterns = orig_pagination.items[:remaining]
+
+        # Create a simple wrapper with capped values for template
+        class PaginationWrapper:
+            def __init__(self, orig, total, pages):
+                self._orig = orig
+                self.total = total
+                self.pages = pages
+                self.page = orig.page
+                self.per_page = orig.per_page
+                self.has_prev = orig.has_prev
+                self.has_next = page < pages
+                self.prev_num = orig.prev_num
+                self.next_num = orig.next_num if page < pages else None
+
+            def iter_pages(self, left_edge=2, left_current=2, right_current=5, right_edge=2):
+                last = 0
+                for num in range(1, self.pages + 1):
+                    if num <= left_edge or \
+                       (self.page - left_current <= num <= self.page + right_current) or \
+                       num > self.pages - right_edge:
+                        if last + 1 != num:
+                            yield None
+                        yield num
+                        last = num
+
+        pagination = PaginationWrapper(orig_pagination, actual_total, max_pages)
     else:
         # Unlimited - normal pagination
         pagination = query.paginate(page=page, per_page=PATTERNS_PER_PAGE, error_out=False)
         patterns = pagination.items
-    symbols = Symbol.query.filter_by(is_active=True).all()
+    symbols = allowed_symbols  # Only show allowed symbols in dropdown
 
     # Get current prices from cache (fast - ~1ms instead of ~3s)
     cached_prices = _get_cached_prices()

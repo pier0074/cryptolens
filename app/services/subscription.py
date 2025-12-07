@@ -62,15 +62,16 @@ def create_subscription(user_id: int, plan: str = 'free') -> Subscription:
     return subscription
 
 
-def extend_subscription(user_id: int, plan: str, custom_days: int = None) -> Subscription:
+def extend_subscription(user_id: int, plan: str, custom_days: int = None, lifetime: bool = False) -> Subscription:
     """
     Extend an existing subscription.
     Adds days to current expiry (or from now if expired).
 
     Args:
         user_id: User ID
-        plan: Plan type to add
+        plan: Plan type to add (tier: 'free', 'pro', 'premium')
         custom_days: Optional custom number of days (overrides plan default)
+        lifetime: If True, set subscription to never expire
 
     Returns:
         Updated Subscription object
@@ -93,9 +94,9 @@ def extend_subscription(user_id: int, plan: str, custom_days: int = None) -> Sub
     plan_config = SUBSCRIPTION_PLANS[plan]
     now = _utc_now_naive()
 
-    # Lifetime plan
-    if plan_config['days'] is None:
-        subscription.plan = 'lifetime'
+    # Lifetime subscription (explicit lifetime flag or plan has no days)
+    if lifetime or plan_config['days'] is None:
+        subscription.plan = plan  # Keep the selected tier (pro, premium, etc.)
         subscription.expires_at = None
         subscription.status = 'active'
         subscription.cancelled_at = None
@@ -365,6 +366,12 @@ def get_subscription_stats() -> Dict:
     # In grace period
     in_grace = len(get_in_grace_period())
 
+    # Lifetime subscriptions (no expiry date)
+    lifetime = Subscription.query.filter(
+        Subscription.expires_at.is_(None),
+        Subscription.status == 'active'
+    ).count()
+
     return {
         'total': total,
         'active': active,
@@ -374,6 +381,7 @@ def get_subscription_stats() -> Dict:
         'by_plan': plans,
         'expiring_soon': expiring_soon,
         'in_grace_period': in_grace,
+        'lifetime': lifetime,
     }
 
 

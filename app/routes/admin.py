@@ -252,14 +252,19 @@ def modify_subscription(user_id):
     plan = request.form.get('plan', 'monthly')
     custom_days = request.form.get('custom_days')
 
+    # Handle lifetime option
+    is_lifetime = custom_days == 'lifetime'
+    days_value = None if is_lifetime else (int(custom_days) if custom_days else None)
+
     try:
         if action == 'create':
             # Create new subscription (cancel existing first)
             cancel_subscription(user_id)
-            extend_subscription(user_id, plan, custom_days=int(custom_days) if custom_days else None)
-            flash(f'New {plan} subscription created.', 'success')
+            extend_subscription(user_id, plan, custom_days=days_value, lifetime=is_lifetime)
+            duration_msg = 'lifetime' if is_lifetime else f'{days_value or 30} days'
+            flash(f'New {plan} subscription created ({duration_msg}).', 'success')
         elif action == 'extend':
-            extend_subscription(user_id, plan, custom_days=int(custom_days) if custom_days else None)
+            extend_subscription(user_id, plan, custom_days=days_value, lifetime=is_lifetime)
             flash(f'Subscription extended with {plan} plan.', 'success')
         elif action == 'cancel':
             cancel_subscription(user_id)
@@ -816,6 +821,42 @@ def broadcast_detail(broadcast_id):
 
     broadcast_notif = BroadcastNotification.query.get_or_404(broadcast_id)
     return render_template('admin/broadcast_detail.html', broadcast=broadcast_notif)
+
+
+@admin_bp.route('/notifications/test-connection')
+@admin_required
+def test_ntfy_connection():
+    """Test NTFY server connectivity"""
+    from app.services.notifier import test_ntfy_connection as do_test
+    from app.config import Config
+
+    result = do_test()
+
+    # Also check user topics
+    users = User.query.filter(
+        User.is_active == True,
+        User.is_verified == True,
+        User.ntfy_topic.isnot(None),
+        User.notify_enabled == True
+    ).all()
+
+    user_info = []
+    for u in users:
+        topic_valid = u.ntfy_topic and len(u.ntfy_topic) >= 3
+        user_info.append({
+            'username': u.username,
+            'email': u.email,
+            'ntfy_topic': u.ntfy_topic,
+            'topic_valid': topic_valid,
+            'notify_enabled': u.notify_enabled
+        })
+
+    return jsonify({
+        'ntfy_test': result,
+        'ntfy_url': Config.NTFY_URL,
+        'eligible_users': len(user_info),
+        'users': user_info
+    })
 
 
 # ----- SCHEDULED -----

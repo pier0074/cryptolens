@@ -70,9 +70,16 @@ def send_broadcast(broadcast_id: int) -> dict:
 
     successful = 0
     failed = 0
+    errors = []
 
     for user in users:
         try:
+            # Validate topic format
+            if not user.ntfy_topic or len(user.ntfy_topic) < 3:
+                errors.append(f"User {user.username}: invalid topic '{user.ntfy_topic}'")
+                failed += 1
+                continue
+
             success = send_notification(
                 topic=user.ntfy_topic,
                 title=broadcast.title,
@@ -83,9 +90,12 @@ def send_broadcast(broadcast_id: int) -> dict:
             if success:
                 successful += 1
             else:
+                errors.append(f"User {user.username} ({user.ntfy_topic}): send failed")
                 failed += 1
         except Exception as e:
-            logger.error(f"Failed to send broadcast to {user.ntfy_topic}: {e}")
+            error_msg = f"User {user.username} ({user.ntfy_topic}): {str(e)}"
+            logger.error(f"Failed to send broadcast: {error_msg}")
+            errors.append(error_msg)
             failed += 1
 
     # Update broadcast record
@@ -94,10 +104,15 @@ def send_broadcast(broadcast_id: int) -> dict:
     broadcast.status = 'completed' if failed == 0 else 'completed_with_errors'
     db.session.commit()
 
+    # Log errors for debugging
+    if errors:
+        logger.warning(f"Broadcast {broadcast_id} errors: {'; '.join(errors[:5])}")
+
     return {
         'total': len(users),
         'successful': successful,
-        'failed': failed
+        'failed': failed,
+        'errors': errors[:10]  # Return first 10 errors for debugging
     }
 
 

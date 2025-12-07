@@ -9,7 +9,7 @@ from app.models import (
     TRADE_MOODS, TRADE_STATUSES
 )
 from app import db
-from app.decorators import login_required, feature_required, check_feature_limit, get_current_user
+from app.decorators import login_required, feature_required, check_feature_limit, get_current_user, filter_symbols_by_tier
 
 portfolio_bp = Blueprint('portfolio', __name__)
 
@@ -377,8 +377,9 @@ def new_trade(portfolio_id):
             return redirect(url_for('portfolio.trade_detail', portfolio_id=portfolio_id, trade_id=trade.id))
         except ValidationError as e:
             flash(str(e), 'error')
-            # Re-render form with error
-            symbols = Symbol.query.filter_by(is_active=True).all()
+            # Re-render form with error - filter symbols by tier
+            all_symbols = Symbol.query.filter_by(is_active=True).all()
+            symbols = filter_symbols_by_tier(all_symbols, user)
             current_prices = _get_current_prices()
             return render_template('portfolio/trade_form.html',
                                   portfolio=portfolio,
@@ -388,8 +389,9 @@ def new_trade(portfolio_id):
                                   is_edit=False,
                                   error=str(e))
 
-    # Get symbols and current prices
-    symbols = Symbol.query.filter_by(is_active=True).all()
+    # Get symbols filtered by tier and current prices
+    all_symbols = Symbol.query.filter_by(is_active=True).all()
+    symbols = filter_symbols_by_tier(all_symbols, user)
     current_prices = _get_current_prices()
 
     return render_template('portfolio/trade_form.html',
@@ -531,13 +533,20 @@ def close_trade_market(portfolio_id, trade_id):
 
 
 @portfolio_bp.route('/<int:portfolio_id>/trades/<int:trade_id>/edit', methods=['GET', 'POST'])
+@login_required
+@feature_required('portfolio')
 def edit_trade(portfolio_id, trade_id):
     """Edit trade details"""
+    user = get_current_user()
     portfolio = db.session.get(Portfolio, portfolio_id)
     trade = db.session.get(Trade, trade_id)
 
     if not portfolio or not trade or trade.portfolio_id != portfolio_id:
         abort(404)
+
+    # Check ownership
+    if portfolio.user_id is not None and portfolio.user_id != user.id:
+        abort(403)
 
     if request.method == 'POST':
         data = request.form
@@ -563,7 +572,9 @@ def edit_trade(portfolio_id, trade_id):
         db.session.commit()
         return redirect(url_for('portfolio.trade_detail', portfolio_id=portfolio_id, trade_id=trade_id))
 
-    symbols = Symbol.query.filter_by(is_active=True).all()
+    # Get symbols filtered by tier
+    all_symbols = Symbol.query.filter_by(is_active=True).all()
+    symbols = filter_symbols_by_tier(all_symbols, user)
     current_prices = _get_current_prices()
 
     return render_template('portfolio/trade_form.html',
@@ -714,8 +725,6 @@ def api_portfolio_trades(portfolio_id):
 def api_trade_from_pattern():
     """Create a trade from a pattern with pre-filled data"""
     from app.models import Pattern
-    from app.services.trading import get_trading_levels_for_pattern
-    from app.routes.patterns import get_candles_df
 
     user = get_current_user()
 
@@ -762,9 +771,10 @@ def api_trade_from_pattern():
         db.session.add(portfolio)
         db.session.commit()
 
-    # Get trading levels for this pattern
-    df = get_candles_df(pattern.symbol_id, pattern.timeframe)
-    levels = get_trading_levels_for_pattern(pattern, df)
+    # Use pattern's stored trading levels (already calculated when pattern was detected)
+    entry_price = pattern.entry or pattern.end_price
+    stop_loss = pattern.stop_loss
+    take_profit = pattern.take_profit_2 or pattern.take_profit_1
 
     # Create the trade with status 'pending' (user needs to confirm)
     trade = Trade(
@@ -773,10 +783,10 @@ def api_trade_from_pattern():
         direction='long' if pattern.direction == 'bullish' else 'short',
         timeframe=pattern.timeframe,
         pattern_type=pattern.pattern_type,
-        entry_price=levels['entry'],
+        entry_price=entry_price,
         entry_quantity=0,  # User must set this
-        stop_loss=levels['stop_loss'],
-        take_profit=levels['take_profit_2'],  # Use TP2 as default
+        stop_loss=stop_loss,
+        take_profit=take_profit,
         status='pending',
         setup_notes=f"Auto-created from {pattern.pattern_type} pattern on {pattern.timeframe}"
     )

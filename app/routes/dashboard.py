@@ -3,6 +3,7 @@ from app.models import Symbol, Pattern, Signal, Candle, SUBSCRIPTION_TIERS
 from app.config import Config
 from app.services.patterns import PATTERN_TYPES
 from app.decorators import login_required, feature_required, get_current_user, get_effective_tier, filter_symbols_by_tier
+from app import db
 from sqlalchemy import func
 from datetime import datetime, timedelta, timezone
 
@@ -70,15 +71,32 @@ def index():
             else:
                 matrix[symbol.symbol][tf] = None
 
-    # Get recent signals (filtered by allowed symbols)
+    # Get recent signals with tier-based restrictions
     symbol_ids = [s.id for s in symbols]
+    tier = get_effective_tier(user)
+
+    # Determine signal limit based on tier
+    if tier == 'free':
+        # Free: Only 1 recent signal, BTC only
+        signal_limit = 1
+    elif tier == 'pro':
+        # Pro: 5 symbols max, 10 recent signals shown
+        signal_limit = 10
+    else:
+        # Premium/Admin: No limit
+        signal_limit = 10  # Still cap UI at 10 for performance
+
     recent_signals = Signal.query.filter(
         Signal.symbol_id.in_(symbol_ids)
-    ).order_by(Signal.created_at.desc()).limit(10).all()
+    ).order_by(Signal.created_at.desc()).limit(signal_limit).all()
 
-    # Enrich signals with symbol info
+    # Enrich signals with symbol and pattern info
     for signal in recent_signals:
-        signal.symbol_obj = Symbol.query.get(signal.symbol_id)
+        signal.symbol_obj = db.session.get(Symbol, signal.symbol_id)
+        if signal.pattern_id:
+            signal.pattern_obj = db.session.get(Pattern, signal.pattern_id)
+        else:
+            signal.pattern_obj = None
 
     # Filter pattern types shown in legend based on tier
     display_pattern_types = allowed_pattern_types if allowed_pattern_types else PATTERN_TYPES

@@ -6,6 +6,22 @@
 <div class="max-w-6xl mx-auto">
     <h1 class="text-3xl font-bold mb-8">Admin Dashboard</h1>
 
+    <!-- Quick Links (Buttons) -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <a href="{{ url_for('admin.users') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold">Manage Users</h3>
+        </a>
+        <a href="{{ url_for('admin.subscriptions') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold">Manage Subscriptions</h3>
+        </a>
+        <a href="{{ url_for('admin.crons') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold">Cron Jobs</h3>
+        </a>
+        <a href="{{ url_for('admin.notifications') }}" class="bg-blue-900/30 border border-blue-700 rounded-lg p-4 hover:bg-blue-900/50 transition text-center">
+            <h3 class="font-semibold text-blue-400">Send Notifications</h3>
+        </a>
+    </div>
+
     <!-- Stats Grid -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
         <div class="bg-card rounded-lg p-6">
@@ -33,7 +49,7 @@
     <div class="bg-card rounded-lg p-6 mb-8">
         <h2 class="text-xl font-semibold mb-4">Subscription Breakdown</h2>
 
-        <div class="grid grid-cols-3 gap-4">
+        <div class="grid grid-cols-4 gap-4">
             <div>
                 <p class="text-gray-400 text-sm">Free</p>
                 <p class="text-2xl font-bold">{{ stats.by_plan.free }}</p>
@@ -45,6 +61,10 @@
             <div>
                 <p class="text-gray-400 text-sm">Premium</p>
                 <p class="text-2xl font-bold text-purple-400">{{ stats.by_plan.premium }}</p>
+            </div>
+            <div>
+                <p class="text-gray-400 text-sm">Lifetime</p>
+                <p class="text-2xl font-bold text-green-400">{{ stats.lifetime }}</p>
             </div>
         </div>
 
@@ -110,38 +130,22 @@
         {% endif %}
     </div>
 
-    <!-- Quick Links -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
-        <a href="{{ url_for('admin.users') }}" class="bg-card rounded-lg p-6 hover:bg-gray-700 transition">
-            <h3 class="text-lg font-semibold">Manage Users</h3>
-            <p class="text-gray-400 text-sm">View and manage user accounts</p>
+    <!-- Secondary Links -->
+    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
+        <a href="{{ url_for('admin.notification_templates') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold">Templates</h3>
         </a>
-
-        <a href="{{ url_for('admin.subscriptions') }}" class="bg-card rounded-lg p-6 hover:bg-gray-700 transition">
-            <h3 class="text-lg font-semibold">Manage Subscriptions</h3>
-            <p class="text-gray-400 text-sm">View and modify subscriptions</p>
+        <a href="{{ url_for('admin.create_user') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold">Create User</h3>
         </a>
-
-        <a href="{{ url_for('admin.crons') }}" class="bg-card rounded-lg p-6 hover:bg-gray-700 transition">
-            <h3 class="text-lg font-semibold">Cron Jobs</h3>
-            <p class="text-gray-400 text-sm">Monitor scheduled tasks and history</p>
+        <a href="{{ url_for('admin.errors') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold">Error Logs</h3>
         </a>
-    </div>
-
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <a href="{{ url_for('admin.notifications') }}" class="bg-blue-900/30 border border-blue-700 rounded-lg p-6 hover:bg-blue-900/50 transition">
-            <h3 class="text-lg font-semibold text-blue-400">Send Notifications</h3>
-            <p class="text-blue-200/70 text-sm">Broadcast messages to users</p>
+        <a href="{{ url_for('docs.swagger_ui') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold">API Docs</h3>
         </a>
-
-        <a href="{{ url_for('admin.notification_templates') }}" class="bg-card rounded-lg p-6 hover:bg-gray-700 transition">
-            <h3 class="text-lg font-semibold">Notification Templates</h3>
-            <p class="text-gray-400 text-sm">Create reusable message templates</p>
-        </a>
-
-        <a href="{{ url_for('admin.create_user') }}" class="bg-card rounded-lg p-6 hover:bg-gray-700 transition">
-            <h3 class="text-lg font-semibold">Create User</h3>
-            <p class="text-gray-400 text-sm">Add a new user account</p>
+        <a href="{{ url_for('settings.index') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold">Settings</h3>
         </a>
     </div>
 </div>
