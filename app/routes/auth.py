@@ -56,6 +56,12 @@ def register():
         username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
         confirm = request.form.get('confirm_password', '')
+        accept_terms = request.form.get('accept_terms')
+
+        # Validate terms acceptance
+        if not accept_terms:
+            flash('You must accept the Terms of Service and Privacy Policy to create an account.', 'error')
+            return render_template('auth/register.html', email=email, username=username)
 
         # Validate password confirmation
         if password != confirm:
