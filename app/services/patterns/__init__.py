@@ -1,10 +1,13 @@
 """
 Pattern Detection Package
 """
+import logging
 from app.services.patterns.base import PatternDetector
 from app.services.patterns.imbalance import ImbalanceDetector
 from app.services.patterns.order_block import OrderBlockDetector
 from app.services.patterns.liquidity import LiquiditySweepDetector
+
+logger = logging.getLogger(__name__)
 
 # All available pattern types
 PATTERN_TYPES = ['imbalance', 'order_block', 'liquidity_sweep']
@@ -147,7 +150,7 @@ def scan_all_patterns(pattern_types: list = None) -> dict:
             try:
                 df = get_candles_as_dataframe(symbol.symbol, tf, limit=200)
             except Exception as e:
-                print(f"Error loading candles for {symbol.symbol} {tf}: {e}")
+                logger.warning(f"Error loading candles for {symbol.symbol} {tf}: {e}")
                 continue
 
             # Pass to all detectors
@@ -159,7 +162,7 @@ def scan_all_patterns(pattern_types: list = None) -> dict:
                     results['by_type'][pattern_type] += count
                     results['by_symbol'][symbol.symbol] += count
                 except Exception as e:
-                    print(f"Error scanning {symbol.symbol} {tf} for {pattern_type}: {e}")
+                    logger.warning(f"Error scanning {symbol.symbol} {tf} for {pattern_type}: {e}")
 
     return results
 

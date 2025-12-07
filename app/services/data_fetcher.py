@@ -140,7 +140,6 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
     Returns:
         Total candles saved
     """
-    import sys
     exchange = get_exchange()
 
     # Calculate start timestamp (timezone-aware)
@@ -158,8 +157,7 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
     total_batches = max(1, (total_candles_needed // batch_size) + 1)
 
     if verbose:
-        print(f"    📊 {symbol} - Fetching ~{total_candles_needed:,} candles in {total_batches} batches...")
-        sys.stdout.flush()
+        logger.info(f"{symbol} - Fetching ~{total_candles_needed:,} candles in {total_batches} batches...")
 
     total_new = 0
     total_api = 0
@@ -181,8 +179,7 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
                 empty_batches += 1
                 if empty_batches >= 3:
                     if verbose:
-                        print(f"    ℹ️  {symbol}: No more data from API, stopping early")
-                        sys.stdout.flush()
+                        logger.info(f"{symbol}: No more data from API, stopping early")
                     break
             else:
                 empty_batches = 0
@@ -197,8 +194,7 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
                 if pct >= last_progress + 10 or batch_num % 50 == 0:
                     last_progress = pct
                     status = f"new: {total_new:,}" if new_count > 0 else "exists"
-                    print(f"    📈 {symbol}: {batch_num}/{total_batches} ({pct}%) [{status}]")
-                    sys.stdout.flush()
+                    logger.info(f"{symbol}: {batch_num}/{total_batches} ({pct}%) [{status}]")
 
             # Move to next batch
             current_since += batch_size * candle_duration
@@ -212,8 +208,7 @@ def fetch_historical(symbol: str, timeframe: str, days: int = 30, progress_callb
             continue
 
     if verbose:
-        print(f"    ✅ {symbol}: Done! {total_new:,} new candles ({total_api:,} from API)")
-        sys.stdout.flush()
+        logger.info(f"{symbol}: Done! {total_new:,} new candles ({total_api:,} from API)")
 
     return total_new
 
