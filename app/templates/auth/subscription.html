@@ -116,11 +116,11 @@
             <ul class="text-sm text-gray-300 mb-6 space-y-2">
                 {% if plan_key == 'free' %}
                 <li>• BTC/USDT only</li>
-                <li>• 3 notifications/day</li>
+                <li>• 1 notification/day</li>
                 <li>• Basic dashboard</li>
                 {% elif plan_key == 'pro' %}
-                <li>• Up to 10 symbols</li>
-                <li>• 100 notifications/day</li>
+                <li>• 5 symbols</li>
+                <li>• 20 notifications/day</li>
                 <li>• Full patterns & signals</li>
                 <li>• 1 portfolio</li>
                 {% elif plan_key == 'premium' %}
@@ -133,6 +133,11 @@
                 {% endif %}
             </ul>
 
+            {# Define tier order for comparison #}
+            {% set tier_order = {'free': 0, 'pro': 1, 'premium': 2} %}
+            {% set current_tier_level = tier_order.get(subscription.plan, 0) %}
+            {% set plan_tier_level = tier_order.get(plan_key, 0) %}
+
             {% if subscription.plan == plan_key %}
                 <span class="block w-full text-center px-4 py-2 bg-blue-600 text-white rounded-lg text-sm">Current Plan</span>
             {% elif g.user.is_admin %}
@@ -143,20 +148,20 @@
                         Switch to {{ plan.name }}
                     </button>
                 </form>
+            {% elif plan_tier_level > current_tier_level %}
+                {# Upgrade available - link to payment page #}
+                <a href="{{ url_for('payments.upgrade') }}?plan={{ plan_key }}"
+                   class="block w-full text-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm transition-colors">
+                    Upgrade to {{ plan.name }}
+                </a>
             {% else %}
-                <button disabled class="w-full px-4 py-2 bg-gray-800 text-gray-500 rounded-lg text-sm cursor-not-allowed">
-                    Contact Admin
-                </button>
+                {# Downgrade - no button shown #}
             {% endif %}
         </div>
         {% endfor %}
     </div>
 
-    {% if not g.user.is_admin %}
-    <p class="mt-8 text-gray-400 text-sm">
-        To upgrade your subscription, please contact the administrator.
-    </p>
-    {% else %}
+    {% if g.user.is_admin %}
     <p class="mt-8 text-blue-400 text-sm">
         As an admin, you can switch plans directly for testing purposes.
     </p>
