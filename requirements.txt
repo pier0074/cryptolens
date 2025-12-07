@@ -23,6 +23,10 @@ numpy>=2.0.0
 
 # Notifications
 requests>=2.31.0
+aiohttp>=3.9.0  # Async HTTP for concurrent notifications
+
+# Background Jobs
+rq>=1.16.0  # Redis Queue for background task processing
 
 # Scheduler
 APScheduler>=3.10.4

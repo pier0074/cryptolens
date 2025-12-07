@@ -201,22 +201,22 @@ Generated from Security & Architecture Audit on December 6, 2025.
 
 ---
 
-### P4.3 Async Notifications
-- [ ] Use `asyncio.gather` for sending to multiple subscribers
-- [ ] Add connection pooling for HTTP requests
-- [ ] Consider background worker for notifications
+### P4.3 Async Notifications ✅ DONE
+- [x] Use `asyncio.gather` for sending to multiple subscribers
+- [x] Add connection pooling for HTTP requests (aiohttp TCPConnector)
+- [x] Integrate async sending into notifier.py
 
-**Files:** `app/services/notifier.py`
+**Files:** `app/services/async_notifier.py`, `app/services/notifier.py`
 
 ---
 
-### P4.4 Background Job Queue
-- [ ] Add Celery or RQ for background tasks
-- [ ] Move pattern scanning to background
-- [ ] Move notifications to background
-- [ ] Add job monitoring/retry
+### P4.4 Background Job Queue ✅ DONE
+- [x] Add RQ (Redis Queue) for background tasks
+- [x] Create job modules: notifications, scanner, maintenance
+- [x] Add queue configuration with priority levels (high, default, low)
+- [x] Add worker entry point script
 
-**Files:** `workers/`, `requirements.txt`
+**Files:** `app/jobs/`, `worker.py`, `requirements.txt`
 
 ---
 

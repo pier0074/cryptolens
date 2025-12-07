@@ -180,59 +180,77 @@ class TestNotificationDelivery:
             db.session.commit()
             return signal.id
 
-    @patch('app.services.notifier.send_notification')
-    def test_notification_sent_to_eligible_users(self, mock_send, app, sample_user, test_signal):
+    @patch('app.services.async_notifier.notify_subscribers_async')
+    def test_notification_sent_to_eligible_users(self, mock_async_send, app, sample_user, test_signal):
         """Test that notifications are sent to eligible users"""
         with app.app_context():
             # Enable per-user mode
             from app.models import Setting
             Setting.set('per_user_notifications', 'true')
 
-            mock_send.return_value = True
+            # Mock async notifier to return success
+            from app.services.async_notifier import AsyncNotificationResult
+            mock_async_send.return_value = {
+                'total': 1,
+                'success': 1,
+                'failed': 0,
+                'results': [AsyncNotificationResult(user_id=sample_user, success=True)]
+            }
 
             signal = db.session.get(Signal, test_signal)
             result = notify_all_subscribers(signal)
 
             assert result['total'] >= 1
             assert result['success'] >= 1
-            assert mock_send.called
+            assert mock_async_send.called
 
-    @patch('app.services.notifier.send_notification')
-    def test_notification_not_sent_to_unverified(self, mock_send, app, unverified_user, test_signal):
+    @patch('app.services.async_notifier.notify_subscribers_async')
+    def test_notification_not_sent_to_unverified(self, mock_async_send, app, unverified_user, test_signal):
         """Test that notifications are NOT sent to unverified users"""
         with app.app_context():
             from app.models import Setting
             Setting.set('per_user_notifications', 'true')
 
-            mock_send.return_value = True
+            # Track which subscribers were passed to async send
+            captured_subscribers = []
+
+            def capture_subscribers(subscribers, **kwargs):
+                captured_subscribers.extend(subscribers)
+                return {'total': 0, 'success': 0, 'failed': 0, 'results': []}
+
+            mock_async_send.side_effect = capture_subscribers
 
             signal = db.session.get(Signal, test_signal)
             result = notify_all_subscribers(signal)
 
             # Check that unverified user was not included
-            call_topics = [call[1]['topic'] if 'topic' in call[1] else call[0][0]
-                          for call in mock_send.call_args_list]
-
             user = db.session.get(User, unverified_user)
-            assert user.ntfy_topic not in call_topics
+            subscriber_topics = [s['ntfy_topic'] for s in captured_subscribers]
+            assert user.ntfy_topic not in subscriber_topics
 
-    @patch('app.services.notifier.send_notification')
-    def test_notification_not_sent_to_expired(self, mock_send, app, user_expired_subscription, test_signal):
+    @patch('app.services.async_notifier.notify_subscribers_async')
+    def test_notification_not_sent_to_expired(self, mock_async_send, app, user_expired_subscription, test_signal):
         """Test that notifications are NOT sent to expired users"""
         with app.app_context():
             from app.models import Setting
             Setting.set('per_user_notifications', 'true')
 
-            mock_send.return_value = True
+            # Track which subscribers were passed to async send
+            captured_subscribers = []
+
+            def capture_subscribers(subscribers, **kwargs):
+                captured_subscribers.extend(subscribers)
+                return {'total': 0, 'success': 0, 'failed': 0, 'results': []}
+
+            mock_async_send.side_effect = capture_subscribers
 
             signal = db.session.get(Signal, test_signal)
             result = notify_all_subscribers(signal)
 
-            call_topics = [call[1].get('topic', call[0][0] if call[0] else None)
-                          for call in mock_send.call_args_list]
-
+            # Check that expired user was not included
             user = db.session.get(User, user_expired_subscription)
-            assert user.ntfy_topic not in call_topics
+            subscriber_topics = [s['ntfy_topic'] for s in captured_subscribers]
+            assert user.ntfy_topic not in subscriber_topics
 
 
 class TestAccessTransitions:

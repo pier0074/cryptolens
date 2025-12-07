@@ -448,23 +448,37 @@ def notify_all_subscribers(signal: Signal, test_mode: bool = False,
         f"Confluence: {signal.confluence_score}/6 {tfs_bracketed}"
     )
 
-    # Send to all subscribers
-    success_count = 0
-    failed_count = 0
+    # Send to all subscribers using async for better performance
+    from app.services.async_notifier import notify_subscribers_async
 
-    for user in subscribers:
-        success = send_notification_to_user(
-            user=user,
+    # Prepare subscriber data for async sending
+    subscriber_data = [
+        {'user_id': user.id, 'ntfy_topic': user.ntfy_topic}
+        for user in subscribers
+    ]
+
+    # Send notifications concurrently
+    tags_list = tags.split(",") if isinstance(tags, str) else tags
+    async_result = notify_subscribers_async(
+        subscribers=subscriber_data,
+        title=title,
+        message=message,
+        priority=priority,
+        tags=tags_list
+    )
+
+    success_count = async_result['success']
+    failed_count = async_result['failed']
+
+    # Record individual notification results
+    for res in async_result.get('results', []):
+        user_notification = UserNotification(
+            user_id=res.user_id,
             signal_id=signal.id,
-            title=title,
-            message=message,
-            priority=priority,
-            tags=tags
+            success=res.success,
+            error=res.error
         )
-        if success:
-            success_count += 1
-        else:
-            failed_count += 1
+        db.session.add(user_notification)
 
     # Log general notification record
     notification = Notification(
@@ -573,33 +587,36 @@ def notify_subscribers_confluence(symbol: str, direction: str, aligned_timeframe
     message += f"R:R: {risk_reward:.1f}\n"
     message += f"Confluence: {confluence}/6 {tfs_bracketed}"
 
-    success_count = 0
-    failed_count = 0
+    # Send to all subscribers using async for better performance
+    from app.services.async_notifier import notify_subscribers_async
 
-    for user in subscribers:
-        success = send_notification(
-            topic=user.ntfy_topic,
-            title=title,
-            message=message,
-            priority=priority,
-            tags=tags
-        )
+    subscriber_data = [
+        {'user_id': user.id, 'ntfy_topic': user.ntfy_topic}
+        for user in subscribers
+    ]
 
-        if signal_id:
+    tags_list = tags.split(",") if isinstance(tags, str) else tags
+    async_result = notify_subscribers_async(
+        subscribers=subscriber_data,
+        title=title,
+        message=message,
+        priority=priority,
+        tags=tags_list
+    )
+
+    success_count = async_result['success']
+    failed_count = async_result['failed']
+
+    # Record individual notification results if signal_id provided
+    if signal_id:
+        for res in async_result.get('results', []):
             user_notification = UserNotification(
-                user_id=user.id,
+                user_id=res.user_id,
                 signal_id=signal_id,
-                success=success,
-                error=None if success else "Failed to send"
+                success=res.success,
+                error=res.error
             )
             db.session.add(user_notification)
-
-        if success:
-            success_count += 1
-        else:
-            failed_count += 1
-
-    if signal_id:
         db.session.commit()
 
     log_notify(
