@@ -2,9 +2,10 @@
 Payment Routes
 Handles checkout, webhooks, and payment status for LemonSqueezy and NOWPayments
 """
-from flask import Blueprint, request, jsonify, render_template, redirect, url_for, flash, session
+from flask import Blueprint, request, jsonify, render_template, redirect, url_for, flash
 from app import db, csrf
 from app.models import User, Payment, SUBSCRIPTION_PLANS
+from app.decorators import login_required, get_current_user
 from app.services.payment import (
     is_lemonsqueezy_configured,
     is_nowpayments_configured,
@@ -16,27 +17,8 @@ from app.services.payment import (
     process_nowpayments_webhook,
     get_available_cryptos
 )
-from functools import wraps
 
 payments_bp = Blueprint('payments', __name__, url_prefix='/payments')
-
-
-def login_required(f):
-    """Require user to be logged in"""
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if 'user_id' not in session:
-            flash('Please log in to continue', 'warning')
-            return redirect(url_for('auth.login'))
-        return f(*args, **kwargs)
-    return decorated_function
-
-
-def get_current_user():
-    """Get the current logged-in user"""
-    if 'user_id' in session:
-        return db.session.get(User, session['user_id'])
-    return None
 
 
 # =============================================================================

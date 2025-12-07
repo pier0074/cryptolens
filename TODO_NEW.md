@@ -149,16 +149,16 @@ Generated from Security & Architecture Audit on December 6, 2025.
 
 ---
 
-### P3.2 Remove Duplicate Code
-- [ ] Remove duplicate `login_required` from `app/routes/payments.py`
-- [ ] Use central `app/decorators.py` version everywhere
-- [ ] Consolidate `get_current_user()` implementations:
-  - `app/decorators.py` (keep)
-  - `app/routes/main.py` (remove)
-  - `app/routes/payments.py` (remove)
-  - `app/routes/auth.py` (remove, use decorators version)
+### P3.2 Remove Duplicate Code ✅ DONE
+- [x] Remove duplicate `login_required` from `app/routes/payments.py`
+- [x] Use central `app/decorators.py` version everywhere
+- [x] Consolidate `get_current_user()` implementations:
+  - `app/decorators.py` (canonical version)
+  - `app/routes/main.py` (removed, now imports from decorators)
+  - `app/routes/payments.py` (removed, now imports from decorators)
+  - `app/routes/auth.py` (already using services/auth version)
 
-**Files:** `app/routes/payments.py`, `app/routes/main.py`, `app/routes/auth.py`
+**Files:** `app/routes/payments.py`, `app/routes/main.py`
 
 ---
 

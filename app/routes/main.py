@@ -2,18 +2,11 @@
 Main Routes
 Public-facing pages including landing page
 """
-from flask import Blueprint, render_template, redirect, url_for, session
-from app import db
-from app.models import User, Pattern, Signal, Symbol, SUBSCRIPTION_PLANS
+from flask import Blueprint, render_template, redirect, url_for
+from app.models import Pattern, Signal, Symbol, SUBSCRIPTION_PLANS
+from app.decorators import get_current_user
 
 main_bp = Blueprint('main', __name__)
-
-
-def get_current_user():
-    """Get the current logged-in user"""
-    if 'user_id' in session:
-        return db.session.get(User, session['user_id'])
-    return None
 
 
 @main_bp.route('/landing')
