@@ -646,3 +646,182 @@ class TestPortfolioRestrictions:
         # User1 cannot access user2's portfolio
         response = client.get(f'/portfolio/{port2_id}')
         assert response.status_code == 403
+
+
+class TestUserSymbolPreferences:
+    """Test user-specific symbol notification preferences"""
+
+    def test_user_symbol_preference_model(self, app):
+        """Test UserSymbolPreference model basic functionality"""
+        from app.models import User, Subscription, Symbol, UserSymbolPreference
+
+        with app.app_context():
+            # Create a user
+            user = User(
+                email='sympref@test.com',
+                username='sympref',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_sympref12'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='premium',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                status='active'
+            )
+            db.session.add(sub)
+
+            # Create a symbol
+            symbol = Symbol(symbol='TEST/USDT', exchange='binance')
+            db.session.add(symbol)
+            db.session.commit()
+
+            # Test is_notify_enabled returns True by default
+            assert UserSymbolPreference.is_notify_enabled(user.id, symbol.id) is True
+
+            # Test toggle_notify
+            new_state = UserSymbolPreference.toggle_notify(user.id, symbol.id)
+            assert new_state is False
+
+            # Verify it persists
+            assert UserSymbolPreference.is_notify_enabled(user.id, symbol.id) is False
+
+            # Toggle again
+            new_state = UserSymbolPreference.toggle_notify(user.id, symbol.id)
+            assert new_state is True
+
+    def test_user_symbol_preference_isolation(self, app):
+        """Different users have independent symbol preferences"""
+        from app.models import User, Subscription, Symbol, UserSymbolPreference
+
+        with app.app_context():
+            # Create two users
+            user1 = User(
+                email='sympref1@test.com',
+                username='sympref1',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_sympref11'
+            )
+            user1.set_password('TestPass123')
+            db.session.add(user1)
+            db.session.commit()
+
+            user2 = User(
+                email='sympref2@test.com',
+                username='sympref2',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_sympref22'
+            )
+            user2.set_password('TestPass123')
+            db.session.add(user2)
+            db.session.commit()
+
+            # Create a symbol
+            symbol = Symbol(symbol='ISO/USDT', exchange='binance')
+            db.session.add(symbol)
+            db.session.commit()
+
+            # User1 mutes the symbol
+            UserSymbolPreference.toggle_notify(user1.id, symbol.id)
+            assert UserSymbolPreference.is_notify_enabled(user1.id, symbol.id) is False
+
+            # User2's preference is still default (True)
+            assert UserSymbolPreference.is_notify_enabled(user2.id, symbol.id) is True
+
+    def test_toggle_notify_requires_premium(self, client, app):
+        """Pro users cannot toggle notifications, only Premium can"""
+        from app.models import User, Subscription, Symbol
+
+        with app.app_context():
+            user = User(
+                email='pronotify@test.com',
+                username='pronotify',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_pronoti12'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='pro',  # Pro, not Premium
+                starts_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                status='active'
+            )
+            db.session.add(sub)
+
+            symbol = Symbol(symbol='PRON/USDT', exchange='binance')
+            db.session.add(symbol)
+            db.session.commit()
+            symbol_id = symbol.id
+
+        # Login as Pro user
+        client.post('/auth/login', data={
+            'email': 'pronotify@test.com',
+            'password': 'TestPass123'
+        })
+
+        # Try to toggle notification preference
+        response = client.post('/settings/symbols',
+                               json={'action': 'toggle_notify', 'id': symbol_id},
+                               content_type='application/json')
+        assert response.status_code == 403
+        data = response.get_json()
+        assert 'Premium required' in data.get('error', '')
+
+    def test_premium_can_toggle_notify(self, client, app):
+        """Premium users can toggle notifications"""
+        from app.models import User, Subscription, Symbol
+
+        with app.app_context():
+            user = User(
+                email='premnotify@test.com',
+                username='premnotify',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_premnot12'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='premium',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                status='active'
+            )
+            db.session.add(sub)
+
+            symbol = Symbol(symbol='PREM/USDT', exchange='binance')
+            db.session.add(symbol)
+            db.session.commit()
+            symbol_id = symbol.id
+
+        # Login as Premium user
+        client.post('/auth/login', data={
+            'email': 'premnotify@test.com',
+            'password': 'TestPass123'
+        })
+
+        # Toggle notification preference
+        response = client.post('/settings/symbols',
+                               json={'action': 'toggle_notify', 'id': symbol_id},
+                               content_type='application/json')
+        assert response.status_code == 200
+        data = response.get_json()
+        assert data['success'] is True
+        assert data['user_specific'] is True
+        assert data['notify_enabled'] is False  # Toggled from default True to False

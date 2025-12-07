@@ -45,6 +45,7 @@ from app.models.trading import (
     Pattern,
     Signal,
     Notification,
+    UserSymbolPreference,
 )
 
 # Portfolio models
@@ -104,6 +105,7 @@ __all__ = [
     'Pattern',
     'Signal',
     'Notification',
+    'UserSymbolPreference',
     # Portfolio models
     'trade_tags',
     'Portfolio',

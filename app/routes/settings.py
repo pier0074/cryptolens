@@ -1,9 +1,9 @@
 import re
 from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
-from app.models import Symbol, Setting
+from app.models import Symbol, Setting, UserSymbolPreference
 from app.config import Config
 from app import db
-from app.decorators import login_required, subscription_required
+from app.decorators import login_required, subscription_required, get_current_user
 from app.services.auth import hash_api_key
 
 # Valid symbol pattern: BASE/QUOTE format (e.g., BTC/USDT, ETH/BTC)
@@ -45,10 +45,12 @@ def save():
 
 
 @settings_bp.route('/symbols', methods=['POST'])
+@login_required
 def manage_symbols():
     """Add or toggle symbols"""
     data = request.get_json()
     action = data.get('action')
+    user = get_current_user()
 
     if action == 'add':
         symbol_name = data.get('symbol', '').strip().upper()
@@ -85,12 +87,24 @@ def manage_symbols():
             return jsonify({'success': True, 'symbol': symbol.to_dict()})
 
     elif action == 'toggle_notify':
+        # User-specific notification preference (Premium/Admin only)
         symbol_id = data.get('id')
         symbol = db.session.get(Symbol, symbol_id)
-        if symbol:
-            symbol.notify_enabled = not symbol.notify_enabled
-            db.session.commit()
-            return jsonify({'success': True, 'symbol': symbol.to_dict()})
+        if not symbol:
+            return jsonify({'success': False, 'error': 'Symbol not found'}), 404
+
+        # Check user has premium access
+        if not user.is_admin and user.subscription_tier != 'premium':
+            return jsonify({'success': False, 'error': 'Premium required for mute/notify'}), 403
+
+        # Toggle user-specific preference
+        new_state = UserSymbolPreference.toggle_notify(user.id, symbol_id)
+        return jsonify({
+            'success': True,
+            'symbol_id': symbol_id,
+            'notify_enabled': new_state,
+            'user_specific': True
+        })
 
     elif action == 'delete':
         # Soft delete: just deactivate the symbol to preserve candle data

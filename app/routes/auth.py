@@ -173,7 +173,7 @@ def logout():
 @login_required
 def profile():
     """User profile and subscription status (unified with settings)"""
-    from app.models import Symbol, Setting
+    from app.models import Symbol, Setting, UserSymbolPreference
     from app.config import Config
 
     user = get_current_user()
@@ -194,13 +194,21 @@ def profile():
     }
     available_symbols = sorted(Config.SYMBOLS)
 
+    # Get user-specific notification preferences for Premium/Admin users
+    user_symbol_prefs = {}
+    if user.is_admin or user.subscription_tier == 'premium':
+        prefs = UserSymbolPreference.query.filter_by(user_id=user.id).all()
+        for pref in prefs:
+            user_symbol_prefs[pref.symbol_id] = pref.notify_enabled
+
     return render_template('auth/profile.html',
                            user=user,
                            subscription=sub_status,
                            plans=SUBSCRIPTION_PLANS,
                            symbols=symbols,
                            settings=settings,
-                           available_symbols=available_symbols)
+                           available_symbols=available_symbols,
+                           user_symbol_prefs=user_symbol_prefs)
 
 
 @auth_bp.route('/change-password', methods=['POST'])

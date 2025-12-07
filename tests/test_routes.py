@@ -423,8 +423,9 @@ class TestSettingsRoutes:
         # Should redirect back to settings page
         assert response.status_code in [200, 302]
 
-    def test_settings_add_symbol(self, client, app):
-        """Test adding a symbol"""
+    def test_settings_add_symbol(self, client, app, sample_user):
+        """Test adding a symbol (requires login)"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             '/settings/symbols',
             json={'action': 'add', 'symbol': 'ETH/USDT'},
@@ -434,8 +435,9 @@ class TestSettingsRoutes:
         data = response.get_json()
         assert data['success'] is True
 
-    def test_settings_add_invalid_symbol(self, client, app):
-        """Test adding invalid symbol format"""
+    def test_settings_add_invalid_symbol(self, client, app, sample_user):
+        """Test adding invalid symbol format (requires login)"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             '/settings/symbols',
             json={'action': 'add', 'symbol': 'invalid'},
@@ -446,8 +448,9 @@ class TestSettingsRoutes:
         data = response.get_json()
         assert data['success'] is False
 
-    def test_settings_toggle_symbol(self, client, app, sample_symbol):
-        """Test toggling symbol active status"""
+    def test_settings_toggle_symbol(self, client, app, sample_user, sample_symbol):
+        """Test toggling symbol active status (requires login)"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.post(
             '/settings/symbols',
             json={'action': 'toggle', 'id': sample_symbol},

@@ -259,3 +259,53 @@ class Notification(db.Model):
 
     def __repr__(self):
         return f'<Notification {self.channel} {self.signal_id}>'
+
+
+class UserSymbolPreference(db.Model):
+    """User-specific symbol notification preferences (for Premium users)"""
+    __tablename__ = 'user_symbol_preferences'
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    symbol_id = db.Column(db.Integer, db.ForeignKey('symbols.id'), nullable=False)
+    notify_enabled = db.Column(db.Boolean, default=True)  # User's notification preference
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc),
+                          onupdate=lambda: datetime.now(timezone.utc))
+
+    # Relationships
+    user = db.relationship('User', backref=db.backref('symbol_preferences', lazy='dynamic'))
+    symbol = db.relationship('Symbol', backref=db.backref('user_preferences', lazy='dynamic'))
+
+    __table_args__ = (
+        db.UniqueConstraint('user_id', 'symbol_id', name='uix_user_symbol_pref'),
+        db.Index('idx_user_symbol_pref', 'user_id', 'symbol_id'),
+    )
+
+    def __repr__(self):
+        return f'<UserSymbolPreference user={self.user_id} symbol={self.symbol_id} notify={self.notify_enabled}>'
+
+    @classmethod
+    def get_or_create(cls, user_id, symbol_id):
+        """Get or create a preference, defaulting to notify_enabled=True"""
+        pref = cls.query.filter_by(user_id=user_id, symbol_id=symbol_id).first()
+        if not pref:
+            pref = cls(user_id=user_id, symbol_id=symbol_id, notify_enabled=True)
+            db.session.add(pref)
+            db.session.commit()
+        return pref
+
+    @classmethod
+    def is_notify_enabled(cls, user_id, symbol_id):
+        """Check if notifications are enabled for a user-symbol pair"""
+        pref = cls.query.filter_by(user_id=user_id, symbol_id=symbol_id).first()
+        # Default to True if no preference exists
+        return pref.notify_enabled if pref else True
+
+    @classmethod
+    def toggle_notify(cls, user_id, symbol_id):
+        """Toggle notification preference for a user-symbol pair"""
+        pref = cls.get_or_create(user_id, symbol_id)
+        pref.notify_enabled = not pref.notify_enabled
+        db.session.commit()
+        return pref.notify_enabled

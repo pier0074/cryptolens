@@ -363,6 +363,24 @@ def migrate():
                 ))
                 changes.append("Added idx_portfolio_user index")
 
+        # User Symbol Preferences table (user-specific notification mute/unmute)
+        if not table_exists('user_symbol_preferences'):
+            db.session.execute(text("""
+                CREATE TABLE user_symbol_preferences (
+                    id INTEGER PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    symbol_id INTEGER NOT NULL,
+                    notify_enabled BOOLEAN DEFAULT 1,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    FOREIGN KEY (user_id) REFERENCES users (id),
+                    FOREIGN KEY (symbol_id) REFERENCES symbols (id),
+                    UNIQUE (user_id, symbol_id)
+                )
+            """))
+            db.session.execute(text("CREATE INDEX idx_user_symbol_pref ON user_symbol_preferences (user_id, symbol_id)"))
+            changes.append("Created user_symbol_preferences table")
+
         db.session.commit()
 
         if changes:

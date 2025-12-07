@@ -3,7 +3,7 @@
 {% block title %}Profile - CryptoLens{% endblock %}
 
 {% block content %}
-<div x-data="profileApp()" class="max-w-5xl mx-auto">
+<div x-data="profileApp()" x-init="init()" class="max-w-5xl mx-auto">
     <div class="flex items-center justify-between mb-6">
         <h1 class="text-3xl font-bold">Your Profile</h1>
         <a href="{{ url_for('auth.logout') }}"
@@ -525,13 +525,16 @@
                 <!-- Active Symbols with mute toggle -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 mb-4">
                     {% for symbol in symbols if symbol.is_active %}
-                    <div class="flex items-center justify-between bg-gray-800 rounded p-2 text-sm">
+                    {% set user_notify = user_symbol_prefs.get(symbol.id, true) %}
+                    <div class="flex items-center justify-between bg-gray-800 rounded p-2 text-sm"
+                         x-data="{ notifyEnabled: {{ 'true' if user_notify else 'false' }} }">
                         <span class="font-mono">{{ symbol.symbol }}</span>
                         <div class="flex items-center gap-1">
-                            <button @click="toggleNotify({{ symbol.id }})"
-                                    class="text-xs px-2 py-1 rounded {% if symbol.notify_enabled %}bg-blue-900 text-blue-200{% else %}bg-gray-700 text-gray-400{% endif %}"
+                            <button @click="toggleNotifyAsync({{ symbol.id }}, $el, $data)"
+                                    :class="notifyEnabled ? 'bg-blue-900 text-blue-200' : 'bg-gray-700 text-gray-400'"
+                                    class="text-xs px-2 py-1 rounded"
                                     title="Toggle notifications">
-                                {{ 'Notify' if symbol.notify_enabled else 'Muted' }}
+                                <span x-text="notifyEnabled ? 'Notify' : 'Muted'"></span>
                             </button>
                         </div>
                     </div>
@@ -604,11 +607,24 @@
 
 <script>
 function profileApp() {
+    // Check URL hash or localStorage for initial tab
+    const urlHash = window.location.hash.replace('#', '');
+    const savedTab = localStorage.getItem('profileTab');
+    const initialTab = urlHash || savedTab || 'account';
+
     return {
-        activeTab: 'account',
+        activeTab: initialTab,
         newSymbol: '',
         customSymbol: '',
         errorMessage: '',
+
+        init() {
+            // Watch for tab changes and persist
+            this.$watch('activeTab', (val) => {
+                localStorage.setItem('profileTab', val);
+                window.location.hash = val;
+            });
+        },
 
         generateApiKey() {
             const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -692,6 +708,7 @@ function profileApp() {
         },
 
         async toggleNotify(id) {
+            // Legacy function - kept for compatibility
             try {
                 const response = await fetch('/settings/symbols', {
                     method: 'POST',
@@ -709,6 +726,29 @@ function profileApp() {
                 alert('Error: ' + e.message);
             }
         }
+    }
+}
+
+// Standalone function for user-specific notify toggle (no page reload)
+async function toggleNotifyAsync(symbolId, el, data) {
+    try {
+        const response = await fetch('/settings/symbols', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': getCsrfToken()
+            },
+            body: JSON.stringify({ action: 'toggle_notify', id: symbolId })
+        });
+        const result = await response.json();
+        if (result.success) {
+            // Update local state without page reload
+            data.notifyEnabled = result.notify_enabled;
+        } else {
+            alert('Error: ' + (result.error || 'Unknown error'));
+        }
+    } catch (e) {
+        alert('Error: ' + e.message);
     }
 }
 
