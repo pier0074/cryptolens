@@ -2,8 +2,12 @@
 API Documentation Routes
 Serves OpenAPI specification and Swagger UI
 """
-from flask import Blueprint, render_template_string, send_from_directory, current_app
+from flask import Blueprint, render_template, render_template_string, send_from_directory, current_app, request, jsonify, flash, redirect, url_for
+from app.decorators import login_required, feature_required, get_current_user
+from app.models import Setting
 import os
+import secrets
+import hashlib
 
 docs_bp = Blueprint('docs', __name__)
 
@@ -85,3 +89,64 @@ def openapi_spec_json():
         json.dumps(spec, indent=2),
         mimetype='application/json'
     )
+
+
+@docs_bp.route('/')
+@login_required
+@feature_required('api_access')
+def api_index():
+    """API page with key management and documentation link"""
+    user = get_current_user()
+
+    # Get current API key (show masked version)
+    api_key = Setting.get('api_key')
+    api_key_masked = None
+    if api_key:
+        # Show first 4 and last 4 characters
+        if len(api_key) > 8:
+            api_key_masked = api_key[:4] + '*' * (len(api_key) - 8) + api_key[-4:]
+        else:
+            api_key_masked = '*' * len(api_key)
+
+    return render_template('api/index.html',
+                           api_key=api_key,
+                           api_key_masked=api_key_masked,
+                           user=user)
+
+
+@docs_bp.route('/generate-key', methods=['POST'])
+@login_required
+@feature_required('api_access')
+def generate_api_key():
+    """Generate a new API key"""
+    from app import db
+
+    # Generate a secure random key
+    new_key = secrets.token_urlsafe(32)
+
+    # Store the key (plain text for display, but we could hash it)
+    Setting.set('api_key', new_key)
+
+    # Also store a hash for verification
+    key_hash = hashlib.sha256(new_key.encode()).hexdigest()
+    Setting.set('api_key_hash', key_hash)
+
+    db.session.commit()
+
+    flash('New API key generated successfully. Make sure to copy it now!', 'success')
+    return redirect(url_for('docs.api_index'))
+
+
+@docs_bp.route('/revoke-key', methods=['POST'])
+@login_required
+@feature_required('api_access')
+def revoke_api_key():
+    """Revoke the current API key"""
+    from app import db
+
+    Setting.set('api_key', '')
+    Setting.set('api_key_hash', '')
+    db.session.commit()
+
+    flash('API key revoked. API access is now disabled.', 'warning')
+    return redirect(url_for('docs.api_index'))

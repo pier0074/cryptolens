@@ -72,6 +72,9 @@
                         <a href="/analytics" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'analytics' in request.endpoint %}bg-gray-800{% endif %}">
                             Analytics
                         </a>
+                        <a href="/api" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if request.endpoint and 'docs' in request.endpoint %}bg-gray-800{% endif %}">
+                            API
+                        </a>
                         {% if g.user.is_admin %}
                         <a href="/logs" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'logs' in request.endpoint %}bg-gray-800{% endif %}">
                             Logs

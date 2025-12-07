@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+
+{% block title %}API - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-4xl mx-auto">
+    <h1 class="text-3xl font-bold mb-8">API Access</h1>
+
+    <!-- API Key Management -->
+    <div class="bg-card rounded-lg p-6 mb-8">
+        <h2 class="text-xl font-semibold mb-4">API Key</h2>
+
+        {% if api_key %}
+        <div class="mb-4">
+            <label class="block text-sm text-gray-400 mb-2">Current API Key</label>
+            <div class="flex items-center gap-3">
+                <div class="flex-1 relative">
+                    <input type="text" id="apiKeyField" value="{{ api_key }}" readonly
+                           class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 font-mono text-sm pr-20">
+                    <button onclick="copyApiKey()"
+                            class="absolute right-2 top-1/2 -translate-y-1/2 text-blue-400 hover:text-blue-300 text-sm">
+                        Copy
+                    </button>
+                </div>
+            </div>
+            <p class="text-xs text-gray-500 mt-2">
+                Use this key in the <code class="bg-gray-800 px-1 rounded">X-API-Key</code> header for API requests.
+            </p>
+        </div>
+
+        <div class="flex gap-3">
+            <form method="POST" action="{{ url_for('docs.generate_api_key') }}" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm"
+                        onclick="return confirm('Generate a new API key? The old key will stop working.')">
+                    Regenerate Key
+                </button>
+            </form>
+            <form method="POST" action="{{ url_for('docs.revoke_api_key') }}" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded text-sm"
+                        onclick="return confirm('Revoke API key? API access will be disabled.')">
+                    Revoke Key
+                </button>
+            </form>
+        </div>
+        {% else %}
+        <p class="text-gray-400 mb-4">No API key configured. Generate one to enable API access.</p>
+        <form method="POST" action="{{ url_for('docs.generate_api_key') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm">
+                Generate API Key
+            </button>
+        </form>
+        {% endif %}
+    </div>
+
+    <!-- API Documentation -->
+    <div class="bg-card rounded-lg p-6 mb-8">
+        <h2 class="text-xl font-semibold mb-4">Documentation</h2>
+        <p class="text-gray-400 mb-4">
+            Explore the full API documentation with interactive examples using Swagger UI.
+        </p>
+        <a href="{{ url_for('docs.swagger_ui') }}"
+           class="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded text-sm">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+            </svg>
+            Open API Documentation
+        </a>
+    </div>
+
+    <!-- Usage Examples -->
+    <div class="bg-card rounded-lg p-6">
+        <h2 class="text-xl font-semibold mb-4">Quick Start</h2>
+
+        <div class="space-y-4">
+            <div>
+                <h3 class="text-sm font-medium text-gray-300 mb-2">Using cURL</h3>
+                <pre class="bg-gray-900 rounded p-3 text-sm overflow-x-auto"><code class="text-green-400">curl -H "X-API-Key: YOUR_API_KEY" \
+     {{ request.host_url }}api/symbols</code></pre>
+            </div>
+
+            <div>
+                <h3 class="text-sm font-medium text-gray-300 mb-2">Using Python</h3>
+                <pre class="bg-gray-900 rounded p-3 text-sm overflow-x-auto"><code class="text-green-400">import requests
+
+headers = {"X-API-Key": "YOUR_API_KEY"}
+response = requests.get("{{ request.host_url }}api/symbols", headers=headers)
+print(response.json())</code></pre>
+            </div>
+
+            <div>
+                <h3 class="text-sm font-medium text-gray-300 mb-2">Available Endpoints</h3>
+                <ul class="text-sm text-gray-400 space-y-1">
+                    <li><code class="bg-gray-800 px-1 rounded">GET /api/symbols</code> - List all symbols</li>
+                    <li><code class="bg-gray-800 px-1 rounded">GET /api/patterns</code> - Get detected patterns</li>
+                    <li><code class="bg-gray-800 px-1 rounded">GET /api/signals</code> - Get trading signals</li>
+                    <li><code class="bg-gray-800 px-1 rounded">GET /api/candles/{symbol}/{timeframe}</code> - Get candle data</li>
+                    <li><code class="bg-gray-800 px-1 rounded">POST /api/scan</code> - Trigger pattern scan</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function copyApiKey() {
+    const field = document.getElementById('apiKeyField');
+    field.select();
+    document.execCommand('copy');
+
+    // Show feedback
+    const btn = event.target;
+    const originalText = btn.textContent;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = originalText, 2000);
+}
+</script>
+{% endblock %}
