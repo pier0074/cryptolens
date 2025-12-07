@@ -2,6 +2,7 @@ import os
 import time
 import logging
 import warnings
+from datetime import timedelta
 from flask import Flask, g, request
 
 # Suppress flask-limiter in-memory storage warning (fine for development)
@@ -109,6 +110,16 @@ def create_app(config_name=None):
     from app.config import config
     app.config.from_object(config[config_name])
 
+    # Session security configuration
+    # Secure cookies in production (HTTPS), always HttpOnly, SameSite=Lax
+    app.config.update(
+        SESSION_COOKIE_SECURE=not app.debug,  # True in production (HTTPS only)
+        SESSION_COOKIE_HTTPONLY=True,  # Prevent JavaScript access to session cookie
+        SESSION_COOKIE_SAMESITE='Lax',  # Prevent CSRF via cross-site requests
+        PERMANENT_SESSION_LIFETIME=timedelta(days=7),  # Session expires after 7 days
+        SESSION_REFRESH_EACH_REQUEST=True,  # Refresh session on each request
+    )
+
     # Ensure data directory exists
     data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
     os.makedirs(data_dir, exist_ok=True)
@@ -192,9 +203,9 @@ def create_app(config_name=None):
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(payments_bp)
 
-    # Exempt API and webhook endpoints from CSRF
+    # Exempt API blueprint from CSRF (uses API key auth for machine-to-machine)
+    # Payment webhooks are exempted individually with @csrf.exempt decorator
     csrf.exempt(api_bp)
-    csrf.exempt(payments_bp)
 
     # Create database tables and enable WAL mode for better concurrency
     with app.app_context():

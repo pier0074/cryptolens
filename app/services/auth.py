@@ -2,6 +2,8 @@
 Authentication Service
 Handles user registration, login, and password management
 """
+import hashlib
+import hmac
 import re
 import uuid
 from datetime import datetime, timezone
@@ -292,3 +294,20 @@ def get_eligible_subscribers():
     ).all()
 
     return [u for u in users if u.has_valid_subscription]
+
+
+def hash_api_key(api_key: str) -> str:
+    """
+    Hash an API key for secure storage.
+    Uses SHA-256 which is appropriate for API key verification.
+    """
+    return hashlib.sha256(api_key.encode()).hexdigest()
+
+
+def verify_api_key(provided_key: str, stored_hash: str) -> bool:
+    """
+    Verify a provided API key against a stored hash.
+    Uses timing-safe comparison to prevent timing attacks.
+    """
+    provided_hash = hash_api_key(provided_key)
+    return hmac.compare_digest(provided_hash, stored_hash)

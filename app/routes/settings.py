@@ -4,6 +4,7 @@ from app.models import Symbol, Setting
 from app.config import Config
 from app import db
 from app.decorators import login_required, subscription_required
+from app.services.auth import hash_api_key
 
 # Valid symbol pattern: BASE/QUOTE format (e.g., BTC/USDT, ETH/BTC)
 SYMBOL_PATTERN = re.compile(r'^[A-Z0-9]{2,10}/[A-Z0-9]{2,10}$')
@@ -25,11 +26,16 @@ def save():
     """Save settings"""
     data = request.form
 
-    # Save each setting
+    # Save each setting (except api_key which needs special handling)
     for key in ['ntfy_topic', 'ntfy_priority', 'scan_interval',
-                'risk_per_trade', 'default_rr', 'min_confluence', 'api_key', 'log_level']:
+                'risk_per_trade', 'default_rr', 'min_confluence', 'log_level']:
         if key in data:
             Setting.set(key, data[key])
+
+    # Handle API key specially - hash it before storing
+    if 'api_key' in data and data['api_key'].strip():
+        api_key = data['api_key'].strip()
+        Setting.set('api_key_hash', hash_api_key(api_key))
 
     # Handle checkbox
     Setting.set('notifications_enabled', 'true' if 'notifications_enabled' in data else 'false')

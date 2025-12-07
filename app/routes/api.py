@@ -1,4 +1,3 @@
-import hmac
 import os
 from functools import wraps
 from typing import Callable, Tuple, Any
@@ -7,6 +6,7 @@ from sqlalchemy.orm import joinedload
 from app.models import Symbol, Candle, Pattern, Signal, Setting, User
 from app.config import Config
 from app import db, csrf, limiter
+from app.services.auth import verify_api_key
 
 api_bp = Blueprint('api', __name__)
 
@@ -41,9 +41,9 @@ def require_api_key(f: Callable[..., Any]) -> Callable[..., Any]:
             if user and user.is_admin:
                 return f(*args, **kwargs)
 
-        # Get API key from settings
-        api_key = Setting.get('api_key')
-        if not api_key:
+        # Get API key hash from settings
+        api_key_hash = Setting.get('api_key_hash')
+        if not api_key_hash:
             # No API key configured - DENY access (secure default)
             return jsonify({
                 'error': 'API not configured',
@@ -58,8 +58,8 @@ def require_api_key(f: Callable[..., Any]) -> Callable[..., Any]:
         if not provided_key:
             return jsonify({'error': 'Unauthorized - API key required'}), 401
 
-        # Use timing-safe comparison to prevent timing attacks
-        if not hmac.compare_digest(provided_key, api_key):
+        # Verify API key against stored hash
+        if not verify_api_key(provided_key, api_key_hash):
             return jsonify({'error': 'Unauthorized - Invalid API key'}), 401
 
         return f(*args, **kwargs)

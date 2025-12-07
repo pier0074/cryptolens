@@ -6,8 +6,9 @@ from urllib.parse import urlparse
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, jsonify, g
 from app.services.auth import (
     register_user, authenticate_user, change_password,
-    get_user_by_id, AuthError
+    get_user_by_id, AuthError, validate_password
 )
+from app.services.lockout import record_failed_attempt, is_locked, clear_lockout
 from app.services.subscription import check_subscription_status
 from app.services.email import (
     send_verification_email, send_password_reset_email,
@@ -122,8 +123,16 @@ def login():
         email = request.form.get('email', '').strip()
         password = request.form.get('password', '')
 
+        # Check if account is locked
+        locked, minutes_remaining = is_locked(email)
+        if locked:
+            flash(f'Account temporarily locked. Try again in {minutes_remaining} minutes.', 'error')
+            return render_template('auth/login.html')
+
         user = authenticate_user(email, password)
         if user:
+            # Clear any failed attempt counters on successful login
+            clear_lockout(user)
             # Check if 2FA is enabled
             if user.totp_enabled:
                 # Store pending 2FA state in session
@@ -141,6 +150,8 @@ def login():
                 return redirect(next_page)
             return redirect(url_for('auth.profile'))
         else:
+            # Record failed attempt for lockout tracking
+            record_failed_attempt(email)
             flash('Invalid email or password.', 'error')
 
     # Clear any stale pending 2FA state on GET request
@@ -399,8 +410,10 @@ def reset_password(token):
             flash('Passwords do not match.', 'error')
             return render_template('auth/reset_password.html', token=token)
 
-        if len(password) < 8:
-            flash('Password must be at least 8 characters.', 'error')
+        # Validate password strength (same rules as registration)
+        valid, error = validate_password(password)
+        if not valid:
+            flash(error, 'error')
             return render_template('auth/reset_password.html', token=token)
 
         # Update password

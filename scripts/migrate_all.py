@@ -217,7 +217,38 @@ def migrate():
                 db.session.execute(text("ALTER TABLE users ADD COLUMN quiet_hours_end INTEGER DEFAULT 7"))
                 changes.append("Added users.quiet_hours_end")
 
-        # 11. Payments table
+            # Account lockout (brute force protection)
+            if 'failed_attempts' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN failed_attempts INTEGER DEFAULT 0"))
+                changes.append("Added users.failed_attempts")
+            if 'locked_until' not in cols:
+                db.session.execute(text("ALTER TABLE users ADD COLUMN locked_until DATETIME"))
+                changes.append("Added users.locked_until")
+
+        # 12. Encrypt existing TOTP secrets
+        if table_exists('users'):
+            from app.services.encryption import encrypt_value
+            # Find users with unencrypted TOTP secrets (not starting with 'gAAAAA' which is Fernet prefix)
+            result = db.session.execute(text(
+                "SELECT id, totp_secret FROM users WHERE totp_secret IS NOT NULL AND totp_secret != ''"
+            ))
+            users_to_encrypt = []
+            for row in result.fetchall():
+                user_id, secret = row
+                # Fernet encrypted values start with 'gAAAAA'
+                if secret and not secret.startswith('gAAAAA'):
+                    users_to_encrypt.append((user_id, secret))
+
+            for user_id, secret in users_to_encrypt:
+                encrypted = encrypt_value(secret)
+                db.session.execute(text(
+                    "UPDATE users SET totp_secret = :encrypted WHERE id = :user_id"
+                ), {'encrypted': encrypted, 'user_id': user_id})
+
+            if users_to_encrypt:
+                changes.append(f"Encrypted {len(users_to_encrypt)} TOTP secrets")
+
+        # Payments table
         if not table_exists('payments'):
             db.session.execute(text("""
                 CREATE TABLE payments (

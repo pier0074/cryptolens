@@ -4,6 +4,7 @@ Tests for API Endpoints
 import pytest
 import json
 from app.models import Symbol, Candle, Pattern, Signal, Setting
+from app.services.auth import hash_api_key
 from app import db
 
 
@@ -45,7 +46,7 @@ class TestHealthEndpoint:
         with app.app_context():
             from app.models import Setting
             # Set API key (which would normally require auth)
-            Setting.set('api_key', 'test-secret-key')
+            Setting.set('api_key_hash', hash_api_key('test-secret-key'))
             db.session.commit()
 
             # Health should still work without auth
@@ -362,7 +363,7 @@ class TestAPIAuthentication:
     def test_scan_with_api_key_required(self, client, app):
         """Test scan endpoint requires API key when configured"""
         with app.app_context():
-            Setting.set('api_key', 'test-secret-key')
+            Setting.set('api_key_hash', hash_api_key('test-secret-key'))
             db.session.commit()
 
             # No key provided - should be 401
@@ -373,7 +374,7 @@ class TestAPIAuthentication:
     def test_scan_with_valid_api_key_header(self, client, app):
         """Test scan endpoint accepts valid API key in header"""
         with app.app_context():
-            Setting.set('api_key', 'test-secret-key')
+            Setting.set('api_key_hash', hash_api_key('test-secret-key'))
             db.session.commit()
 
             response = client.post(
@@ -386,7 +387,7 @@ class TestAPIAuthentication:
     def test_scan_with_valid_api_key_param(self, client, app):
         """Test scan endpoint accepts valid API key as query param"""
         with app.app_context():
-            Setting.set('api_key', 'test-secret-key')
+            Setting.set('api_key_hash', hash_api_key('test-secret-key'))
             db.session.commit()
 
             response = client.post('/api/scan?api_key=test-secret-key')
@@ -395,7 +396,7 @@ class TestAPIAuthentication:
     def test_scan_with_invalid_api_key(self, client, app):
         """Test scan endpoint rejects invalid API key"""
         with app.app_context():
-            Setting.set('api_key', 'test-secret-key')
+            Setting.set('api_key_hash', hash_api_key('test-secret-key'))
             db.session.commit()
 
             response = client.post(
@@ -407,7 +408,7 @@ class TestAPIAuthentication:
     def test_scheduler_endpoints_require_auth(self, client, app):
         """Test scheduler control endpoints require authentication"""
         with app.app_context():
-            Setting.set('api_key', 'test-secret-key')
+            Setting.set('api_key_hash', hash_api_key('test-secret-key'))
             db.session.commit()
 
             # All these should return 401 without key
@@ -418,7 +419,7 @@ class TestAPIAuthentication:
     def test_scheduler_status_no_auth(self, client, app):
         """Test scheduler status endpoint doesn't require auth"""
         with app.app_context():
-            Setting.set('api_key', 'test-secret-key')
+            Setting.set('api_key_hash', hash_api_key('test-secret-key'))
             db.session.commit()
 
             # Status is read-only, shouldn't need auth
@@ -444,7 +445,7 @@ class TestFetchEndpoint:
     def test_fetch_missing_params(self, client, app):
         """Test fetch endpoint requires symbol and timeframe"""
         with app.app_context():
-            Setting.set('api_key', 'test-secret-key')
+            Setting.set('api_key_hash', hash_api_key('test-secret-key'))
             db.session.commit()
 
             response = client.post(
@@ -459,7 +460,7 @@ class TestFetchEndpoint:
     def test_fetch_with_params(self, client, app, sample_symbol):
         """Test fetch endpoint with valid parameters"""
         with app.app_context():
-            Setting.set('api_key', 'test-secret-key')
+            Setting.set('api_key_hash', hash_api_key('test-secret-key'))
             db.session.commit()
 
             response = client.post(

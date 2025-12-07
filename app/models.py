@@ -788,9 +788,13 @@ class User(db.Model):
     password_reset_token = db.Column(db.String(64), nullable=True)
     password_reset_expires = db.Column(db.DateTime, nullable=True)
 
-    # Two-factor authentication (TOTP)
-    totp_secret = db.Column(db.String(32), nullable=True)
+    # Two-factor authentication (TOTP) - secret is encrypted at rest
+    totp_secret = db.Column(db.String(256), nullable=True)
     totp_enabled = db.Column(db.Boolean, default=False)
+
+    # Account lockout (brute force protection)
+    failed_attempts = db.Column(db.Integer, default=0)
+    locked_until = db.Column(db.DateTime, nullable=True)
 
     # Notification preferences
     notify_enabled = db.Column(db.Boolean, default=True)  # Master toggle
@@ -887,18 +891,32 @@ class User(db.Model):
         self.password_reset_token = None
         self.password_reset_expires = None
 
+    def _get_decrypted_totp_secret(self):
+        """Decrypt and return the TOTP secret"""
+        if not self.totp_secret:
+            return None
+        from app.services.encryption import decrypt_value
+        try:
+            return decrypt_value(self.totp_secret)
+        except Exception:
+            # If decryption fails, assume it's a legacy unencrypted value
+            return self.totp_secret
+
     def generate_totp_secret(self):
-        """Generate a new TOTP secret for 2FA"""
+        """Generate a new TOTP secret for 2FA (stored encrypted)"""
         import pyotp
-        self.totp_secret = pyotp.random_base32()
-        return self.totp_secret
+        from app.services.encryption import encrypt_value
+        secret = pyotp.random_base32()
+        self.totp_secret = encrypt_value(secret)
+        return secret  # Return plaintext for QR code generation
 
     def get_totp_uri(self):
         """Get the TOTP provisioning URI for QR code"""
         import pyotp
-        if not self.totp_secret:
+        secret = self._get_decrypted_totp_secret()
+        if not secret:
             return None
-        return pyotp.totp.TOTP(self.totp_secret).provisioning_uri(
+        return pyotp.totp.TOTP(secret).provisioning_uri(
             name=self.email,
             issuer_name='CryptoLens'
         )
@@ -906,9 +924,10 @@ class User(db.Model):
     def verify_totp(self, token):
         """Verify a TOTP token"""
         import pyotp
-        if not self.totp_secret:
+        secret = self._get_decrypted_totp_secret()
+        if not secret:
             return False
-        totp = pyotp.TOTP(self.totp_secret)
+        totp = pyotp.TOTP(secret)
         return totp.verify(token)
 
     @property

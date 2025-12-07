@@ -3,7 +3,7 @@ Payment Routes
 Handles checkout, webhooks, and payment status for LemonSqueezy and NOWPayments
 """
 from flask import Blueprint, request, jsonify, render_template, redirect, url_for, flash, session
-from app import db
+from app import db, csrf
 from app.models import User, Payment, SUBSCRIPTION_PLANS
 from app.services.payment import (
     is_lemonsqueezy_configured,
@@ -173,6 +173,7 @@ def payment_cancel():
 # =============================================================================
 
 @payments_bp.route('/lemonsqueezy/webhook', methods=['POST'])
+@csrf.exempt
 def lemonsqueezy_webhook():
     """Handle LemonSqueezy webhooks"""
     signature = request.headers.get('X-Signature', '')
@@ -192,6 +193,7 @@ def lemonsqueezy_webhook():
 
 
 @payments_bp.route('/nowpayments/webhook', methods=['POST'])
+@csrf.exempt
 def nowpayments_webhook():
     """Handle NOWPayments IPN callbacks"""
     signature = request.headers.get('x-nowpayments-sig', '')

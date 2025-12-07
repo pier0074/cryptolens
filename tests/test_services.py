@@ -381,3 +381,112 @@ class TestNotifierService:
                 risk_reward=3.0
             )
             assert result is True
+
+
+class TestEncryptionService:
+    """Tests for encryption service"""
+
+    def test_encrypt_and_decrypt_roundtrip(self, app):
+        """Test that encryption and decryption work correctly"""
+        with app.app_context():
+            from app.services.encryption import encrypt_value, decrypt_value
+            original = "JBSWY3DPEHPK3PXP"  # Sample TOTP secret
+
+            encrypted = encrypt_value(original)
+            assert encrypted != original
+            assert encrypted.startswith('gAAAAA')  # Fernet prefix
+
+            decrypted = decrypt_value(encrypted)
+            assert decrypted == original
+
+    def test_encrypt_empty_string(self, app):
+        """Test encrypting empty string returns empty"""
+        with app.app_context():
+            from app.services.encryption import encrypt_value, decrypt_value
+            assert encrypt_value('') == ''
+            assert decrypt_value('') == ''
+
+    def test_encrypt_different_values_produce_different_ciphertexts(self, app):
+        """Test that different values produce different ciphertexts"""
+        with app.app_context():
+            from app.services.encryption import encrypt_value
+            encrypted1 = encrypt_value("secret1")
+            encrypted2 = encrypt_value("secret2")
+            assert encrypted1 != encrypted2
+
+    def test_generate_encryption_key(self, app):
+        """Test generating a new encryption key"""
+        with app.app_context():
+            from app.services.encryption import generate_encryption_key
+            key = generate_encryption_key()
+            assert len(key) == 44  # Base64-encoded 32-byte key
+            assert key.endswith('=')
+
+
+class TestTOTPEncryption:
+    """Tests for TOTP secret encryption in User model"""
+
+    def test_generate_totp_secret_encrypts(self, app, sample_user):
+        """Test that generated TOTP secrets are encrypted"""
+        with app.app_context():
+            from app.models import User
+            user = db.session.get(User, sample_user)
+
+            plaintext_secret = user.generate_totp_secret()
+            db.session.commit()
+
+            # The stored value should be encrypted (Fernet prefix)
+            assert user.totp_secret.startswith('gAAAAA')
+            # The returned value should be plaintext
+            assert not plaintext_secret.startswith('gAAAAA')
+
+    def test_verify_totp_with_encrypted_secret(self, app, sample_user):
+        """Test TOTP verification works with encrypted secrets"""
+        with app.app_context():
+            import pyotp
+            from app.models import User
+            user = db.session.get(User, sample_user)
+
+            plaintext_secret = user.generate_totp_secret()
+            db.session.commit()
+
+            # Generate a valid token
+            totp = pyotp.TOTP(plaintext_secret)
+            valid_token = totp.now()
+
+            # Verification should work
+            assert user.verify_totp(valid_token) is True
+            assert user.verify_totp('000000') is False
+
+    def test_get_totp_uri_with_encrypted_secret(self, app, sample_user):
+        """Test TOTP URI generation works with encrypted secrets"""
+        with app.app_context():
+            from urllib.parse import quote
+            from app.models import User
+            user = db.session.get(User, sample_user)
+
+            user.generate_totp_secret()
+            db.session.commit()
+
+            uri = user.get_totp_uri()
+            assert uri is not None
+            assert 'otpauth://totp/' in uri
+            # Email is URL-encoded in the URI
+            assert quote(user.email, safe='') in uri
+
+    def test_decrypt_legacy_unencrypted_secret(self, app, sample_user):
+        """Test that legacy unencrypted secrets still work"""
+        with app.app_context():
+            import pyotp
+            from app.models import User
+            user = db.session.get(User, sample_user)
+
+            # Simulate a legacy unencrypted secret
+            legacy_secret = pyotp.random_base32()
+            user.totp_secret = legacy_secret  # Store directly without encryption
+            db.session.commit()
+
+            # Verification should still work (fallback to plaintext)
+            totp = pyotp.TOTP(legacy_secret)
+            valid_token = totp.now()
+            assert user.verify_totp(valid_token) is True

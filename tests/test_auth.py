@@ -288,3 +288,103 @@ class TestLoginRoutes:
             'confirm_password': 'ValidPass123'
         }, follow_redirects=True)
         assert response.status_code == 200
+
+
+class TestAccountLockout:
+    """Tests for account lockout (brute force protection)"""
+
+    def test_record_failed_attempt_increments_counter(self, app, sample_user):
+        """Test that failed attempts are recorded"""
+        from app.services.lockout import record_failed_attempt
+        with app.app_context():
+            user = User.query.filter_by(email='test@example.com').first()
+            assert user.failed_attempts == 0
+
+            record_failed_attempt('test@example.com')
+            db.session.refresh(user)
+            assert user.failed_attempts == 1
+
+            record_failed_attempt('test@example.com')
+            db.session.refresh(user)
+            assert user.failed_attempts == 2
+
+    def test_account_locks_after_max_attempts(self, app, sample_user):
+        """Test that account locks after 5 failed attempts"""
+        from app.services.lockout import record_failed_attempt, is_locked, MAX_ATTEMPTS
+        with app.app_context():
+            # Record MAX_ATTEMPTS failures
+            for _ in range(MAX_ATTEMPTS):
+                record_failed_attempt('test@example.com')
+
+            locked, minutes = is_locked('test@example.com')
+            assert locked is True
+            assert minutes is not None
+            assert minutes > 0
+
+    def test_is_locked_returns_false_for_unlocked_account(self, app, sample_user):
+        """Test that unlocked accounts return False"""
+        from app.services.lockout import is_locked
+        with app.app_context():
+            locked, minutes = is_locked('test@example.com')
+            assert locked is False
+            assert minutes is None
+
+    def test_is_locked_returns_false_for_nonexistent_email(self, app):
+        """Test that nonexistent emails don't reveal existence"""
+        from app.services.lockout import is_locked
+        with app.app_context():
+            locked, minutes = is_locked('nonexistent@example.com')
+            assert locked is False
+            assert minutes is None
+
+    def test_clear_lockout_resets_counters(self, app, sample_user):
+        """Test that clear_lockout resets failed attempts"""
+        from app.services.lockout import record_failed_attempt, clear_lockout
+        with app.app_context():
+            user = User.query.filter_by(email='test@example.com').first()
+
+            # Record some failures
+            record_failed_attempt('test@example.com')
+            record_failed_attempt('test@example.com')
+            db.session.refresh(user)
+            assert user.failed_attempts == 2
+
+            # Clear lockout
+            clear_lockout(user)
+            db.session.refresh(user)
+            assert user.failed_attempts == 0
+            assert user.locked_until is None
+
+    def test_login_blocked_when_locked(self, app, client, sample_user):
+        """Test that login is blocked for locked accounts"""
+        from app.services.lockout import record_failed_attempt, MAX_ATTEMPTS
+        with app.app_context():
+            # Lock the account
+            for _ in range(MAX_ATTEMPTS):
+                record_failed_attempt('test@example.com')
+
+        # Try to login
+        response = client.post('/auth/login', data={
+            'email': 'test@example.com',
+            'password': 'TestPass123'
+        }, follow_redirects=True)
+        assert b'temporarily locked' in response.data
+
+    def test_successful_login_clears_lockout(self, app, client, sample_user):
+        """Test that successful login clears failed attempt counter"""
+        from app.services.lockout import record_failed_attempt
+        with app.app_context():
+            # Record a few failed attempts (but not enough to lock)
+            record_failed_attempt('test@example.com')
+            record_failed_attempt('test@example.com')
+
+        # Successful login
+        client.post('/auth/login', data={
+            'email': 'test@example.com',
+            'password': 'TestPass123'
+        }, follow_redirects=True)
+
+        # Check counter was cleared
+        with app.app_context():
+            user = User.query.filter_by(email='test@example.com').first()
+            assert user.failed_attempts == 0
