@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, request, jsonify, abort
 from app.models import Symbol, Signal, Pattern
 from app import db
-from app.decorators import login_required, feature_required
+from app.decorators import login_required, feature_required, limit_query_results
 
 signals_bp = Blueprint('signals', __name__)
 
@@ -32,7 +32,10 @@ def index():
         db_direction = 'bullish' if direction_filter == 'long' else 'bearish'
         query = query.filter_by(direction=db_direction)
 
-    signals = query.order_by(Signal.created_at.desc()).limit(50).all()
+    # Apply tier-based limit (Pro: 50, Premium: unlimited)
+    query = query.order_by(Signal.created_at.desc())
+    query = limit_query_results(query, 'signals_limit')
+    signals = query.all()
 
     # Get all symbols for dropdown
     symbols = Symbol.query.filter_by(is_active=True).order_by(Symbol.symbol).all()

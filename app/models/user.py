@@ -258,6 +258,37 @@ class User(db.Model):
         """Get the limit for a specific feature (None = unlimited)"""
         return self.tier_features.get(feature_name)
 
+    def get_daily_notification_count(self):
+        """Get the number of notifications sent to this user today."""
+        from app.models.user import UserNotification
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        return UserNotification.query.filter(
+            UserNotification.user_id == self.id,
+            UserNotification.sent_at >= today_start,
+            UserNotification.success == True
+        ).count()
+
+    def can_receive_notification_now(self):
+        """Check if user can receive a notification based on daily limit."""
+        if not self.can_receive_notifications:
+            return False
+
+        limit = self.tier_features.get('daily_notifications')
+        if limit is None:  # Unlimited
+            return True
+
+        current_count = self.get_daily_notification_count()
+        return current_count < limit
+
+    def get_notification_delay_seconds(self):
+        """Get notification delay in seconds for user's tier (Free has 10 min delay)."""
+        delay_minutes = self.tier_features.get('notification_delay_minutes', 0)
+        return delay_minutes * 60 if delay_minutes else 0
+
+    def get_allowed_pattern_types(self):
+        """Get pattern types allowed for user's tier (None = all types)."""
+        return self.tier_features.get('pattern_types')
+
     def to_dict(self, include_subscription=True):
         result = {
             'id': self.id,

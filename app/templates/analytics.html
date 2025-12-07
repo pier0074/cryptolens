@@ -132,53 +132,8 @@
                     <span>Notifications Sent</span>
                     <span class="text-xl font-bold text-yellow-400">{{ stats.notified_signals }}</span>
                 </div>
-                <div class="flex justify-between items-center p-3 bg-gray-800/50 rounded">
-                    <span>Avg Backtest Win Rate</span>
-                    <span class="text-xl font-bold {% if avg_win_rate >= 50 %}text-green-400{% else %}text-red-400{% endif %}">
-                        {{ "%.1f"|format(avg_win_rate) }}%
-                    </span>
-                </div>
             </div>
         </div>
-    </div>
-
-    <!-- Recent Backtests -->
-    <div class="bg-card rounded-lg p-6">
-        <h2 class="text-lg font-bold mb-4">Recent Backtests</h2>
-        {% if backtests %}
-        <div class="overflow-x-auto">
-            <table class="w-full text-sm">
-                <thead>
-                    <tr class="border-b border-gray-700">
-                        <th class="text-left p-2 text-muted">Name</th>
-                        <th class="text-left p-2 text-muted">Pattern</th>
-                        <th class="text-center p-2 text-muted">Trades</th>
-                        <th class="text-center p-2 text-muted">Win Rate</th>
-                        <th class="text-center p-2 text-muted">Profit</th>
-                        <th class="text-center p-2 text-muted">Max DD</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for bt in backtests %}
-                    <tr class="border-b border-gray-800">
-                        <td class="p-2">{{ bt.name }}</td>
-                        <td class="p-2 capitalize">{{ bt.pattern_type.replace('_', ' ') }}</td>
-                        <td class="p-2 text-center">{{ bt.total_trades }}</td>
-                        <td class="p-2 text-center {% if bt.win_rate >= 50 %}text-green-400{% else %}text-red-400{% endif %}">
-                            {{ "%.1f"|format(bt.win_rate) }}%
-                        </td>
-                        <td class="p-2 text-center {% if bt.total_profit_pct >= 0 %}text-green-400{% else %}text-red-400{% endif %}">
-                            {{ "%.2f"|format(bt.total_profit_pct) }}%
-                        </td>
-                        <td class="p-2 text-center text-red-400">{{ "%.2f"|format(bt.max_drawdown) }}%</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-        </div>
-        {% else %}
-        <p class="text-muted">No backtests yet. Run a backtest to see results here.</p>
-        {% endif %}
     </div>
 </div>
 {% endblock %}

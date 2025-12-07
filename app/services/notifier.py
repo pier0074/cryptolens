@@ -288,13 +288,18 @@ def notify_confluence(symbol: str, direction: str, aligned_timeframes: list,
     )
 
 
-def get_eligible_subscribers():
+def get_eligible_subscribers(pattern_type: str = None):
     """
     Get all users who are eligible to receive notifications.
     A user is eligible if:
     - Account is active
     - Account is verified
     - Has a valid subscription (active or in grace period)
+    - Has not exceeded daily notification limit
+    - Can view the pattern type (if specified)
+
+    Args:
+        pattern_type: Optional pattern type to filter by tier access
 
     Returns:
         List of User objects
@@ -306,7 +311,47 @@ def get_eligible_subscribers():
         joinedload(User.subscription)
     ).filter_by(is_active=True, is_verified=True).all()
 
-    return [u for u in users if u.can_receive_notifications]
+    eligible = []
+    for u in users:
+        # Check basic notification eligibility
+        if not u.can_receive_notification_now():
+            continue
+
+        # Check pattern type access if specified
+        if pattern_type:
+            allowed_types = u.get_allowed_pattern_types()
+            if allowed_types and pattern_type not in allowed_types:
+                continue
+
+        eligible.append(u)
+
+    return eligible
+
+
+def get_subscribers_with_delay():
+    """
+    Get eligible subscribers grouped by notification delay.
+
+    Returns:
+        Dict with delay_seconds as keys and list of users as values
+    """
+    from sqlalchemy.orm import joinedload
+
+    users = User.query.options(
+        joinedload(User.subscription)
+    ).filter_by(is_active=True, is_verified=True).all()
+
+    by_delay = {}
+    for u in users:
+        if not u.can_receive_notification_now():
+            continue
+
+        delay = u.get_notification_delay_seconds()
+        if delay not in by_delay:
+            by_delay[delay] = []
+        by_delay[delay].append(u)
+
+    return by_delay
 
 
 def send_notification_to_user(user: User, signal_id: int, title: str, message: str,
@@ -370,8 +415,12 @@ def notify_all_subscribers(signal: Signal, test_mode: bool = False,
         success = notify_signal(signal, test_mode, current_price)
         return {'total': 1, 'success': 1 if success else 0, 'failed': 0 if success else 1}
 
-    # Get eligible subscribers
-    subscribers = get_eligible_subscribers()
+    # Get pattern type for tier-based filtering
+    pattern = db.session.get(Pattern, signal.pattern_id) if signal.pattern_id else None
+    pattern_type = pattern.pattern_type if pattern else None
+
+    # Get eligible subscribers (filtered by rate limits and pattern type access)
+    subscribers = get_eligible_subscribers(pattern_type=pattern_type)
 
     if not subscribers:
         log_notify("No eligible subscribers for notification", level='WARNING')

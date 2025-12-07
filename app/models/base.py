@@ -82,7 +82,9 @@ SUBSCRIPTION_TIERS = {
         'name': 'Free',
         'symbols': ['BTC/USDT'],  # Only BTC
         'max_symbols': 1,
-        'daily_notifications': 3,
+        'pattern_types': ['imbalance'],  # FVG only
+        'daily_notifications': 1,
+        'notification_delay_minutes': 10,  # 10-minute delay
         'dashboard': 'limited',  # BTC only
         'patterns_page': False,
         'patterns_limit': 0,
@@ -102,17 +104,19 @@ SUBSCRIPTION_TIERS = {
     'pro': {
         'name': 'Pro',
         'symbols': None,  # Any symbol
-        'max_symbols': 10,
-        'daily_notifications': 100,
+        'max_symbols': 5,
+        'pattern_types': ['imbalance', 'order_block', 'liquidity_sweep'],  # Current 3 patterns
+        'daily_notifications': 20,
+        'notification_delay_minutes': 0,  # No delay
         'dashboard': 'full',
         'patterns_page': True,
         'patterns_limit': 100,  # Last 100 entries
         'signals_page': True,
-        'signals_limit': 100,  # Last 100 entries
-        'analytics_page': True,  # No recent backtest
+        'signals_limit': 50,  # Last 50 entries
+        'analytics_page': True,
         'portfolio': True,
         'portfolio_limit': 1,
-        'transactions_limit': 10,
+        'transactions_limit': 5,  # 5 tx/day
         'backtest': False,
         'stats_page': 'full',
         'api_access': False,
@@ -124,7 +128,9 @@ SUBSCRIPTION_TIERS = {
         'name': 'Premium',
         'symbols': None,  # Any symbol
         'max_symbols': None,  # Unlimited
+        'pattern_types': None,  # All pattern types
         'daily_notifications': None,  # Unlimited
+        'notification_delay_minutes': 0,  # No delay
         'dashboard': 'full',
         'patterns_page': True,
         'patterns_limit': None,  # Full history

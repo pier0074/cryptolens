@@ -43,9 +43,42 @@ class TestDashboardRoutes:
         response = client.get('/analytics')
         assert response.status_code == 200
 
-    def test_analytics_redirects_non_premium(self, client, app, sample_user):
-        """Test analytics redirects non-premium users"""
+    def test_analytics_accessible_to_pro(self, client, app, sample_user):
+        """Test analytics is accessible to Pro users"""
         login_user(client, 'test@example.com', 'TestPass123')
+        response = client.get('/analytics')
+        assert response.status_code == 200  # Pro users have analytics access
+
+    def test_analytics_redirects_free_users(self, client, app):
+        """Test analytics redirects free tier users"""
+        from app.models import User, Subscription
+        from datetime import datetime, timezone, timedelta
+
+        # Create a free user
+        with app.app_context():
+            user = User(
+                email='free@example.com',
+                username='freeuser',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_free123456789'
+            )
+            user.set_password('FreePass123')
+            db.session.add(user)
+            db.session.commit()
+
+            # Add free subscription
+            sub = Subscription(
+                user_id=user.id,
+                plan='free',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=None,  # Free never expires
+                status='active'
+            )
+            db.session.add(sub)
+            db.session.commit()
+
+        login_user(client, 'free@example.com', 'FreePass123')
         response = client.get('/analytics')
         assert response.status_code == 302  # Redirect to upgrade page
 

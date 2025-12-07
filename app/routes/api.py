@@ -19,14 +19,15 @@ csrf.exempt(api_bp)
 
 def require_api_key(f: Callable[..., Any]) -> Callable[..., Any]:
     """
-    Decorator to require API key OR admin session for sensitive endpoints.
+    Decorator to require API key OR Premium user session for API endpoints.
 
     Security: DENY by default. To allow unauthenticated access (dev only),
     set environment variable: ALLOW_UNAUTHENTICATED_API=true
 
     Accepts:
     - API key via X-API-Key header or api_key query param
-    - Admin user session (for UI access)
+    - Admin user session (full access)
+    - Premium user session (API access enabled in tier)
     """
     @wraps(f)
     def decorated(*args: Any, **kwargs: Any) -> JsonResponse:
@@ -34,12 +35,24 @@ def require_api_key(f: Callable[..., Any]) -> Callable[..., Any]:
         if os.getenv('ALLOW_UNAUTHENTICATED_API', 'false').lower() == 'true':
             return f(*args, **kwargs)
 
-        # Check for admin session (UI access)
+        # Check for user session
         user_id = session.get('user_id')
         if user_id:
             user = db.session.get(User, user_id)
-            if user and user.is_admin:
-                return f(*args, **kwargs)
+            if user:
+                # Admins always have full API access
+                if user.is_admin:
+                    return f(*args, **kwargs)
+
+                # Check if user's tier has API access (Premium only)
+                if user.can_access_feature('api_access'):
+                    return f(*args, **kwargs)
+
+                # User exists but doesn't have API access
+                return jsonify({
+                    'error': 'Forbidden',
+                    'message': 'API access requires Premium subscription'
+                }), 403
 
         # Get API key hash from settings
         api_key_hash = Setting.get('api_key_hash')

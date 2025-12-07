@@ -1,10 +1,20 @@
 from flask import Blueprint, render_template, jsonify
-from app.models import Symbol, Pattern, Signal, Candle, Backtest
+from app.models import Symbol, Pattern, Signal, Candle, SUBSCRIPTION_TIERS
 from app.config import Config
 from app.services.patterns import PATTERN_TYPES
-from app.decorators import login_required, tier_required
+from app.decorators import login_required, feature_required, get_current_user, get_effective_tier, filter_symbols_by_tier
 from sqlalchemy import func
 from datetime import datetime, timedelta, timezone
+
+
+def get_allowed_pattern_types(user):
+    """Get pattern types allowed for user's tier."""
+    tier = get_effective_tier(user)
+    tier_config = SUBSCRIPTION_TIERS.get(tier, SUBSCRIPTION_TIERS['free'])
+    allowed = tier_config.get('pattern_types')
+    if allowed is None:
+        return None  # All types allowed
+    return allowed
 
 dashboard_bp = Blueprint('dashboard', __name__)
 
@@ -13,20 +23,34 @@ dashboard_bp = Blueprint('dashboard', __name__)
 @login_required
 def index():
     """Main dashboard with symbol/timeframe matrix"""
-    symbols = Symbol.query.filter_by(is_active=True).all()
+    user = get_current_user()
+    all_symbols = Symbol.query.filter_by(is_active=True).all()
+
+    # Filter symbols by user tier (Free: BTC/USDT only, Pro: 5, Premium: unlimited)
+    symbols = filter_symbols_by_tier(all_symbols, user)
+
+    # Get allowed pattern types for user tier (Free: FVG only)
+    allowed_pattern_types = get_allowed_pattern_types(user)
+
     timeframes = Config.TIMEFRAMES
 
-    # Build matrix data with ALL pattern types
+    # Build matrix data with tier-filtered pattern types
     matrix = {}
     for symbol in symbols:
         matrix[symbol.symbol] = {}
         for tf in timeframes:
             # Get all active patterns for this symbol/timeframe
-            patterns = Pattern.query.filter_by(
+            query = Pattern.query.filter_by(
                 symbol_id=symbol.id,
                 timeframe=tf,
                 status='active'
-            ).order_by(Pattern.detected_at.desc()).all()
+            )
+
+            # Filter by allowed pattern types for user tier
+            if allowed_pattern_types:
+                query = query.filter(Pattern.pattern_type.in_(allowed_pattern_types))
+
+            patterns = query.order_by(Pattern.detected_at.desc()).all()
 
             if patterns:
                 # Group by pattern type
@@ -46,25 +70,32 @@ def index():
             else:
                 matrix[symbol.symbol][tf] = None
 
-    # Get recent signals
-    recent_signals = Signal.query.order_by(Signal.created_at.desc()).limit(10).all()
+    # Get recent signals (filtered by allowed symbols)
+    symbol_ids = [s.id for s in symbols]
+    recent_signals = Signal.query.filter(
+        Signal.symbol_id.in_(symbol_ids)
+    ).order_by(Signal.created_at.desc()).limit(10).all()
 
     # Enrich signals with symbol info
     for signal in recent_signals:
         signal.symbol_obj = Symbol.query.get(signal.symbol_id)
+
+    # Filter pattern types shown in legend based on tier
+    display_pattern_types = allowed_pattern_types if allowed_pattern_types else PATTERN_TYPES
 
     return render_template('dashboard.html',
                            symbols=symbols,
                            timeframes=timeframes,
                            matrix=matrix,
                            recent_signals=recent_signals,
-                           pattern_types=PATTERN_TYPES)
+                           pattern_types=display_pattern_types)
 
 
 @dashboard_bp.route('/analytics')
-@tier_required('premium')
+@login_required
+@feature_required('analytics_page')
 def analytics():
-    """Performance analytics dashboard - Premium only"""
+    """Performance analytics dashboard - Pro+ required"""
     # Get statistics
     stats = {
         'total_symbols': Symbol.query.filter_by(is_active=True).count(),
@@ -89,12 +120,6 @@ def analytics():
     day_ago = datetime.now(timezone.utc) - timedelta(days=1)
     recent_patterns = Pattern.query.filter(Pattern.created_at >= day_ago).count()
 
-    # Backtest stats
-    backtests = Backtest.query.order_by(Backtest.created_at.desc()).limit(10).all()
-    avg_win_rate = 0
-    if backtests:
-        avg_win_rate = sum(b.win_rate for b in backtests) / len(backtests)
-
     # Top performing symbols (by pattern count)
     top_symbols = []
     symbols = Symbol.query.filter_by(is_active=True).all()
@@ -111,6 +136,4 @@ def analytics():
                            bullish_count=bullish_count,
                            bearish_count=bearish_count,
                            recent_patterns=recent_patterns,
-                           avg_win_rate=avg_win_rate,
-                           top_symbols=top_symbols,
-                           backtests=backtests)
+                           top_symbols=top_symbols)
