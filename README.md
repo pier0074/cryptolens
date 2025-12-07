@@ -10,7 +10,7 @@ Automated detection of institutional trading patterns across multiple timeframes
 
 ## Features
 
-- **Pattern Detection**: FVG, Order Blocks, Liquidity Sweeps across 6 timeframes
+- **Pattern Detection**: FVG, OB, Sweep patterns across 6 timeframes
 - **Multi-TF Confluence**: Signals generated when patterns align across timeframes
 - **Interactive Charts**: TradingView-style charts with pattern visualization
 - **Smart Price Formatting**: Auto-adjusts decimals for micro-cap to large-cap tokens
@@ -260,9 +260,9 @@ Patterns auto-expire based on timeframe significance:
 
 | Pattern Type | Free | Pro | Premium |
 |--------------|:----:|:---:|:-------:|
-| Fair Value Gap (FVG) | ✓ | ✓ | ✓ |
-| Order Block (OB) | ✗ | ✓ | ✓ |
-| Liquidity Sweep | ✗ | ✓ | ✓ |
+| FVG (Fair Value Gap) | ✓ | ✓ | ✓ |
+| OB (Order Block) | ✗ | ✓ | ✓ |
+| Sweep (Liquidity Sweep) | ✗ | ✓ | ✓ |
 
 ---
 
