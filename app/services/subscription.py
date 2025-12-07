@@ -62,7 +62,7 @@ def create_subscription(user_id: int, plan: str = 'free') -> Subscription:
     return subscription
 
 
-def extend_subscription(user_id: int, plan: str) -> Subscription:
+def extend_subscription(user_id: int, plan: str, custom_days: int = None) -> Subscription:
     """
     Extend an existing subscription.
     Adds days to current expiry (or from now if expired).
@@ -70,6 +70,7 @@ def extend_subscription(user_id: int, plan: str) -> Subscription:
     Args:
         user_id: User ID
         plan: Plan type to add
+        custom_days: Optional custom number of days (overrides plan default)
 
     Returns:
         Updated Subscription object
@@ -101,14 +102,17 @@ def extend_subscription(user_id: int, plan: str) -> Subscription:
         db.session.commit()
         return subscription
 
+    # Use custom_days if provided, otherwise use plan default
+    days_to_add = custom_days if custom_days else plan_config['days']
+
     # Calculate new expiry date
     expires = _ensure_utc_naive(subscription.expires_at) if subscription.expires_at else None
     if expires and expires > now:
         # Add to current expiry
-        new_expiry = expires + timedelta(days=plan_config['days'])
+        new_expiry = expires + timedelta(days=days_to_add)
     else:
         # Start from now
-        new_expiry = now + timedelta(days=plan_config['days'])
+        new_expiry = now + timedelta(days=days_to_add)
 
     subscription.plan = plan
     subscription.expires_at = new_expiry

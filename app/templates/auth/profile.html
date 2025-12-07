@@ -381,9 +381,10 @@
     <!-- ===================== TRADING TAB (All Users with Tier Restrictions) ===================== -->
     <div x-show="activeTab === 'trading'" x-cloak>
         {% set tier = user.subscription_tier %}
-        {% set is_free = tier == 'free' %}
-        {% set is_pro = tier == 'pro' %}
-        {% set is_premium = tier == 'premium' or user.is_admin %}
+        {% set is_admin = user.is_admin %}
+        {% set is_free = tier == 'free' and not is_admin %}
+        {% set is_pro = tier == 'pro' and not is_admin %}
+        {% set is_premium = tier == 'premium' or is_admin %}
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <!-- Tier Info Banner -->

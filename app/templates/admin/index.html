@@ -111,7 +111,7 @@
     </div>
 
     <!-- Quick Links -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
         <a href="{{ url_for('admin.users') }}" class="bg-card rounded-lg p-6 hover:bg-gray-700 transition">
             <h3 class="text-lg font-semibold">Manage Users</h3>
             <p class="text-gray-400 text-sm">View and manage user accounts</p>
@@ -125,6 +125,18 @@
         <a href="{{ url_for('admin.crons') }}" class="bg-card rounded-lg p-6 hover:bg-gray-700 transition">
             <h3 class="text-lg font-semibold">Cron Jobs</h3>
             <p class="text-gray-400 text-sm">Monitor scheduled tasks and history</p>
+        </a>
+    </div>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <a href="{{ url_for('admin.notifications') }}" class="bg-blue-900/30 border border-blue-700 rounded-lg p-6 hover:bg-blue-900/50 transition">
+            <h3 class="text-lg font-semibold text-blue-400">Send Notifications</h3>
+            <p class="text-blue-200/70 text-sm">Broadcast messages to users</p>
+        </a>
+
+        <a href="{{ url_for('admin.notification_templates') }}" class="bg-card rounded-lg p-6 hover:bg-gray-700 transition">
+            <h3 class="text-lg font-semibold">Notification Templates</h3>
+            <p class="text-gray-400 text-sm">Create reusable message templates</p>
         </a>
 
         <a href="{{ url_for('admin.create_user') }}" class="bg-card rounded-lg p-6 hover:bg-gray-700 transition">

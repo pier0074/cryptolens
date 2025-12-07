@@ -250,10 +250,16 @@ def modify_subscription(user_id):
     """Modify user subscription"""
     action = request.form.get('action')
     plan = request.form.get('plan', 'monthly')
+    custom_days = request.form.get('custom_days')
 
     try:
-        if action == 'extend':
-            extend_subscription(user_id, plan)
+        if action == 'create':
+            # Create new subscription (cancel existing first)
+            cancel_subscription(user_id)
+            extend_subscription(user_id, plan, custom_days=int(custom_days) if custom_days else None)
+            flash(f'New {plan} subscription created.', 'success')
+        elif action == 'extend':
+            extend_subscription(user_id, plan, custom_days=int(custom_days) if custom_days else None)
             flash(f'Subscription extended with {plan} plan.', 'success')
         elif action == 'cancel':
             cancel_subscription(user_id)
@@ -268,6 +274,8 @@ def modify_subscription(user_id):
             flash('Invalid action.', 'error')
     except SubscriptionError as e:
         flash(str(e), 'error')
+    except ValueError as e:
+        flash(f'Invalid custom days value: {e}', 'error')
 
     return redirect(url_for('admin.user_detail', user_id=user_id))
 
