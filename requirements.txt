@@ -28,6 +28,10 @@ aiohttp>=3.9.0  # Async HTTP for concurrent notifications
 # Background Jobs
 rq>=1.16.0  # Redis Queue for background task processing
 
+# Monitoring
+prometheus-client>=0.20.0  # Prometheus metrics
+# Error tracking is self-hosted (uses PostgreSQL + email alerts)
+
 # Scheduler
 APScheduler>=3.10.4
 
@@ -43,3 +47,10 @@ cryptography>=42.0.0
 # Development
 pytest>=7.4.0
 pytest-cov>=4.1.0
+pytest-asyncio>=0.23.0  # For async test support
+
+# Documentation
+PyYAML>=6.0.0  # For OpenAPI spec parsing
+
+# Load Testing (optional)
+locust>=2.20.0  # Load testing framework

@@ -133,6 +133,12 @@ def create_app(config_name=None):
     from app.config import config
     app.config.from_object(config[config_name])
 
+    # Error tracking is enabled by default using built-in tracker
+    # No external services required - uses PostgreSQL for storage
+    app.config['ERROR_TRACKING_ENABLED'] = os.getenv('ERROR_TRACKING_ENABLED', 'true').lower() == 'true'
+    if app.config['ERROR_TRACKING_ENABLED']:
+        logging.getLogger('cryptolens').info("Error tracking enabled (self-hosted)")
+
     # Session security configuration
     # Secure cookies in production (HTTPS), always HttpOnly, SameSite=Lax
     app.config.update(
@@ -193,6 +199,7 @@ def create_app(config_name=None):
     def after_request(response):
         if hasattr(g, 'start_time'):
             elapsed_ms = (time.time() - g.start_time) * 1000
+            elapsed_sec = elapsed_ms / 1000
 
             # Log level based on response time
             log_msg = f"[{elapsed_ms:7.1f}ms] {request.method} {request.path} -> {response.status_code}"
@@ -205,6 +212,16 @@ def create_app(config_name=None):
                 req_logger.info(log_msg)
             else:
                 req_logger.warning(log_msg)
+
+            # Record Prometheus metrics (skip /metrics endpoint itself)
+            if request.path != '/metrics':
+                try:
+                    from app.routes.metrics import REQUEST_COUNT, REQUEST_LATENCY
+                    endpoint = request.endpoint or request.path
+                    REQUEST_LATENCY.labels(method=request.method, endpoint=endpoint).observe(elapsed_sec)
+                    REQUEST_COUNT.labels(method=request.method, endpoint=endpoint, status=response.status_code).inc()
+                except Exception:
+                    pass  # Don't fail request if metrics unavailable
         return response
 
     # Register error handlers for domain exceptions
@@ -232,6 +249,15 @@ def create_app(config_name=None):
         from flask import jsonify, request, render_template
         import logging
         logging.getLogger('cryptolens').error(f"Server error: {error}")
+
+        # Capture error with built-in tracker
+        if app.config.get('ERROR_TRACKING_ENABLED'):
+            try:
+                from app.services.error_tracker import capture_exception
+                capture_exception(error)
+            except Exception as e:
+                logging.getLogger('cryptolens').warning(f"Failed to capture error: {e}")
+
         if request.is_json or request.path.startswith('/api/'):
             return jsonify({'error': 'Server error', 'message': 'An unexpected error occurred'}), 500
         return render_template('errors/500.html'), 500
@@ -250,6 +276,8 @@ def create_app(config_name=None):
     from app.routes.admin import admin_bp
     from app.routes.payments import payments_bp
     from app.routes.main import main_bp
+    from app.routes.metrics import metrics_bp
+    from app.routes.docs import docs_bp
 
     app.register_blueprint(dashboard_bp)
     app.register_blueprint(main_bp)
@@ -264,10 +292,13 @@ def create_app(config_name=None):
     app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(admin_bp, url_prefix='/admin')
     app.register_blueprint(payments_bp)
+    app.register_blueprint(metrics_bp)  # Prometheus metrics at /metrics
+    app.register_blueprint(docs_bp, url_prefix='/api')  # API docs at /api/docs
 
     # Exempt API blueprint from CSRF (uses API key auth for machine-to-machine)
     # Payment webhooks are exempted individually with @csrf.exempt decorator
     csrf.exempt(api_bp)
+    csrf.exempt(metrics_bp)  # Metrics endpoint is scraped by Prometheus
 
     # Create database tables and enable WAL mode for better concurrency
     with app.app_context():

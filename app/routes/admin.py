@@ -411,3 +411,109 @@ def api_cron_runs(job_id):
         'job': job.to_dict(),
         'runs': [r.to_dict() for r in runs]
     })
+
+
+# ============================================
+# Error Tracking Routes
+# ============================================
+
+@admin_bp.route('/errors')
+@admin_required
+def errors():
+    """Error tracking dashboard"""
+    from app.models import ErrorLog
+    from app.services.error_tracker import get_error_stats
+
+    page = request.args.get('page', 1, type=int)
+    per_page = 25
+    status = request.args.get('status', 'all')
+    error_type = request.args.get('type', '')
+
+    query = ErrorLog.query
+
+    if status == 'new':
+        query = query.filter(ErrorLog.status == 'new')
+    elif status == 'acknowledged':
+        query = query.filter(ErrorLog.status == 'acknowledged')
+    elif status == 'resolved':
+        query = query.filter(ErrorLog.status == 'resolved')
+    elif status == 'unresolved':
+        query = query.filter(ErrorLog.status.in_(['new', 'acknowledged']))
+
+    if error_type:
+        query = query.filter(ErrorLog.error_type.ilike(f'%{error_type}%'))
+
+    query = query.order_by(ErrorLog.last_seen.desc())
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+    stats = get_error_stats(days=7)
+
+    return render_template('admin/errors.html',
+                           errors=pagination.items,
+                           pagination=pagination,
+                           stats=stats,
+                           status=status,
+                           error_type=error_type)
+
+
+@admin_bp.route('/errors/<int:error_id>')
+@admin_required
+def error_detail(error_id):
+    """Error detail page"""
+    from app.models import ErrorLog
+
+    error = ErrorLog.query.get_or_404(error_id)
+    return render_template('admin/error_detail.html', error=error)
+
+
+@admin_bp.route('/errors/<int:error_id>/acknowledge', methods=['POST'])
+@admin_required
+def acknowledge_error(error_id):
+    """Mark error as acknowledged"""
+    from app.models import ErrorLog
+
+    error = ErrorLog.query.get_or_404(error_id)
+    error.status = 'acknowledged'
+    db.session.commit()
+    flash('Error acknowledged.', 'success')
+    return redirect(url_for('admin.error_detail', error_id=error_id))
+
+
+@admin_bp.route('/errors/<int:error_id>/resolve', methods=['POST'])
+@admin_required
+def resolve_error(error_id):
+    """Mark error as resolved"""
+    from app.models import ErrorLog
+
+    error = ErrorLog.query.get_or_404(error_id)
+    error.status = 'resolved'
+    error.resolved_at = datetime.now(timezone.utc)
+    error.resolved_by = session.get('user_id')
+    error.notes = request.form.get('notes', '')
+    db.session.commit()
+    flash('Error resolved.', 'success')
+    return redirect(url_for('admin.error_detail', error_id=error_id))
+
+
+@admin_bp.route('/errors/<int:error_id>/ignore', methods=['POST'])
+@admin_required
+def ignore_error(error_id):
+    """Mark error as ignored"""
+    from app.models import ErrorLog
+
+    error = ErrorLog.query.get_or_404(error_id)
+    error.status = 'ignored'
+    db.session.commit()
+    flash('Error ignored.', 'info')
+    return redirect(url_for('admin.errors'))
+
+
+@admin_bp.route('/api/errors/stats')
+@admin_required
+def api_error_stats():
+    """Get error statistics as JSON"""
+    from app.services.error_tracker import get_error_stats
+
+    days = request.args.get('days', 7, type=int)
+    stats = get_error_stats(days=days)
+    return jsonify(stats)

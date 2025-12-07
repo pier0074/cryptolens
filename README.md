@@ -294,6 +294,8 @@ Each user has a unique notification topic, ensuring privacy.
 
 ## API
 
+**Interactive Documentation**: Visit `/api/docs` for Swagger UI with full API documentation.
+
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
 | `/api/health` | GET | No | Health check for monitoring |
@@ -305,15 +307,57 @@ Each user has a unique notification topic, ensuring privacy.
 | `/api/scan` | POST | API Key | Trigger manual pattern scan |
 | `/api/fetch` | POST | API Key | Trigger manual data fetch |
 | `/api/scan/run` | POST | API Key | Run full fetch cycle |
+| `/api/docs` | GET | No | Swagger UI documentation |
+| `/api/docs/openapi.yaml` | GET | No | OpenAPI specification (YAML) |
+| `/api/docs/openapi.json` | GET | No | OpenAPI specification (JSON) |
 
 **Note**: POST endpoints require API Key in `X-API-Key` header (set in Settings).
+
+---
+
+## Monitoring & Observability
+
+### Prometheus Metrics
+
+A `/metrics` endpoint exposes Prometheus-compatible metrics:
+
+- **Request metrics**: HTTP request count and latency by endpoint
+- **Business metrics**: Active patterns, signals, users, subscriptions
+- **Cache metrics**: Hit/miss ratios
+- **Job metrics**: Queue sizes and processing times
+
+Configure your Prometheus to scrape `http://your-server:5000/metrics`.
+
+### Error Tracking (Self-Hosted)
+
+Built-in error tracking that stores errors in PostgreSQL and sends email alerts. No external services or Docker required.
+
+**Features:**
+- Automatic capture of all unhandled exceptions
+- Error grouping by hash (similar errors consolidated)
+- Request context capture (endpoint, user, IP, headers)
+- Email alerts for critical errors
+- Admin dashboard at `/admin/errors`
+
+**Configuration:**
+```bash
+# Enable/disable in .env
+ERROR_TRACKING_ENABLED=true
+```
+
+**Critical errors that trigger email alerts:**
+- Database errors (DatabaseError, OperationalError, IntegrityError)
+- Connection errors (ConnectionError, TimeoutError)
+- Security errors (AuthenticationError, PaymentError, SecurityError)
+
+View and manage errors in Admin Panel > Error Tracking.
 
 ---
 
 ## Testing
 
 ```bash
-python -m pytest                    # All tests (314 tests)
+python -m pytest                    # All tests (358 tests)
 python -m pytest --cov=app          # With coverage
 python -m pytest tests/test_auth.py # Auth tests only
 ```
@@ -325,20 +369,25 @@ python -m pytest tests/test_auth.py # Auth tests only
 ```
 cryptolens/
 ├── app/
-│   ├── routes/          # Web routes (api, auth, dashboard, patterns, etc.)
+│   ├── routes/          # Web routes (api, auth, dashboard, patterns, metrics, etc.)
 │   ├── services/        # Business logic (auth, email, notifier, signals, etc.)
 │   │   └── patterns/    # FVG, OB, Sweep detectors
+│   ├── jobs/            # Background jobs (notifications, scanner, maintenance)
+│   ├── models/          # SQLAlchemy models (user, trading, portfolio, system)
 │   ├── templates/       # Jinja2 HTML templates
 │   ├── decorators.py    # Access control decorators
-│   └── models.py        # SQLAlchemy models (User, Subscription, etc.)
+│   ├── exceptions.py    # Domain exceptions
+│   └── constants.py     # Application constants
 ├── scripts/
 │   ├── fetch.py         # Real-time fetch + detection
 │   ├── fetch_historical.py
 │   ├── compute_stats.py # Cache stats
 │   ├── db_health.py     # Data verification
 │   └── migrate_all.py   # DB migrations
-├── tests/               # Test suite (314 tests)
+├── tests/               # Test suite (358 tests)
+├── worker.py            # Background job worker (RQ)
 ├── crontab.txt          # Cron configuration
+├── PRODUCTION.md        # Production deployment guide
 └── run.py
 ```
 

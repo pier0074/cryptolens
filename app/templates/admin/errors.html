@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+
+{% block title %}Error Tracking - Admin{% endblock %}
+
+{% block content %}
+<div class="container-fluid py-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2>Error Tracking</h2>
+        <a href="{{ url_for('admin.index') }}" class="btn btn-outline-secondary">
+            Back to Admin
+        </a>
+    </div>
+
+    <!-- Stats Cards -->
+    <div class="row mb-4">
+        <div class="col-md-3">
+            <div class="card bg-danger text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Total Errors (7d)</h5>
+                    <h2>{{ stats.total or 0 }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-warning text-dark">
+                <div class="card-body">
+                    <h5 class="card-title">Unique Errors</h5>
+                    <h2>{{ stats.unique or 0 }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-info text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Unresolved</h5>
+                    <h2>{{ stats.unresolved or 0 }}</h2>
+                </div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card bg-success text-white">
+                <div class="card-body">
+                    <h5 class="card-title">Resolved</h5>
+                    <h2>{{ (stats.total or 0) - (stats.unresolved or 0) }}</h2>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card mb-4">
+        <div class="card-body">
+            <form method="get" class="row g-3">
+                <div class="col-md-3">
+                    <label class="form-label">Status</label>
+                    <select name="status" class="form-select">
+                        <option value="all" {% if status == 'all' %}selected{% endif %}>All</option>
+                        <option value="new" {% if status == 'new' %}selected{% endif %}>New</option>
+                        <option value="acknowledged" {% if status == 'acknowledged' %}selected{% endif %}>Acknowledged</option>
+                        <option value="unresolved" {% if status == 'unresolved' %}selected{% endif %}>Unresolved</option>
+                        <option value="resolved" {% if status == 'resolved' %}selected{% endif %}>Resolved</option>
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Error Type</label>
+                    <input type="text" name="type" class="form-control"
+                           value="{{ error_type }}" placeholder="Filter by type...">
+                </div>
+                <div class="col-md-2 d-flex align-items-end">
+                    <button type="submit" class="btn btn-primary">Filter</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Error List -->
+    <div class="card">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>Status</th>
+                            <th>Type</th>
+                            <th>Message</th>
+                            <th>Endpoint</th>
+                            <th>Count</th>
+                            <th>Last Seen</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for error in errors %}
+                        <tr>
+                            <td>
+                                {% if error.status == 'new' %}
+                                <span class="badge bg-danger">New</span>
+                                {% elif error.status == 'acknowledged' %}
+                                <span class="badge bg-warning text-dark">Ack</span>
+                                {% elif error.status == 'resolved' %}
+                                <span class="badge bg-success">Resolved</span>
+                                {% else %}
+                                <span class="badge bg-secondary">{{ error.status }}</span>
+                                {% endif %}
+                            </td>
+                            <td><code>{{ error.error_type }}</code></td>
+                            <td class="text-truncate" style="max-width: 300px;">
+                                {{ error.message[:100] }}{% if error.message|length > 100 %}...{% endif %}
+                            </td>
+                            <td><small>{{ error.endpoint or '-' }}</small></td>
+                            <td>
+                                <span class="badge bg-secondary">{{ error.occurrence_count }}</span>
+                            </td>
+                            <td>
+                                <small>{{ error.last_seen.strftime('%Y-%m-%d %H:%M') if error.last_seen else '-' }}</small>
+                            </td>
+                            <td>
+                                <a href="{{ url_for('admin.error_detail', error_id=error.id) }}"
+                                   class="btn btn-sm btn-outline-primary">View</a>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="7" class="text-center text-muted py-4">
+                                No errors found. That's good!
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Pagination -->
+            {% if pagination.pages > 1 %}
+            <nav class="mt-3">
+                <ul class="pagination justify-content-center">
+                    {% if pagination.has_prev %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('admin.errors', page=pagination.prev_num, status=status, type=error_type) }}">Previous</a>
+                    </li>
+                    {% endif %}
+
+                    {% for p in pagination.iter_pages() %}
+                        {% if p %}
+                        <li class="page-item {% if p == pagination.page %}active{% endif %}">
+                            <a class="page-link" href="{{ url_for('admin.errors', page=p, status=status, type=error_type) }}">{{ p }}</a>
+                        </li>
+                        {% else %}
+                        <li class="page-item disabled"><span class="page-link">...</span></li>
+                        {% endif %}
+                    {% endfor %}
+
+                    {% if pagination.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="{{ url_for('admin.errors', page=pagination.next_num, status=status, type=error_type) }}">Next</a>
+                    </li>
+                    {% endif %}
+                </ul>
+            </nav>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Top Errors by Type -->
+    {% if stats.by_type %}
+    <div class="card mt-4">
+        <div class="card-header">
+            <h5 class="mb-0">Top Error Types (7 days)</h5>
+        </div>
+        <div class="card-body">
+            <table class="table table-sm">
+                <thead>
+                    <tr>
+                        <th>Type</th>
+                        <th>Count</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in stats.by_type[:5] %}
+                    <tr>
+                        <td><code>{{ item.type }}</code></td>
+                        <td>{{ item.count }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

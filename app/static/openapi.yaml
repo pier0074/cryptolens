@@ -1,0 +1,637 @@
+openapi: 3.0.3
+info:
+  title: CryptoLens API
+  description: |
+    Smart Money Concepts (SMC) Pattern Detection API for Crypto Trading.
+
+    ## Authentication
+
+    Some endpoints require API key authentication. Include the API key in one of:
+    - Header: `X-API-Key: your-api-key`
+    - Query parameter: `?api_key=your-api-key`
+
+    API keys are configured in the Settings page of the web application.
+
+    ## Rate Limiting
+
+    - Public endpoints: 200 requests/minute
+    - Protected endpoints: As specified per endpoint
+
+  version: 2.0.0
+  contact:
+    name: CryptoLens Support
+    url: https://github.com/pier0074/cryptolens/issues
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: /api
+    description: Current server
+
+tags:
+  - name: Health
+    description: Health check and monitoring
+  - name: Market Data
+    description: Symbols, candles, and market data
+  - name: Patterns
+    description: Detected trading patterns
+  - name: Signals
+    description: Trading signals and alerts
+  - name: Operations
+    description: Manual triggers and scheduler control (API key required)
+
+paths:
+  /health:
+    get:
+      tags:
+        - Health
+      summary: Health check
+      description: |
+        Health check endpoint for monitoring and load balancers.
+        Returns current status of database and cache connections.
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Service is healthy or degraded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+              examples:
+                healthy:
+                  summary: Healthy response
+                  value:
+                    status: healthy
+                    database: connected
+                    cache: redis
+                    timestamp: "2025-01-15T10:30:00Z"
+                    version: "2.0.0"
+                degraded:
+                  summary: Degraded response
+                  value:
+                    status: degraded
+                    database: connected
+                    cache: error
+                    cache_error: "Connection refused"
+                    timestamp: "2025-01-15T10:30:00Z"
+                    version: "2.0.0"
+        '503':
+          description: Service is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  /symbols:
+    get:
+      tags:
+        - Market Data
+      summary: List symbols
+      description: Get all tracked cryptocurrency symbols
+      operationId: getSymbols
+      parameters:
+        - name: active
+          in: query
+          description: Filter to active symbols only
+          schema:
+            type: string
+            enum: ['true', 'false']
+            default: 'true'
+      responses:
+        '200':
+          description: List of symbols
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Symbol'
+              example:
+                - id: 1
+                  symbol: "BTC/USDT"
+                  is_active: true
+                  created_at: "2025-01-01T00:00:00Z"
+                - id: 2
+                  symbol: "ETH/USDT"
+                  is_active: true
+                  created_at: "2025-01-01T00:00:00Z"
+
+  /candles/{symbol}/{timeframe}:
+    get:
+      tags:
+        - Market Data
+      summary: Get candles
+      description: Get OHLCV candle data for a symbol and timeframe
+      operationId: getCandles
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          description: Trading pair (use dash instead of slash, e.g., BTC-USDT)
+          schema:
+            type: string
+          example: BTC-USDT
+        - name: timeframe
+          in: path
+          required: true
+          description: Candle timeframe
+          schema:
+            type: string
+            enum: ['1m', '5m', '15m', '1h', '4h', '1d']
+          example: '1h'
+        - name: limit
+          in: query
+          description: Maximum number of candles to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+            default: 200
+      responses:
+        '200':
+          description: List of candles (oldest first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Candle'
+        '404':
+          description: Symbol not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /patterns:
+    get:
+      tags:
+        - Patterns
+      summary: Get patterns
+      description: Get detected trading patterns with optional filters
+      operationId: getPatterns
+      parameters:
+        - name: symbol
+          in: query
+          description: Filter by symbol (use dash instead of slash)
+          schema:
+            type: string
+          example: BTC-USDT
+        - name: timeframe
+          in: query
+          description: Filter by timeframe
+          schema:
+            type: string
+            enum: ['1m', '5m', '15m', '1h', '4h', '1d']
+        - name: status
+          in: query
+          description: Filter by pattern status
+          schema:
+            type: string
+            enum: ['active', 'filled', 'expired']
+            default: active
+        - name: limit
+          in: query
+          description: Maximum number of patterns to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        '200':
+          description: List of patterns
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Pattern'
+
+  /signals:
+    get:
+      tags:
+        - Signals
+      summary: Get signals
+      description: Get trading signals with optional filters
+      operationId: getSignals
+      parameters:
+        - name: status
+          in: query
+          description: Filter by signal status
+          schema:
+            type: string
+            enum: ['active', 'triggered', 'expired']
+        - name: direction
+          in: query
+          description: Filter by signal direction
+          schema:
+            type: string
+            enum: ['bullish', 'bearish']
+        - name: limit
+          in: query
+          description: Maximum number of signals to return
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 50
+      responses:
+        '200':
+          description: List of signals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Signal'
+
+  /matrix:
+    get:
+      tags:
+        - Patterns
+      summary: Get pattern matrix
+      description: |
+        Get the symbol/timeframe pattern matrix showing the direction
+        of the most recent active pattern for each combination.
+        Results are cached for 60 seconds.
+      operationId: getMatrix
+      responses:
+        '200':
+          description: Pattern matrix
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PatternMatrix'
+              example:
+                BTC/USDT:
+                  1m: neutral
+                  5m: bullish
+                  15m: bullish
+                  1h: neutral
+                  4h: bearish
+                  1d: neutral
+                ETH/USDT:
+                  1m: bearish
+                  5m: neutral
+                  15m: bullish
+                  1h: bullish
+                  4h: neutral
+                  1d: neutral
+
+  /scan:
+    post:
+      tags:
+        - Operations
+      summary: Trigger pattern scan
+      description: Manually trigger a pattern scan across all symbols
+      operationId: triggerScan
+      security:
+        - ApiKeyHeader: []
+        - ApiKeyQuery: []
+      responses:
+        '200':
+          description: Scan results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanResult'
+        '401':
+          description: Unauthorized - API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limit exceeded (1 per minute)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '503':
+          description: API not configured
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /fetch:
+    post:
+      tags:
+        - Operations
+      summary: Trigger data fetch
+      description: Manually trigger data fetch for a specific symbol and timeframe
+      operationId: triggerFetch
+      security:
+        - ApiKeyHeader: []
+        - ApiKeyQuery: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - symbol
+                - timeframe
+              properties:
+                symbol:
+                  type: string
+                  description: Trading pair
+                  example: BTC/USDT
+                timeframe:
+                  type: string
+                  enum: ['1m', '5m', '15m', '1h', '4h', '1d']
+                  example: '1h'
+      responses:
+        '200':
+          description: Fetch results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  candles_fetched:
+                    type: integer
+        '400':
+          description: Missing required fields
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limit exceeded (5 per minute)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /scan/run:
+    post:
+      tags:
+        - Operations
+      summary: Run full scan cycle
+      description: Trigger a complete fetch and scan cycle
+      operationId: runScanNow
+      security:
+        - ApiKeyHeader: []
+        - ApiKeyQuery: []
+      responses:
+        '200':
+          description: Scan cycle results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ScanResult'
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limit exceeded (1 per minute)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /scheduler/status:
+    get:
+      tags:
+        - Operations
+      summary: Get scheduler status
+      description: Get the current status of the background scheduler
+      operationId: getSchedulerStatus
+      responses:
+        '200':
+          description: Scheduler status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchedulerStatus'
+
+components:
+  securitySchemes:
+    ApiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API key passed in header
+    ApiKeyQuery:
+      type: apiKey
+      in: query
+      name: api_key
+      description: API key passed as query parameter
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Error type or code
+        message:
+          type: string
+          description: Human-readable error message
+      required:
+        - error
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, degraded, unhealthy]
+        database:
+          type: string
+          enum: [connected, error]
+        cache:
+          type: string
+          enum: [redis, memory, error, unknown]
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+        database_error:
+          type: string
+          description: Present only if database has error
+        cache_error:
+          type: string
+          description: Present only if cache has error
+
+    Symbol:
+      type: object
+      properties:
+        id:
+          type: integer
+        symbol:
+          type: string
+          example: BTC/USDT
+        is_active:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    Candle:
+      type: object
+      properties:
+        id:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+        open:
+          type: number
+          format: float
+        high:
+          type: number
+          format: float
+        low:
+          type: number
+          format: float
+        close:
+          type: number
+          format: float
+        volume:
+          type: number
+          format: float
+
+    Pattern:
+      type: object
+      properties:
+        id:
+          type: integer
+        symbol_id:
+          type: integer
+        timeframe:
+          type: string
+        pattern_type:
+          type: string
+          enum: [imbalance, order_block, liquidity_sweep]
+        direction:
+          type: string
+          enum: [bullish, bearish]
+        status:
+          type: string
+          enum: [active, filled, expired]
+        zone_high:
+          type: number
+          format: float
+        zone_low:
+          type: number
+          format: float
+        detected_at:
+          type: string
+          format: date-time
+        filled_at:
+          type: string
+          format: date-time
+          nullable: true
+        expires_at:
+          type: string
+          format: date-time
+        strength:
+          type: number
+          format: float
+          minimum: 0
+          maximum: 1
+
+    Signal:
+      type: object
+      properties:
+        id:
+          type: integer
+        symbol:
+          type: string
+          example: BTC/USDT
+        direction:
+          type: string
+          enum: [bullish, bearish]
+        confluence_score:
+          type: integer
+          minimum: 2
+        timeframes:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [active, triggered, expired]
+        entry_price:
+          type: number
+          format: float
+        stop_loss:
+          type: number
+          format: float
+        take_profit:
+          type: number
+          format: float
+        created_at:
+          type: string
+          format: date-time
+
+    PatternMatrix:
+      type: object
+      additionalProperties:
+        type: object
+        properties:
+          1m:
+            type: string
+            enum: [bullish, bearish, neutral]
+          5m:
+            type: string
+            enum: [bullish, bearish, neutral]
+          15m:
+            type: string
+            enum: [bullish, bearish, neutral]
+          1h:
+            type: string
+            enum: [bullish, bearish, neutral]
+          4h:
+            type: string
+            enum: [bullish, bearish, neutral]
+          1d:
+            type: string
+            enum: [bullish, bearish, neutral]
+
+    ScanResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        patterns_detected:
+          type: integer
+        signals_generated:
+          type: integer
+        duration_seconds:
+          type: number
+          format: float
+
+    SchedulerStatus:
+      type: object
+      properties:
+        running:
+          type: boolean
+        mode:
+          type: string
+          enum: [cron, apscheduler, disabled]
+        last_run:
+          type: string
+          format: date-time
+          nullable: true
+        next_run:
+          type: string
+          format: date-time
+          nullable: true

@@ -58,6 +58,12 @@ from app.models.user import (
     UserNotification,
 )
 
+# Error tracking models
+from app.models.errors import (
+    ErrorLog,
+    ErrorStats,
+)
+
 # Export all for 'from app.models import *'
 __all__ = [
     # Utilities
@@ -98,4 +104,7 @@ __all__ = [
     'User',
     'Subscription',
     'UserNotification',
+    # Error tracking models
+    'ErrorLog',
+    'ErrorStats',
 ]
