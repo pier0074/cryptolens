@@ -140,16 +140,25 @@ def create_app(config_name=None):
     # Register custom Jinja2 filters
     app.jinja_env.filters['price'] = format_price
 
-    # Context processor - inject last_update into all templates (from cache)
+    # Context processor - inject last_update into all templates (cached)
     @app.context_processor
     def inject_last_update():
+        # Use Flask-Caching to avoid DB query on every request
+        cached_value = cache.get('last_data_update')
+        if cached_value is not None:
+            return {'last_data_update': cached_value}
+
+        # Cache miss - fetch from DB and cache for 60 seconds
         from app.models import StatsCache
         import json
         try:
             stats_cache = StatsCache.query.filter_by(key='global').first()
             if stats_cache:
                 data = json.loads(stats_cache.data)
-                return {'last_data_update': data.get('last_data_update')}
+                last_update = data.get('last_data_update')
+                cache.set('last_data_update', last_update, timeout=60)
+                return {'last_data_update': last_update}
+            cache.set('last_data_update', None, timeout=60)
             return {'last_data_update': None}
         except Exception:
             return {'last_data_update': None}

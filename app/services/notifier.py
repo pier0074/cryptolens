@@ -296,16 +296,14 @@ def get_eligible_subscribers():
     Returns:
         List of User objects
     """
-    eligible_users = []
+    from sqlalchemy.orm import joinedload
 
-    # Get all active and verified users
-    users = User.query.filter_by(is_active=True, is_verified=True).all()
+    # Eager load subscriptions to avoid N+1 queries
+    users = User.query.options(
+        joinedload(User.subscription)
+    ).filter_by(is_active=True, is_verified=True).all()
 
-    for user in users:
-        if user.can_receive_notifications:
-            eligible_users.append(user)
-
-    return eligible_users
+    return [u for u in users if u.can_receive_notifications]
 
 
 def send_notification_to_user(user: User, signal_id: int, title: str, message: str,

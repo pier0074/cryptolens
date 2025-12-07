@@ -288,7 +288,12 @@ def get_eligible_subscribers():
     Returns:
         List of User objects
     """
-    users = User.query.filter(
+    from sqlalchemy.orm import joinedload
+
+    # Eager load subscriptions to avoid N+1 queries
+    users = User.query.options(
+        joinedload(User.subscription)
+    ).filter(
         User.is_active == True,
         User.is_verified == True
     ).all()

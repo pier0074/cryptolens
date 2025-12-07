@@ -199,24 +199,24 @@ Generated from Security & Architecture Audit on December 6, 2025.
 
 ---
 
-## PHASE 4: PERFORMANCE OPTIMIZATION
+## PHASE 4: PERFORMANCE OPTIMIZATION ✅ COMPLETE
 
-### P4.1 Fix N+1 Queries
-- [ ] Add `joinedload` to pattern queries in `app/routes/api.py`
-- [ ] Optimize eligible subscribers query in `app/services/notifier.py`
-- [ ] Add query logging in development to catch new N+1s
-- [ ] Profile endpoints with SQLAlchemy profiler
+### P4.1 Fix N+1 Queries ✅ DONE
+- [x] Add `joinedload` to pattern queries in `app/routes/api.py` (done in Phase 2)
+- [x] Optimize eligible subscribers query in `app/services/notifier.py` and `app/services/auth.py`
+- [ ] Add query logging in development - future enhancement
+- [ ] Profile endpoints with SQLAlchemy profiler - future enhancement
 
-**Files:** `app/routes/api.py`, `app/services/notifier.py`
+**Files:** `app/routes/api.py`, `app/services/notifier.py`, `app/services/auth.py`
 
 ---
 
-### P4.2 Optimize Context Processor
-- [ ] Cache `last_data_update` in Redis (not DB query per request)
-- [ ] Add cache invalidation when data updates
-- [ ] Consider moving to AJAX lazy-load
+### P4.2 Optimize Context Processor ✅ DONE
+- [x] Cache `last_data_update` using Flask-Caching (60s TTL)
+- [x] Avoids DB query on every request
+- [ ] AJAX lazy-load - future enhancement
 
-**Files:** `app/__init__.py:130-141`
+**Files:** `app/__init__.py`
 
 ---
 
@@ -265,13 +265,14 @@ Generated from Security & Architecture Audit on December 6, 2025.
 
 ---
 
-### P5.3 Health Checks
-- [ ] Expand `/api/health` to check:
+### P5.3 Health Checks ✅ DONE
+- [x] Expand `/api/health` to check:
   - Database connectivity
-  - Redis connectivity
-  - Exchange API reachability
-  - NTFY reachability
-- [ ] Add readiness vs liveness endpoints
+  - Cache/Redis connectivity
+  - Status: healthy/degraded/unhealthy
+- [ ] Add Exchange API reachability check - future enhancement
+- [ ] Add NTFY reachability check - future enhancement
+- [ ] Add readiness vs liveness endpoints - future enhancement
 - [ ] Add dependency health in response
 
 **Files:** `app/routes/api.py`

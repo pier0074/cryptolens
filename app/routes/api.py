@@ -72,16 +72,18 @@ def health_check() -> JsonResponse:
     Health check endpoint for monitoring and load balancers.
 
     Returns JSON with:
-    - status: 'healthy' or 'unhealthy'
+    - status: 'healthy', 'degraded', or 'unhealthy'
     - database: 'connected' or 'error'
+    - cache: 'connected', 'memory', or 'error'
     - timestamp: current UTC timestamp
     """
-    import time
     from datetime import datetime, timezone
+    from flask import current_app
 
     health = {
         'status': 'healthy',
         'database': 'connected',
+        'cache': 'unknown',
         'timestamp': datetime.now(timezone.utc).isoformat(),
         'version': '2.0.0'
     }
@@ -94,8 +96,31 @@ def health_check() -> JsonResponse:
         health['status'] = 'unhealthy'
         health['database'] = 'error'
         health['database_error'] = str(e)
-        return jsonify(health), 503
 
+    # Check cache connectivity
+    try:
+        cache_type = current_app.config.get('CACHE_TYPE', 'SimpleCache')
+        if cache_type == 'RedisCache':
+            # Test Redis connection
+            cache.set('_health_check', '1', timeout=5)
+            if cache.get('_health_check') == '1':
+                health['cache'] = 'redis'
+            else:
+                health['cache'] = 'error'
+                health['status'] = 'degraded'
+        else:
+            health['cache'] = 'memory'
+    except Exception as e:
+        health['cache'] = 'error'
+        health['cache_error'] = str(e)
+        if health['status'] == 'healthy':
+            health['status'] = 'degraded'
+
+    # Return appropriate status code
+    if health['status'] == 'unhealthy':
+        return jsonify(health), 503
+    elif health['status'] == 'degraded':
+        return jsonify(health), 200  # Still return 200 for degraded
     return jsonify(health), 200
 
 
