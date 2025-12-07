@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+
+{% block title %}Notification Templates - Admin - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto">
+    <div class="flex justify-between items-center mb-8">
+        <h1 class="text-3xl font-bold">Notification Templates</h1>
+        <div class="flex gap-2">
+            <a href="{{ url_for('admin.notifications') }}" class="text-blue-400 hover:text-blue-300">
+                &larr; Back
+            </a>
+            <a href="{{ url_for('admin.create_template') }}" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg">
+                Create Template
+            </a>
+        </div>
+    </div>
+
+    {% if templates %}
+    <div class="bg-card rounded-lg overflow-hidden">
+        <table class="w-full">
+            <thead class="bg-darker">
+                <tr>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">Name</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">Type</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">Title</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">Priority</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">Used</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">Status</th>
+                    <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">Actions</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-800">
+                {% for template in templates %}
+                <tr>
+                    <td class="px-4 py-3 font-medium">{{ template.name }}</td>
+                    <td class="px-4 py-3">
+                        <span class="px-2 py-1 text-xs rounded bg-gray-700 text-gray-300 capitalize">
+                            {{ template.template_type }}
+                        </span>
+                    </td>
+                    <td class="px-4 py-3 text-sm text-muted">
+                        {{ template.title[:40] }}{% if template.title|length > 40 %}...{% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        {% for i in range(5) %}
+                        <span class="{% if i < template.priority %}text-yellow-400{% else %}text-gray-600{% endif %}">!</span>
+                        {% endfor %}
+                    </td>
+                    <td class="px-4 py-3 text-sm">{{ template.times_used }}</td>
+                    <td class="px-4 py-3">
+                        {% if template.is_active %}
+                        <span class="px-2 py-1 text-xs rounded bg-green-900 text-green-200">Active</span>
+                        {% else %}
+                        <span class="px-2 py-1 text-xs rounded bg-gray-700 text-gray-400">Inactive</span>
+                        {% endif %}
+                    </td>
+                    <td class="px-4 py-3">
+                        <div class="flex gap-2">
+                            <a href="{{ url_for('admin.edit_template', template_id=template.id) }}"
+                               class="text-blue-400 hover:text-blue-300 text-sm">Edit</a>
+                            <form method="POST" action="{{ url_for('admin.delete_template', template_id=template.id) }}" class="inline">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="text-red-400 hover:text-red-300 text-sm"
+                                        onclick="return confirm('Delete this template?');">Delete</button>
+                            </form>
+                        </div>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <div class="bg-card rounded-lg p-8 text-center">
+        <p class="text-muted mb-4">No templates created yet.</p>
+        <a href="{{ url_for('admin.create_template') }}" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg">
+            Create Your First Template
+        </a>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

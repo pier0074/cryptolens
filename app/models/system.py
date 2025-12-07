@@ -320,3 +320,179 @@ class CronRun(db.Model):
             'notifications_sent': self.notifications_sent,
             'details': self.details,
         }
+
+
+# =============================================================================
+# NOTIFICATION MODELS
+# =============================================================================
+
+# Template types for admin broadcasts
+NOTIFICATION_TEMPLATE_TYPES = ['promotion', 'downtime', 'update', 'announcement', 'custom']
+
+# Target audience options
+NOTIFICATION_TARGETS = ['all', 'free', 'pro', 'premium', 'verified', 'active']
+
+
+class NotificationTemplate(db.Model):
+    """Reusable notification templates for admin broadcasts"""
+    __tablename__ = 'notification_templates'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False)
+    template_type = db.Column(db.String(20), nullable=False)  # promotion, downtime, update, etc.
+    title = db.Column(db.String(200), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    priority = db.Column(db.Integer, default=3)  # NTFY priority 1-5
+    tags = db.Column(db.String(100), nullable=True)  # Comma-separated NTFY tags
+
+    # Metadata
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc),
+                          onupdate=lambda: datetime.now(timezone.utc))
+    is_active = db.Column(db.Boolean, default=True)
+
+    # Usage tracking
+    times_used = db.Column(db.Integer, default=0)
+    last_used_at = db.Column(db.DateTime, nullable=True)
+
+    # Relationships
+    creator = db.relationship('User', foreign_keys=[created_by])
+
+    def __repr__(self):
+        return f'<NotificationTemplate {self.name}>'
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'template_type': self.template_type,
+            'title': self.title,
+            'message': self.message,
+            'priority': self.priority,
+            'tags': self.tags,
+            'is_active': self.is_active,
+            'times_used': self.times_used,
+            'last_used_at': self.last_used_at.isoformat() if self.last_used_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+        }
+
+
+class BroadcastNotification(db.Model):
+    """Track admin broadcast notifications sent to users"""
+    __tablename__ = 'broadcast_notifications'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Content
+    title = db.Column(db.String(200), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    priority = db.Column(db.Integer, default=3)
+    tags = db.Column(db.String(100), nullable=True)
+
+    # Targeting
+    target_audience = db.Column(db.String(50), nullable=False)  # all, free, pro, premium, custom
+    target_topics = db.Column(db.Text, nullable=True)  # Comma-separated topics for custom targeting
+
+    # Template reference (optional)
+    template_id = db.Column(db.Integer, db.ForeignKey('notification_templates.id'), nullable=True)
+
+    # Sender
+    sent_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    sent_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    # Results
+    total_recipients = db.Column(db.Integer, default=0)
+    successful = db.Column(db.Integer, default=0)
+    failed = db.Column(db.Integer, default=0)
+    status = db.Column(db.String(20), default='pending')  # pending, sending, completed, failed
+
+    # Relationships
+    sender = db.relationship('User', foreign_keys=[sent_by])
+    template = db.relationship('NotificationTemplate')
+
+    __table_args__ = (
+        db.Index('idx_broadcast_sent', 'sent_at'),
+        db.Index('idx_broadcast_status', 'status'),
+    )
+
+    def __repr__(self):
+        return f'<BroadcastNotification {self.id} {self.status}>'
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'message': self.message[:100] + '...' if len(self.message) > 100 else self.message,
+            'priority': self.priority,
+            'target_audience': self.target_audience,
+            'sent_by': self.sender.username if self.sender else None,
+            'sent_at': self.sent_at.isoformat() if self.sent_at else None,
+            'total_recipients': self.total_recipients,
+            'successful': self.successful,
+            'failed': self.failed,
+            'status': self.status,
+        }
+
+
+class ScheduledNotification(db.Model):
+    """Scheduled notifications to be sent at a future time"""
+    __tablename__ = 'scheduled_notifications'
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # Content
+    title = db.Column(db.String(200), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    priority = db.Column(db.Integer, default=3)
+    tags = db.Column(db.String(100), nullable=True)
+
+    # Targeting
+    target_audience = db.Column(db.String(50), nullable=False)  # all, free, pro, premium
+    target_topics = db.Column(db.Text, nullable=True)
+
+    # Template reference (optional)
+    template_id = db.Column(db.Integer, db.ForeignKey('notification_templates.id'), nullable=True)
+
+    # Schedule
+    scheduled_for = db.Column(db.DateTime, nullable=False)
+    created_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    # Status
+    status = db.Column(db.String(20), default='pending')  # pending, sent, cancelled, failed
+    sent_at = db.Column(db.DateTime, nullable=True)
+    broadcast_id = db.Column(db.Integer, db.ForeignKey('broadcast_notifications.id'), nullable=True)
+
+    # Relationships
+    creator = db.relationship('User', foreign_keys=[created_by])
+    template = db.relationship('NotificationTemplate')
+    broadcast = db.relationship('BroadcastNotification')
+
+    __table_args__ = (
+        db.Index('idx_scheduled_time', 'scheduled_for', 'status'),
+    )
+
+    def __repr__(self):
+        return f'<ScheduledNotification {self.id} {self.scheduled_for}>'
+
+    @property
+    def is_due(self):
+        """Check if notification is due to be sent"""
+        if self.status != 'pending':
+            return False
+        return datetime.now(timezone.utc) >= self.scheduled_for
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'message': self.message[:100] + '...' if len(self.message) > 100 else self.message,
+            'priority': self.priority,
+            'target_audience': self.target_audience,
+            'scheduled_for': self.scheduled_for.isoformat() if self.scheduled_for else None,
+            'created_by': self.creator.username if self.creator else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'status': self.status,
+            'sent_at': self.sent_at.isoformat() if self.sent_at else None,
+        }

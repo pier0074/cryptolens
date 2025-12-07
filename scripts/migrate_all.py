@@ -274,6 +274,80 @@ def migrate():
             db.session.execute(text("CREATE INDEX idx_payment_provider ON payments (provider, external_id)"))
             changes.append("Created payments table")
 
+        # Notification Templates table
+        if not table_exists('notification_templates'):
+            db.session.execute(text("""
+                CREATE TABLE notification_templates (
+                    id INTEGER PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL,
+                    template_type VARCHAR(20) NOT NULL,
+                    title VARCHAR(200) NOT NULL,
+                    message TEXT NOT NULL,
+                    priority INTEGER DEFAULT 3,
+                    tags VARCHAR(100),
+                    created_by INTEGER NOT NULL,
+                    created_at DATETIME,
+                    updated_at DATETIME,
+                    is_active BOOLEAN DEFAULT 1,
+                    times_used INTEGER DEFAULT 0,
+                    last_used_at DATETIME,
+                    FOREIGN KEY (created_by) REFERENCES users (id)
+                )
+            """))
+            changes.append("Created notification_templates table")
+
+        # Broadcast Notifications table
+        if not table_exists('broadcast_notifications'):
+            db.session.execute(text("""
+                CREATE TABLE broadcast_notifications (
+                    id INTEGER PRIMARY KEY,
+                    title VARCHAR(200) NOT NULL,
+                    message TEXT NOT NULL,
+                    priority INTEGER DEFAULT 3,
+                    tags VARCHAR(100),
+                    target_audience VARCHAR(50) NOT NULL,
+                    target_topics TEXT,
+                    template_id INTEGER,
+                    sent_by INTEGER NOT NULL,
+                    sent_at DATETIME,
+                    total_recipients INTEGER DEFAULT 0,
+                    successful INTEGER DEFAULT 0,
+                    failed INTEGER DEFAULT 0,
+                    status VARCHAR(20) DEFAULT 'pending',
+                    FOREIGN KEY (template_id) REFERENCES notification_templates (id),
+                    FOREIGN KEY (sent_by) REFERENCES users (id)
+                )
+            """))
+            db.session.execute(text("CREATE INDEX idx_broadcast_sent ON broadcast_notifications (sent_at)"))
+            db.session.execute(text("CREATE INDEX idx_broadcast_status ON broadcast_notifications (status)"))
+            changes.append("Created broadcast_notifications table")
+
+        # Scheduled Notifications table
+        if not table_exists('scheduled_notifications'):
+            db.session.execute(text("""
+                CREATE TABLE scheduled_notifications (
+                    id INTEGER PRIMARY KEY,
+                    title VARCHAR(200) NOT NULL,
+                    message TEXT NOT NULL,
+                    priority INTEGER DEFAULT 3,
+                    tags VARCHAR(100),
+                    target_audience VARCHAR(50) NOT NULL,
+                    target_topics TEXT,
+                    template_id INTEGER,
+                    scheduled_for DATETIME NOT NULL,
+                    created_by INTEGER NOT NULL,
+                    created_at DATETIME,
+                    status VARCHAR(20) DEFAULT 'pending',
+                    sent_at DATETIME,
+                    broadcast_id INTEGER,
+                    FOREIGN KEY (template_id) REFERENCES notification_templates (id),
+                    FOREIGN KEY (created_by) REFERENCES users (id),
+                    FOREIGN KEY (broadcast_id) REFERENCES broadcast_notifications (id)
+                )
+            """))
+            db.session.execute(text("CREATE INDEX idx_scheduled_time ON scheduled_notifications (scheduled_for, status)"))
+            changes.append("Created scheduled_notifications table")
+
         db.session.commit()
 
         if changes:

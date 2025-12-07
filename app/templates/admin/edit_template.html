@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Template - Admin - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="flex justify-between items-center mb-8">
+        <h1 class="text-3xl font-bold">Edit Template: {{ template.name }}</h1>
+        <a href="{{ url_for('admin.notification_templates') }}" class="text-blue-400 hover:text-blue-300">
+            &larr; Back
+        </a>
+    </div>
+
+    <form method="POST" class="bg-card rounded-lg p-6 space-y-6">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <div>
+            <label class="block text-sm text-gray-400 mb-2">Template Name</label>
+            <input type="text" name="name" required value="{{ template.name }}"
+                   class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
+        </div>
+
+        <div>
+            <label class="block text-sm text-gray-400 mb-2">Type</label>
+            <select name="template_type" required
+                    class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
+                {% for type in template_types %}
+                <option value="{{ type }}" {% if template.template_type == type %}selected{% endif %}>
+                    {{ type | title }}
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <div>
+            <label class="block text-sm text-gray-400 mb-2">Notification Title</label>
+            <input type="text" name="title" required maxlength="200" value="{{ template.title }}"
+                   class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
+        </div>
+
+        <div>
+            <label class="block text-sm text-gray-400 mb-2">Message</label>
+            <textarea name="message" rows="5" required
+                      class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">{{ template.message }}</textarea>
+        </div>
+
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm text-gray-400 mb-2">Priority (1-5)</label>
+                <select name="priority"
+                        class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
+                    {% for i in range(1, 6) %}
+                    <option value="{{ i }}" {% if template.priority == i %}selected{% endif %}>
+                        {{ i }} - {% if i == 1 %}Minimum{% elif i == 2 %}Low{% elif i == 3 %}Default{% elif i == 4 %}High{% else %}Urgent{% endif %}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm text-gray-400 mb-2">Tags (comma-separated)</label>
+                <input type="text" name="tags" value="{{ template.tags or '' }}"
+                       class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
+            </div>
+        </div>
+
+        <div>
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" name="is_active" {% if template.is_active %}checked{% endif %}
+                       class="w-4 h-4 rounded bg-darker border-gray-600">
+                <span class="text-sm">Active (available for use)</span>
+            </label>
+        </div>
+
+        <div class="text-sm text-muted">
+            <p>Created: {{ template.created_at.strftime('%Y-%m-%d %H:%M') if template.created_at else 'Unknown' }}</p>
+            <p>Used {{ template.times_used }} times{% if template.last_used_at %} (last: {{ template.last_used_at.strftime('%Y-%m-%d %H:%M') }}){% endif %}</p>
+        </div>
+
+        <div class="flex justify-end gap-4">
+            <a href="{{ url_for('admin.notification_templates') }}"
+               class="px-6 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg">
+                Cancel
+            </a>
+            <button type="submit" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg">
+                Save Changes
+            </button>
+        </div>
+    </form>
+</div>
+{% endblock %}

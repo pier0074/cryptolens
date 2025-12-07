@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+
+{% block title %}Notifications - Admin - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-6xl mx-auto">
+    <div class="flex justify-between items-center mb-8">
+        <h1 class="text-3xl font-bold">Notification Management</h1>
+        <div class="flex gap-2">
+            <a href="{{ url_for('admin.broadcast') }}" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg">
+                Send Broadcast
+            </a>
+            <a href="{{ url_for('admin.schedule_notification') }}" class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg">
+                Schedule
+            </a>
+        </div>
+    </div>
+
+    <!-- Stats Grid -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-3xl font-bold text-blue-400">{{ stats.total_broadcasts }}</div>
+            <div class="text-sm text-muted">Total Broadcasts</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-3xl font-bold text-green-400">{{ stats.total_sent_24h }}</div>
+            <div class="text-sm text-muted">Sent (24h)</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-3xl font-bold text-purple-400">{{ stats.pending_scheduled }}</div>
+            <div class="text-sm text-muted">Pending Scheduled</div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <div class="text-3xl font-bold text-yellow-400">{{ stats.active_templates }}</div>
+            <div class="text-sm text-muted">Active Templates</div>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Recent Broadcasts -->
+        <div class="bg-card rounded-lg p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold">Recent Broadcasts</h2>
+            </div>
+            {% if recent_broadcasts %}
+            <div class="space-y-3">
+                {% for broadcast in recent_broadcasts %}
+                <div class="p-3 bg-darker rounded-lg">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="font-medium">{{ broadcast.title }}</p>
+                            <p class="text-sm text-muted mt-1">{{ broadcast.message[:80] }}{% if broadcast.message|length > 80 %}...{% endif %}</p>
+                        </div>
+                        <span class="px-2 py-1 text-xs rounded
+                            {% if broadcast.status == 'completed' %}bg-green-900 text-green-200
+                            {% elif broadcast.status == 'sending' %}bg-blue-900 text-blue-200
+                            {% else %}bg-yellow-900 text-yellow-200{% endif %}">
+                            {{ broadcast.status }}
+                        </span>
+                    </div>
+                    <div class="flex justify-between items-center mt-2 text-xs text-muted">
+                        <span>{{ broadcast.target_audience | title }} - {{ broadcast.successful }}/{{ broadcast.total_recipients }} sent</span>
+                        <span>{{ broadcast.sent_at.strftime('%Y-%m-%d %H:%M') if broadcast.sent_at else 'Pending' }}</span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-muted">No broadcasts sent yet.</p>
+            {% endif %}
+        </div>
+
+        <!-- Scheduled Notifications -->
+        <div class="bg-card rounded-lg p-6">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-semibold">Scheduled Notifications</h2>
+            </div>
+            {% if pending_scheduled %}
+            <div class="space-y-3">
+                {% for scheduled in pending_scheduled %}
+                <div class="p-3 bg-darker rounded-lg">
+                    <div class="flex justify-between items-start">
+                        <div>
+                            <p class="font-medium">{{ scheduled.title }}</p>
+                            <p class="text-sm text-muted mt-1">Target: {{ scheduled.target_audience | title }}</p>
+                        </div>
+                        <form method="POST" action="{{ url_for('admin.cancel_scheduled', scheduled_id=scheduled.id) }}">
+                            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                            <button type="submit" class="text-red-400 hover:text-red-300 text-sm"
+                                    onclick="return confirm('Cancel this scheduled notification?');">
+                                Cancel
+                            </button>
+                        </form>
+                    </div>
+                    <div class="flex justify-between items-center mt-2 text-xs text-muted">
+                        <span>By {{ scheduled.creator.username if scheduled.creator else 'Unknown' }}</span>
+                        <span class="text-purple-400">{{ scheduled.scheduled_for.strftime('%Y-%m-%d %H:%M UTC') }}</span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-muted">No scheduled notifications.</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Templates Section -->
+    <div class="mt-8 bg-card rounded-lg p-6">
+        <div class="flex justify-between items-center mb-4">
+            <h2 class="text-xl font-semibold">Notification Templates</h2>
+            <a href="{{ url_for('admin.notification_templates') }}" class="text-blue-400 hover:text-blue-300 text-sm">
+                Manage Templates &rarr;
+            </a>
+        </div>
+        {% if templates %}
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {% for template in templates[:6] %}
+            <div class="p-4 bg-darker rounded-lg">
+                <div class="flex justify-between items-start">
+                    <div>
+                        <p class="font-medium">{{ template.name }}</p>
+                        <span class="px-2 py-0.5 text-xs rounded bg-gray-700 text-gray-300 capitalize">
+                            {{ template.template_type }}
+                        </span>
+                    </div>
+                </div>
+                <p class="text-sm text-muted mt-2">{{ template.title }}</p>
+                <p class="text-xs text-muted mt-1">Used {{ template.times_used }} times</p>
+            </div>
+            {% endfor %}
+        </div>
+        {% else %}
+        <p class="text-muted">No templates created yet.</p>
+        <a href="{{ url_for('admin.create_template') }}" class="text-blue-400 hover:text-blue-300 text-sm">
+            Create your first template &rarr;
+        </a>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

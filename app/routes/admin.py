@@ -60,6 +60,8 @@ def users():
         query = query.filter(User.is_verified == False)
     elif status == 'admin':
         query = query.filter(User.is_admin == True)
+    elif status == 'locked':
+        query = query.filter(User.locked_until > datetime.now(timezone.utc))
 
     query = query.order_by(User.created_at.desc())
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
@@ -68,7 +70,8 @@ def users():
                            users=pagination.items,
                            pagination=pagination,
                            status=status,
-                           search=search)
+                           search=search,
+                           now=datetime.now(timezone.utc))
 
 
 @admin_bp.route('/users/<int:user_id>')
@@ -82,7 +85,8 @@ def user_detail(user_id):
 
     return render_template('admin/user_detail.html',
                            user=user,
-                           plans=SUBSCRIPTION_PLANS)
+                           plans=SUBSCRIPTION_PLANS,
+                           now=datetime.now(timezone.utc))
 
 
 @admin_bp.route('/users/<int:user_id>/verify', methods=['POST'])
@@ -122,6 +126,77 @@ def deactivate_user_route(user_id):
     else:
         flash('Failed to deactivate user.', 'error')
     return redirect(url_for('admin.user_detail', user_id=user_id))
+
+
+@admin_bp.route('/users/<int:user_id>/unlock', methods=['POST'])
+@admin_required
+def unlock_user_route(user_id):
+    """Unlock a locked user account"""
+    user = get_user_by_id(user_id)
+    if not user:
+        flash('User not found.', 'error')
+        return redirect(url_for('admin.users'))
+
+    user.failed_attempts = 0
+    user.locked_until = None
+    db.session.commit()
+    flash(f'Account unlocked for {user.username}.', 'success')
+    return redirect(url_for('admin.user_detail', user_id=user_id))
+
+
+@admin_bp.route('/users/bulk-action', methods=['POST'])
+@admin_required
+def bulk_user_action():
+    """Perform bulk actions on multiple users"""
+    user_ids = request.form.getlist('user_ids', type=int)
+    action = request.form.get('action')
+    current = get_current_user()
+
+    if not user_ids:
+        flash('No users selected.', 'error')
+        return redirect(url_for('admin.users'))
+
+    if not action:
+        flash('No action selected.', 'error')
+        return redirect(url_for('admin.users'))
+
+    success_count = 0
+    skip_count = 0
+
+    for user_id in user_ids:
+        # Prevent self-modification for destructive actions
+        if user_id == current.id and action in ['deactivate']:
+            skip_count += 1
+            continue
+
+        user = db.session.get(User, user_id)
+        if not user:
+            continue
+
+        if action == 'activate':
+            user.is_active = True
+            success_count += 1
+        elif action == 'deactivate':
+            user.is_active = False
+            success_count += 1
+        elif action == 'verify':
+            user.is_verified = True
+            user.email_verification_token = None
+            user.email_verification_expires = None
+            success_count += 1
+        elif action == 'unlock':
+            user.failed_attempts = 0
+            user.locked_until = None
+            success_count += 1
+
+    db.session.commit()
+
+    if success_count > 0:
+        flash(f'Successfully applied {action} to {success_count} user(s).', 'success')
+    if skip_count > 0:
+        flash(f'Skipped {skip_count} user(s) (cannot modify yourself).', 'warning')
+
+    return redirect(url_for('admin.users'))
 
 
 @admin_bp.route('/users/<int:user_id>/make-admin', methods=['POST'])
@@ -517,3 +592,310 @@ def api_error_stats():
     days = request.args.get('days', 7, type=int)
     stats = get_error_stats(days=days)
     return jsonify(stats)
+
+
+# =============================================================================
+# NOTIFICATION MANAGEMENT
+# =============================================================================
+
+@admin_bp.route('/notifications')
+@admin_required
+def notifications():
+    """Notification management dashboard"""
+    from app.models import (
+        NotificationTemplate, BroadcastNotification, ScheduledNotification,
+        NOTIFICATION_TEMPLATE_TYPES, NOTIFICATION_TARGETS
+    )
+
+    # Get recent broadcasts
+    recent_broadcasts = BroadcastNotification.query.order_by(
+        BroadcastNotification.sent_at.desc()
+    ).limit(10).all()
+
+    # Get pending scheduled notifications
+    pending_scheduled = ScheduledNotification.query.filter_by(
+        status='pending'
+    ).order_by(ScheduledNotification.scheduled_for.asc()).all()
+
+    # Get active templates
+    templates = NotificationTemplate.query.filter_by(is_active=True).order_by(
+        NotificationTemplate.times_used.desc()
+    ).all()
+
+    # Stats
+    stats = {
+        'total_broadcasts': BroadcastNotification.query.count(),
+        'total_sent_24h': BroadcastNotification.query.filter(
+            BroadcastNotification.sent_at >= datetime.now(timezone.utc) - timedelta(days=1)
+        ).count(),
+        'pending_scheduled': ScheduledNotification.query.filter_by(status='pending').count(),
+        'active_templates': NotificationTemplate.query.filter_by(is_active=True).count(),
+    }
+
+    return render_template('admin/notifications.html',
+                           recent_broadcasts=recent_broadcasts,
+                           pending_scheduled=pending_scheduled,
+                           templates=templates,
+                           stats=stats,
+                           template_types=NOTIFICATION_TEMPLATE_TYPES,
+                           targets=NOTIFICATION_TARGETS)
+
+
+# ----- TEMPLATES -----
+
+@admin_bp.route('/notifications/templates')
+@admin_required
+def notification_templates():
+    """List all notification templates"""
+    from app.models import NotificationTemplate, NOTIFICATION_TEMPLATE_TYPES
+
+    templates = NotificationTemplate.query.order_by(
+        NotificationTemplate.created_at.desc()
+    ).all()
+
+    return render_template('admin/notification_templates.html',
+                           templates=templates,
+                           template_types=NOTIFICATION_TEMPLATE_TYPES)
+
+
+@admin_bp.route('/notifications/templates/create', methods=['GET', 'POST'])
+@admin_required
+def create_template():
+    """Create a new notification template"""
+    from app.models import NotificationTemplate, NOTIFICATION_TEMPLATE_TYPES
+
+    if request.method == 'POST':
+        current = get_current_user()
+        template = NotificationTemplate(
+            name=request.form.get('name'),
+            template_type=request.form.get('template_type'),
+            title=request.form.get('title'),
+            message=request.form.get('message'),
+            priority=int(request.form.get('priority', 3)),
+            tags=request.form.get('tags'),
+            created_by=current.id
+        )
+        db.session.add(template)
+        db.session.commit()
+        flash(f'Template "{template.name}" created.', 'success')
+        return redirect(url_for('admin.notification_templates'))
+
+    return render_template('admin/create_template.html',
+                           template_types=NOTIFICATION_TEMPLATE_TYPES)
+
+
+@admin_bp.route('/notifications/templates/<int:template_id>/edit', methods=['GET', 'POST'])
+@admin_required
+def edit_template(template_id):
+    """Edit a notification template"""
+    from app.models import NotificationTemplate, NOTIFICATION_TEMPLATE_TYPES
+
+    template = NotificationTemplate.query.get_or_404(template_id)
+
+    if request.method == 'POST':
+        template.name = request.form.get('name')
+        template.template_type = request.form.get('template_type')
+        template.title = request.form.get('title')
+        template.message = request.form.get('message')
+        template.priority = int(request.form.get('priority', 3))
+        template.tags = request.form.get('tags')
+        template.is_active = 'is_active' in request.form
+        db.session.commit()
+        flash(f'Template "{template.name}" updated.', 'success')
+        return redirect(url_for('admin.notification_templates'))
+
+    return render_template('admin/edit_template.html',
+                           template=template,
+                           template_types=NOTIFICATION_TEMPLATE_TYPES)
+
+
+@admin_bp.route('/notifications/templates/<int:template_id>/delete', methods=['POST'])
+@admin_required
+def delete_template(template_id):
+    """Delete a notification template"""
+    from app.models import NotificationTemplate
+
+    template = NotificationTemplate.query.get_or_404(template_id)
+    name = template.name
+    db.session.delete(template)
+    db.session.commit()
+    flash(f'Template "{name}" deleted.', 'success')
+    return redirect(url_for('admin.notification_templates'))
+
+
+# ----- BROADCAST -----
+
+@admin_bp.route('/notifications/broadcast', methods=['GET', 'POST'])
+@admin_required
+def broadcast():
+    """Send a broadcast notification"""
+    from app.models import (
+        NotificationTemplate, BroadcastNotification,
+        NOTIFICATION_TEMPLATE_TYPES, NOTIFICATION_TARGETS
+    )
+
+    templates = NotificationTemplate.query.filter_by(is_active=True).all()
+
+    if request.method == 'POST':
+        current = get_current_user()
+        title = request.form.get('title')
+        message = request.form.get('message')
+        priority = int(request.form.get('priority', 3))
+        tags = request.form.get('tags')
+        target = request.form.get('target', 'all')
+        template_id = request.form.get('template_id', type=int)
+
+        # Create broadcast record
+        broadcast_notif = BroadcastNotification(
+            title=title,
+            message=message,
+            priority=priority,
+            tags=tags,
+            target_audience=target,
+            template_id=template_id if template_id else None,
+            sent_by=current.id,
+            status='sending'
+        )
+        db.session.add(broadcast_notif)
+        db.session.commit()
+
+        # Update template usage if used
+        if template_id:
+            template = db.session.get(NotificationTemplate, template_id)
+            if template:
+                template.times_used += 1
+                template.last_used_at = datetime.now(timezone.utc)
+                db.session.commit()
+
+        # Send the notifications
+        from app.services.broadcast import send_broadcast
+        result = send_broadcast(broadcast_notif.id)
+
+        flash(f'Broadcast sent to {result["successful"]} users ({result["failed"]} failed).', 'success')
+        return redirect(url_for('admin.notifications'))
+
+    return render_template('admin/broadcast.html',
+                           templates=templates,
+                           targets=NOTIFICATION_TARGETS)
+
+
+@admin_bp.route('/notifications/broadcast/<int:broadcast_id>')
+@admin_required
+def broadcast_detail(broadcast_id):
+    """View broadcast details"""
+    from app.models import BroadcastNotification
+
+    broadcast_notif = BroadcastNotification.query.get_or_404(broadcast_id)
+    return render_template('admin/broadcast_detail.html', broadcast=broadcast_notif)
+
+
+# ----- SCHEDULED -----
+
+@admin_bp.route('/notifications/schedule', methods=['GET', 'POST'])
+@admin_required
+def schedule_notification():
+    """Schedule a notification for future delivery"""
+    from app.models import (
+        NotificationTemplate, ScheduledNotification, NOTIFICATION_TARGETS
+    )
+    from dateutil import parser
+
+    templates = NotificationTemplate.query.filter_by(is_active=True).all()
+
+    if request.method == 'POST':
+        current = get_current_user()
+        scheduled_for_str = request.form.get('scheduled_for')
+
+        try:
+            scheduled_for = parser.parse(scheduled_for_str)
+            if scheduled_for.tzinfo is None:
+                scheduled_for = scheduled_for.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            flash('Invalid date/time format.', 'error')
+            return redirect(url_for('admin.schedule_notification'))
+
+        if scheduled_for <= datetime.now(timezone.utc):
+            flash('Scheduled time must be in the future.', 'error')
+            return redirect(url_for('admin.schedule_notification'))
+
+        scheduled = ScheduledNotification(
+            title=request.form.get('title'),
+            message=request.form.get('message'),
+            priority=int(request.form.get('priority', 3)),
+            tags=request.form.get('tags'),
+            target_audience=request.form.get('target', 'all'),
+            template_id=request.form.get('template_id', type=int) or None,
+            scheduled_for=scheduled_for,
+            created_by=current.id
+        )
+        db.session.add(scheduled)
+        db.session.commit()
+
+        flash(f'Notification scheduled for {scheduled_for.strftime("%Y-%m-%d %H:%M UTC")}.', 'success')
+        return redirect(url_for('admin.notifications'))
+
+    now_str = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M')
+    return render_template('admin/schedule_notification.html',
+                           templates=templates,
+                           targets=NOTIFICATION_TARGETS,
+                           now_str=now_str)
+
+
+@admin_bp.route('/notifications/scheduled/<int:scheduled_id>/cancel', methods=['POST'])
+@admin_required
+def cancel_scheduled(scheduled_id):
+    """Cancel a scheduled notification"""
+    from app.models import ScheduledNotification
+
+    scheduled = ScheduledNotification.query.get_or_404(scheduled_id)
+    if scheduled.status != 'pending':
+        flash('Cannot cancel - notification already sent or cancelled.', 'error')
+    else:
+        scheduled.status = 'cancelled'
+        db.session.commit()
+        flash('Scheduled notification cancelled.', 'success')
+
+    return redirect(url_for('admin.notifications'))
+
+
+# ----- API -----
+
+@admin_bp.route('/api/notifications/templates')
+@admin_required
+def api_templates():
+    """Get templates as JSON"""
+    from app.models import NotificationTemplate
+
+    templates = NotificationTemplate.query.filter_by(is_active=True).all()
+    return jsonify([t.to_dict() for t in templates])
+
+
+@admin_bp.route('/api/notifications/templates/<int:template_id>')
+@admin_required
+def api_template_detail(template_id):
+    """Get template detail as JSON"""
+    from app.models import NotificationTemplate
+
+    template = NotificationTemplate.query.get_or_404(template_id)
+    return jsonify(template.to_dict())
+
+
+@admin_bp.route('/api/notifications/audience-count')
+@admin_required
+def api_audience_count():
+    """Get count of users for a target audience"""
+    target = request.args.get('target', 'all')
+
+    query = User.query.filter(User.is_active == True, User.is_verified == True)
+
+    if target == 'free':
+        # Users with free tier
+        query = query.join(Subscription).filter(Subscription.plan == 'free')
+    elif target == 'pro':
+        query = query.join(Subscription).filter(Subscription.plan == 'pro')
+    elif target == 'premium':
+        query = query.join(Subscription).filter(Subscription.plan == 'premium')
+    # 'all', 'verified', 'active' use the base query
+
+    count = query.count()
+    return jsonify({'count': count, 'target': target})

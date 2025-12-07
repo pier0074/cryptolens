@@ -31,6 +31,11 @@ from app.models.system import (
     Payment,
     CronJob,
     CronRun,
+    NotificationTemplate,
+    BroadcastNotification,
+    ScheduledNotification,
+    NOTIFICATION_TEMPLATE_TYPES,
+    NOTIFICATION_TARGETS,
 )
 
 # Trading models
@@ -88,6 +93,11 @@ __all__ = [
     'Payment',
     'CronJob',
     'CronRun',
+    'NotificationTemplate',
+    'BroadcastNotification',
+    'ScheduledNotification',
+    'NOTIFICATION_TEMPLATE_TYPES',
+    'NOTIFICATION_TARGETS',
     # Trading models
     'Symbol',
     'Candle',

@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}Broadcast Details - Admin - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="flex justify-between items-center mb-8">
+        <h1 class="text-3xl font-bold">Broadcast Details</h1>
+        <a href="{{ url_for('admin.notifications') }}" class="text-blue-400 hover:text-blue-300">
+            &larr; Back
+        </a>
+    </div>
+
+    <div class="bg-card rounded-lg p-6 space-y-6">
+        <!-- Status Badge -->
+        <div class="flex justify-between items-center">
+            <span class="px-3 py-1 text-sm rounded
+                {% if broadcast.status == 'completed' %}bg-green-900 text-green-200
+                {% elif broadcast.status == 'completed_with_errors' %}bg-yellow-900 text-yellow-200
+                {% elif broadcast.status == 'sending' %}bg-blue-900 text-blue-200
+                {% else %}bg-gray-700 text-gray-300{% endif %}">
+                {{ broadcast.status | replace('_', ' ') | title }}
+            </span>
+            <span class="text-sm text-muted">ID: {{ broadcast.id }}</span>
+        </div>
+
+        <!-- Content -->
+        <div>
+            <label class="block text-sm text-gray-400 mb-1">Title</label>
+            <p class="text-lg font-medium">{{ broadcast.title }}</p>
+        </div>
+
+        <div>
+            <label class="block text-sm text-gray-400 mb-1">Message</label>
+            <p class="text-white whitespace-pre-wrap bg-darker p-4 rounded-lg">{{ broadcast.message }}</p>
+        </div>
+
+        <!-- Details Grid -->
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm text-gray-400 mb-1">Target Audience</label>
+                <p class="capitalize">{{ broadcast.target_audience }}</p>
+            </div>
+            <div>
+                <label class="block text-sm text-gray-400 mb-1">Priority</label>
+                <p>{{ broadcast.priority }}/5</p>
+            </div>
+            <div>
+                <label class="block text-sm text-gray-400 mb-1">Sent By</label>
+                <p>{{ broadcast.sender.username if broadcast.sender else 'Unknown' }}</p>
+            </div>
+            <div>
+                <label class="block text-sm text-gray-400 mb-1">Sent At</label>
+                <p>{{ broadcast.sent_at.strftime('%Y-%m-%d %H:%M UTC') if broadcast.sent_at else 'N/A' }}</p>
+            </div>
+        </div>
+
+        <!-- Results -->
+        <div class="p-4 bg-darker rounded-lg">
+            <h3 class="font-semibold mb-3">Delivery Results</h3>
+            <div class="grid grid-cols-3 gap-4 text-center">
+                <div>
+                    <p class="text-2xl font-bold text-blue-400">{{ broadcast.total_recipients }}</p>
+                    <p class="text-sm text-muted">Total</p>
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-green-400">{{ broadcast.successful }}</p>
+                    <p class="text-sm text-muted">Successful</p>
+                </div>
+                <div>
+                    <p class="text-2xl font-bold text-red-400">{{ broadcast.failed }}</p>
+                    <p class="text-sm text-muted">Failed</p>
+                </div>
+            </div>
+            {% if broadcast.total_recipients > 0 %}
+            <div class="mt-4">
+                <div class="flex rounded-full overflow-hidden h-3">
+                    <div class="bg-green-500" style="width: {{ (broadcast.successful / broadcast.total_recipients * 100)|round }}%"></div>
+                    <div class="bg-red-500" style="width: {{ (broadcast.failed / broadcast.total_recipients * 100)|round }}%"></div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+
+        {% if broadcast.tags %}
+        <div>
+            <label class="block text-sm text-gray-400 mb-1">Tags</label>
+            <div class="flex flex-wrap gap-2">
+                {% for tag in broadcast.tags.split(',') %}
+                <span class="px-2 py-1 text-xs bg-gray-700 rounded">{{ tag.strip() }}</span>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        {% if broadcast.template %}
+        <div>
+            <label class="block text-sm text-gray-400 mb-1">Template Used</label>
+            <p>{{ broadcast.template.name }}</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

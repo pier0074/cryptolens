@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+
+{% block title %}Send Broadcast - Admin - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="max-w-2xl mx-auto">
+    <div class="flex justify-between items-center mb-8">
+        <h1 class="text-3xl font-bold">Send Broadcast Notification</h1>
+        <a href="{{ url_for('admin.notifications') }}" class="text-blue-400 hover:text-blue-300">
+            &larr; Back
+        </a>
+    </div>
+
+    <form method="POST" class="bg-card rounded-lg p-6 space-y-6">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+
+        <!-- Template Selection -->
+        <div>
+            <label class="block text-sm text-gray-400 mb-2">Use Template (optional)</label>
+            <select id="templateSelect" name="template_id"
+                    class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white"
+                    onchange="loadTemplate()">
+                <option value="">-- Custom Message --</option>
+                {% for template in templates %}
+                <option value="{{ template.id }}" data-title="{{ template.title }}"
+                        data-message="{{ template.message }}" data-priority="{{ template.priority }}"
+                        data-tags="{{ template.tags or '' }}">
+                    {{ template.name }} ({{ template.template_type }})
+                </option>
+                {% endfor %}
+            </select>
+        </div>
+
+        <!-- Target Audience -->
+        <div>
+            <label class="block text-sm text-gray-400 mb-2">Target Audience</label>
+            <select id="targetSelect" name="target" required
+                    class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white"
+                    onchange="updateAudienceCount()">
+                {% for target in targets %}
+                <option value="{{ target }}">{{ target | title }}</option>
+                {% endfor %}
+            </select>
+            <p id="audienceCount" class="text-sm text-muted mt-1">Loading recipient count...</p>
+        </div>
+
+        <!-- Notification Title -->
+        <div>
+            <label class="block text-sm text-gray-400 mb-2">Title</label>
+            <input type="text" id="titleInput" name="title" required maxlength="200"
+                   class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white"
+                   placeholder="Notification title">
+        </div>
+
+        <!-- Message -->
+        <div>
+            <label class="block text-sm text-gray-400 mb-2">Message</label>
+            <textarea id="messageInput" name="message" rows="6" required
+                      class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white"
+                      placeholder="Write your broadcast message..."></textarea>
+        </div>
+
+        <!-- Priority and Tags -->
+        <div class="grid grid-cols-2 gap-4">
+            <div>
+                <label class="block text-sm text-gray-400 mb-2">Priority</label>
+                <select id="prioritySelect" name="priority"
+                        class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
+                    <option value="1">1 - Minimum</option>
+                    <option value="2">2 - Low</option>
+                    <option value="3" selected>3 - Default</option>
+                    <option value="4">4 - High</option>
+                    <option value="5">5 - Urgent</option>
+                </select>
+            </div>
+
+            <div>
+                <label class="block text-sm text-gray-400 mb-2">Tags (comma-separated)</label>
+                <input type="text" id="tagsInput" name="tags"
+                       class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white"
+                       placeholder="e.g., announcement">
+            </div>
+        </div>
+
+        <!-- Warning -->
+        <div class="p-4 bg-yellow-900/30 border border-yellow-700 rounded-lg">
+            <p class="text-yellow-300 text-sm">
+                This will send a notification to all users in the selected audience immediately.
+                Please review your message carefully before sending.
+            </p>
+        </div>
+
+        <div class="flex justify-end gap-4">
+            <a href="{{ url_for('admin.notifications') }}"
+               class="px-6 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg">
+                Cancel
+            </a>
+            <button type="submit" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg"
+                    onclick="return confirm('Send this broadcast notification?');">
+                Send Broadcast
+            </button>
+        </div>
+    </form>
+</div>
+
+<script>
+function loadTemplate() {
+    const select = document.getElementById('templateSelect');
+    const option = select.options[select.selectedIndex];
+
+    if (option.value) {
+        document.getElementById('titleInput').value = option.dataset.title;
+        document.getElementById('messageInput').value = option.dataset.message;
+        document.getElementById('prioritySelect').value = option.dataset.priority;
+        document.getElementById('tagsInput').value = option.dataset.tags;
+    }
+}
+
+function updateAudienceCount() {
+    const target = document.getElementById('targetSelect').value;
+    const countEl = document.getElementById('audienceCount');
+
+    fetch(`{{ url_for('admin.api_audience_count') }}?target=${target}`)
+        .then(response => response.json())
+        .then(data => {
+            countEl.textContent = `Will send to approximately ${data.count} user(s)`;
+        })
+        .catch(() => {
+            countEl.textContent = 'Could not load recipient count';
+        });
+}
+
+// Load initial count
+updateAudienceCount();
+</script>
+{% endblock %}

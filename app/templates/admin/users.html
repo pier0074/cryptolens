@@ -24,6 +24,7 @@
                 <option value="inactive" {% if status == 'inactive' %}selected{% endif %}>Inactive</option>
                 <option value="verified" {% if status == 'verified' %}selected{% endif %}>Verified</option>
                 <option value="unverified" {% if status == 'unverified' %}selected{% endif %}>Unverified</option>
+                <option value="locked" {% if status == 'locked' %}selected{% endif %}>Locked</option>
                 <option value="admin" {% if status == 'admin' %}selected{% endif %}>Admins</option>
             </select>
 
@@ -31,11 +32,34 @@
         </form>
     </div>
 
+    <!-- Bulk Actions -->
+    <form id="bulkForm" method="POST" action="{{ url_for('admin.bulk_user_action') }}" class="mb-4">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="bg-card rounded-lg p-4 flex flex-wrap items-center gap-4">
+            <span class="text-sm text-gray-400">Bulk Actions:</span>
+            <select name="action" class="px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
+                <option value="">Select action...</option>
+                <option value="activate">Activate</option>
+                <option value="deactivate">Deactivate</option>
+                <option value="verify">Verify Email</option>
+                <option value="unlock">Unlock Accounts</option>
+            </select>
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg text-sm"
+                    onclick="return confirmBulkAction()">
+                Apply to Selected
+            </button>
+            <span id="selectedCount" class="text-sm text-gray-400 ml-auto">0 selected</span>
+        </div>
+
     <!-- Users Table -->
     <div class="bg-card rounded-lg overflow-hidden">
         <table class="w-full">
             <thead class="bg-darker">
                 <tr>
+                    <th class="px-4 py-3 text-left">
+                        <input type="checkbox" id="selectAll" class="w-4 h-4 rounded bg-darker border-gray-600"
+                               onchange="toggleAllCheckboxes()">
+                    </th>
                     <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">User</th>
                     <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">Status</th>
                     <th class="px-4 py-3 text-left text-sm font-medium text-gray-400">Subscription</th>
@@ -46,6 +70,11 @@
             <tbody class="divide-y divide-gray-800">
                 {% for user in users %}
                 <tr>
+                    <td class="px-4 py-3">
+                        <input type="checkbox" name="user_ids" value="{{ user.id }}"
+                               class="user-checkbox w-4 h-4 rounded bg-darker border-gray-600"
+                               onchange="updateSelectedCount()">
+                    </td>
                     <td class="px-4 py-3">
                         <div>
                             <p class="font-medium">{{ user.username }}</p>
@@ -63,6 +92,9 @@
                         {% endif %}
                         {% if not user.is_active %}
                             <span class="px-2 py-1 text-xs rounded bg-red-900 text-red-200">Inactive</span>
+                        {% endif %}
+                        {% if user.locked_until and user.locked_until > now %}
+                            <span class="px-2 py-1 text-xs rounded bg-orange-900 text-orange-200">Locked</span>
                         {% endif %}
                     </td>
                     <td class="px-4 py-3">
@@ -86,7 +118,7 @@
                 </tr>
                 {% else %}
                 <tr>
-                    <td colspan="5" class="px-4 py-8 text-center text-gray-400">
+                    <td colspan="6" class="px-4 py-8 text-center text-gray-400">
                         No users found.
                     </td>
                 </tr>
@@ -94,6 +126,7 @@
             </tbody>
         </table>
     </div>
+    </form>
 
     <!-- Pagination -->
     {% if pagination.pages > 1 %}
@@ -111,4 +144,33 @@
     </div>
     {% endif %}
 </div>
+
+<script>
+function toggleAllCheckboxes() {
+    const selectAll = document.getElementById('selectAll');
+    const checkboxes = document.querySelectorAll('.user-checkbox');
+    checkboxes.forEach(cb => cb.checked = selectAll.checked);
+    updateSelectedCount();
+}
+
+function updateSelectedCount() {
+    const checkboxes = document.querySelectorAll('.user-checkbox:checked');
+    document.getElementById('selectedCount').textContent = checkboxes.length + ' selected';
+}
+
+function confirmBulkAction() {
+    const checkboxes = document.querySelectorAll('.user-checkbox:checked');
+    const action = document.querySelector('select[name="action"]').value;
+
+    if (checkboxes.length === 0) {
+        alert('Please select at least one user.');
+        return false;
+    }
+    if (!action) {
+        alert('Please select an action.');
+        return false;
+    }
+    return confirm('Apply ' + action + ' to ' + checkboxes.length + ' user(s)?');
+}
+</script>
 {% endblock %}
