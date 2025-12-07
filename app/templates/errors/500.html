@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+
+{% block title %}Server Error - CryptoLens{% endblock %}
+
+{% block content %}
+<div class="min-h-screen flex items-center justify-center">
+    <div class="text-center">
+        <h1 class="text-6xl font-bold text-red-500 mb-4">500</h1>
+        <h2 class="text-2xl font-semibold text-white mb-4">Server Error</h2>
+        <p class="text-gray-400 mb-8">Something went wrong on our end. Please try again later.</p>
+        <a href="{{ url_for('dashboard.index') }}" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg transition">
+            Go to Dashboard
+        </a>
+    </div>
+</div>
+{% endblock %}

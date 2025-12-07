@@ -19,6 +19,29 @@ limiter = Limiter(key_func=get_remote_address, default_limits=["200 per minute"]
 cache = Cache()
 
 # Configure logging
+class JSONFormatter(logging.Formatter):
+    """JSON formatter for structured logging in production."""
+    def format(self, record):
+        import json
+        log_data = {
+            'timestamp': self.formatTime(record, self.datefmt),
+            'level': record.levelname,
+            'logger': record.name,
+            'message': record.getMessage(),
+        }
+        # Add exception info if present
+        if record.exc_info:
+            log_data['exception'] = self.formatException(record.exc_info)
+        # Add extra fields if present
+        if hasattr(record, 'symbol'):
+            log_data['symbol'] = record.symbol
+        if hasattr(record, 'timeframe'):
+            log_data['timeframe'] = record.timeframe
+        if hasattr(record, 'request_id'):
+            log_data['request_id'] = record.request_id
+        return json.dumps(log_data)
+
+
 def setup_logging(app, db_log_level=None):
     """Configure application logging based on environment or database setting."""
     # Priority: db setting > env var > default
@@ -50,9 +73,7 @@ def setup_logging(app, db_log_level=None):
     # Create formatter based on format preference
     if log_format == 'json':
         # JSON format for production log aggregation
-        formatter = logging.Formatter(
-            '{"timestamp":"%(asctime)s","level":"%(levelname)s","message":"%(message)s"}'
-        )
+        formatter = JSONFormatter(datefmt='%Y-%m-%dT%H:%M:%S')
     else:
         # Simple format for development
         formatter = logging.Formatter(
@@ -185,6 +206,35 @@ def create_app(config_name=None):
             else:
                 req_logger.warning(log_msg)
         return response
+
+    # Register error handlers for domain exceptions
+    from app.exceptions import CryptoLensError
+
+    @app.errorhandler(CryptoLensError)
+    def handle_domain_error(error):
+        from flask import jsonify, request
+        if request.is_json or request.path.startswith('/api/'):
+            return jsonify(error.to_dict()), error.status_code
+        # For HTML requests, flash and redirect
+        from flask import flash, redirect, url_for
+        flash(error.message, 'error')
+        return redirect(request.referrer or url_for('dashboard.index'))
+
+    @app.errorhandler(404)
+    def handle_not_found(error):
+        from flask import jsonify, request, render_template
+        if request.is_json or request.path.startswith('/api/'):
+            return jsonify({'error': 'Not found', 'message': 'Resource not found'}), 404
+        return render_template('errors/404.html'), 404
+
+    @app.errorhandler(500)
+    def handle_server_error(error):
+        from flask import jsonify, request, render_template
+        import logging
+        logging.getLogger('cryptolens').error(f"Server error: {error}")
+        if request.is_json or request.path.startswith('/api/'):
+            return jsonify({'error': 'Server error', 'message': 'An unexpected error occurred'}), 500
+        return render_template('errors/500.html'), 500
 
     # Register blueprints
     from app.routes.dashboard import dashboard_bp

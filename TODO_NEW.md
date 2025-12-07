@@ -117,33 +117,14 @@ Generated from Security & Architecture Audit on December 6, 2025.
 
 ## PHASE 3: CODE QUALITY REFACTORING
 
-### P3.1 Split models.py (1417 lines → 4 files)
-- [ ] Create `app/models/__init__.py` (exports all models)
-- [ ] Create `app/models/user.py`:
-  - User
-  - Subscription
-  - UserNotification
-- [ ] Create `app/models/trading.py`:
-  - Symbol
-  - Candle
-  - Pattern
-  - Signal
-  - Notification
-- [ ] Create `app/models/portfolio.py`:
-  - Portfolio
-  - Trade
-  - TradeTag
-  - JournalEntry
-- [ ] Create `app/models/system.py`:
-  - Setting
-  - Log
-  - StatsCache
-  - CronJob
-  - CronRun
-  - Payment
-  - Backtest
-- [ ] Update all imports across codebase
-- [ ] Run tests to verify no regressions
+### P3.1 Split models.py (1435 lines → 5 files) ✅ DONE
+- [x] Create `app/models/__init__.py` (exports all models)
+- [x] Create `app/models/base.py` (utilities and constants)
+- [x] Create `app/models/user.py`: User, Subscription, UserNotification
+- [x] Create `app/models/trading.py`: Symbol, Candle, Pattern, Signal, Notification
+- [x] Create `app/models/portfolio.py`: Portfolio, Trade, TradeTag, JournalEntry
+- [x] Create `app/models/system.py`: Setting, Log, StatsCache, CronJob, CronRun, Payment, Backtest
+- [x] Run tests to verify no regressions (329 tests pass)
 
 **Files:** `app/models/`
 
@@ -162,17 +143,16 @@ Generated from Security & Architecture Audit on December 6, 2025.
 
 ---
 
-### P3.3 Standardize Error Handling
-- [ ] Create `app/exceptions.py` with domain exceptions:
-  - `AuthenticationError`
-  - `AuthorizationError`
-  - `ValidationError`
-  - `NotFoundError`
-- [ ] Create error handlers in `app/__init__.py`
-- [ ] Convert services to raise domain exceptions
-- [ ] Remove mixed return types (tuple vs exception)
+### P3.3 Standardize Error Handling ✅ DONE
+- [x] Create `app/exceptions.py` with domain exceptions:
+  - `AuthenticationError`, `AuthorizationError`, `ValidationError`, `NotFoundError`
+  - `RateLimitError`, `ExternalServiceError`, `ConfigurationError`
+- [x] Create error handlers in `app/__init__.py` (CryptoLensError, 404, 500)
+- [x] Create error templates (404.html, 500.html)
+- [ ] Convert services to raise domain exceptions - future enhancement
+- [ ] Remove mixed return types (tuple vs exception) - future enhancement
 
-**Files:** `app/exceptions.py`, `app/__init__.py`, `app/services/`
+**Files:** `app/exceptions.py`, `app/__init__.py`, `app/templates/errors/`
 
 ---
 
@@ -242,13 +222,13 @@ Generated from Security & Architecture Audit on December 6, 2025.
 
 ## PHASE 5: OBSERVABILITY & OPERATIONS
 
-### P5.1 Structured Logging
-- [ ] Add JSON logging format for production
-- [ ] Include request ID in all logs
-- [ ] Add performance metrics logging
-- [ ] Configure log aggregation (ELK/Datadog)
+### P5.1 Structured Logging ✅ DONE
+- [x] Add JSON logging format for production (JSONFormatter class)
+- [x] Add performance metrics logging (request timing in after_request)
+- [ ] Include request ID in all logs - future enhancement
+- [ ] Configure log aggregation (ELK/Datadog) - deployment-specific
 
-**Files:** `app/__init__.py`, `app/services/logger.py`
+**Files:** `app/__init__.py`
 
 ---
 
