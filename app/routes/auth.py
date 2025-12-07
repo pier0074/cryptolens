@@ -90,7 +90,7 @@ def register():
 def login():
     """User login page"""
     if 'user_id' in session:
-        return redirect(url_for('auth.profile'))
+        return redirect(url_for('dashboard.index'))
 
     # Check if this is a 2FA verification step
     pending_2fa_user_id = session.get('pending_2fa_user_id')
@@ -114,7 +114,7 @@ def login():
                 next_page = request.args.get('next')
                 if next_page and is_safe_url(next_page):
                     return redirect(next_page)
-                return redirect(url_for('auth.profile'))
+                return redirect(url_for('dashboard.index'))
             else:
                 flash('Invalid authentication code.', 'error')
                 return render_template('auth/login.html', requires_2fa=True)
@@ -144,11 +144,11 @@ def login():
 
             flash(f'Welcome back, {user.username}!', 'success')
 
-            # Redirect to next page or profile (with open redirect protection)
+            # Redirect to next page or dashboard (with open redirect protection)
             next_page = request.args.get('next')
             if next_page and is_safe_url(next_page):
                 return redirect(next_page)
-            return redirect(url_for('auth.profile'))
+            return redirect(url_for('dashboard.index'))
         else:
             # Record failed attempt for lockout tracking
             record_failed_attempt(email)

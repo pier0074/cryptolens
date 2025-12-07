@@ -97,12 +97,18 @@
 
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         {% for plan_key, plan in plans.items() %}
-        <div class="bg-card rounded-lg p-6 border-2 {% if subscription.plan == plan_key %}border-blue-500{% else %}border-gray-700 hover:border-gray-600{% endif %} transition-colors">
-            <h3 class="text-xl font-semibold mb-2">{{ plan.name }}</h3>
+        <div class="bg-card rounded-lg p-6 border-2 {% if subscription.plan == plan_key %}border-blue-500{% elif plan_key == 'pro' %}border-blue-500/50{% else %}border-gray-700 hover:border-gray-600{% endif %} transition-colors {% if plan_key == 'pro' %}relative{% endif %}">
+            {% if plan_key == 'pro' %}
+            <div class="absolute -top-3 left-1/2 transform -translate-x-1/2">
+                <span class="bg-blue-600 text-white px-3 py-1 rounded-full text-xs font-bold">Most Popular</span>
+            </div>
+            {% endif %}
+            <h3 class="text-xl font-semibold mb-1">{{ plan.name }}</h3>
+            <p class="text-sm text-gray-400 mb-3">{{ plan.tagline }}</p>
             <div class="mb-4">
-                <p class="text-3xl font-bold">
+                <p class="text-3xl font-bold {% if plan_key == 'pro' %}text-blue-400{% elif plan_key == 'premium' %}text-purple-400{% endif %}">
                     {% if plan.price == 0 %}
-                        Free
+                        $0<span class="text-lg text-gray-400 font-normal">/forever</span>
                     {% else %}
                         ${{ plan.price }}<span class="text-lg text-gray-400 font-normal">/mo</span>
                     {% endif %}
@@ -112,25 +118,18 @@
                 {% endif %}
             </div>
 
-            <!-- Feature highlights -->
-            <ul class="text-sm text-gray-300 mb-6 space-y-2">
-                {% if plan_key == 'free' %}
-                <li>• BTC/USDT only</li>
-                <li>• 1 notification/day</li>
-                <li>• Basic dashboard</li>
-                {% elif plan_key == 'pro' %}
-                <li>• 5 symbols</li>
-                <li>• 20 notifications/day</li>
-                <li>• Full patterns & signals</li>
-                <li>• 1 portfolio</li>
-                {% elif plan_key == 'premium' %}
-                <li>• Unlimited symbols</li>
-                <li>• Unlimited notifications</li>
-                <li>• Full patterns & signals</li>
-                <li>• Unlimited portfolios</li>
-                <li>• Backtesting</li>
-                <li>• API access</li>
-                {% endif %}
+            <!-- Feature highlights from centralized config -->
+            <ul class="text-sm mb-6 space-y-2">
+                {% for feature in plan.features %}
+                <li class="flex items-start {% if not feature.included %}text-gray-500{% else %}text-gray-300{% endif %}">
+                    {% if feature.included %}
+                    <svg class="w-4 h-4 {% if plan_key == 'pro' %}text-blue-400{% elif plan_key == 'premium' %}text-purple-400{% else %}text-green-400{% endif %} mr-2 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+                    {% else %}
+                    <svg class="w-4 h-4 text-gray-500 mr-2 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
+                    {% endif %}
+                    <span>{% if feature.highlight %}<strong>{{ feature.highlight }}</strong> {{ feature.text|replace(feature.highlight, '') }}{% else %}{{ feature.text }}{% endif %}</span>
+                </li>
+                {% endfor %}
             </ul>
 
             {# Define tier order for comparison #}
@@ -151,7 +150,7 @@
             {% elif plan_tier_level > current_tier_level %}
                 {# Upgrade available - link to payment page #}
                 <a href="{{ url_for('payments.upgrade') }}?plan={{ plan_key }}"
-                   class="block w-full text-center px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg text-sm transition-colors">
+                   class="block w-full text-center px-4 py-2 {% if plan_key == 'pro' %}bg-blue-600 hover:bg-blue-500{% else %}bg-purple-600 hover:bg-purple-500{% endif %} text-white rounded-lg text-sm transition-colors">
                     Upgrade to {{ plan.name }}
                 </a>
             {% else %}

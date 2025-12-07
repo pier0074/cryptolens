@@ -59,6 +59,14 @@ SUBSCRIPTION_PLANS = {
         'price_yearly': 0,
         'days': None,  # Unlimited duration with limited features
         'tier': 'free',
+        'tagline': 'Perfect to get started',
+        'features': [
+            {'text': 'BTC/USDT trading pair', 'highlight': 'BTC/USDT', 'included': True},
+            {'text': '1 notification per day', 'highlight': '1', 'included': True},
+            {'text': 'FVG pattern detection', 'highlight': 'FVG', 'included': True},
+            {'text': '10 minute notification delay', 'highlight': None, 'included': False},
+            {'text': 'No portfolio tracking', 'highlight': None, 'included': False},
+        ],
     },
     'pro': {
         'name': 'Pro',
@@ -66,6 +74,15 @@ SUBSCRIPTION_PLANS = {
         'price_yearly': 190,  # ~$15.83/mo
         'days': 30,
         'tier': 'pro',
+        'tagline': 'For active traders',
+        'features': [
+            {'text': '5 symbols (BTC, ETH, XRP, BNB, SOL)', 'highlight': '5 symbols', 'included': True},
+            {'text': '20 notifications per day', 'highlight': '20', 'included': True},
+            {'text': 'All 3 pattern types (FVG, OB, Sweep)', 'highlight': 'All 3', 'included': True},
+            {'text': '1 portfolio with 5 trades/day', 'highlight': '1 portfolio', 'included': True},
+            {'text': 'Real-time notifications', 'highlight': 'Real-time', 'included': True},
+            {'text': 'Last 100 patterns & 50 signals', 'highlight': '100 patterns', 'included': True},
+        ],
     },
     'premium': {
         'name': 'Premium',
@@ -73,6 +90,15 @@ SUBSCRIPTION_PLANS = {
         'price_yearly': 490,  # ~$40.83/mo
         'days': 30,
         'tier': 'premium',
+        'tagline': 'For professional traders',
+        'features': [
+            {'text': 'Unlimited symbols', 'highlight': 'Unlimited', 'included': True},
+            {'text': 'Unlimited notifications', 'highlight': 'Unlimited', 'included': True},
+            {'text': 'Unlimited portfolios & trades', 'highlight': 'Unlimited', 'included': True},
+            {'text': 'Full history access', 'highlight': 'Full history', 'included': True},
+            {'text': 'Backtesting engine', 'highlight': 'Backtesting', 'included': True},
+            {'text': 'REST API access', 'highlight': 'REST API', 'included': True},
+        ],
     },
 }
 

@@ -224,147 +224,58 @@
             </div>
 
             <div class="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto">
-                <!-- Free -->
-                <div class="bg-card rounded-2xl p-8 border border-gray-800 hover:border-gray-700 transition-all duration-300">
-                    <div class="text-center mb-8">
-                        <div class="inline-flex items-center justify-center w-16 h-16 bg-gray-800 rounded-full mb-4">
-                            <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                            </svg>
-                        </div>
-                        <h3 class="text-2xl font-bold mb-2">Free</h3>
-                        <p class="text-gray-400 text-sm">Perfect to get started</p>
-                    </div>
-                    <div class="text-center mb-8">
-                        <span class="text-5xl font-bold">$0</span>
-                        <span class="text-gray-400 text-lg">/forever</span>
-                    </div>
-                    <ul class="space-y-4 mb-8">
-                        <li class="flex items-start">
-                            <svg class="w-5 h-5 text-green-400 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                            <span><strong>BTC/USDT</strong> trading pair</span>
-                        </li>
-                        <li class="flex items-start">
-                            <svg class="w-5 h-5 text-green-400 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                            <span><strong>1</strong> notification per day</span>
-                        </li>
-                        <li class="flex items-start">
-                            <svg class="w-5 h-5 text-green-400 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                            <span><strong>FVG</strong> pattern detection</span>
-                        </li>
-                        <li class="flex items-start text-gray-500">
-                            <svg class="w-5 h-5 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
-                            <span>10 minute notification delay</span>
-                        </li>
-                        <li class="flex items-start text-gray-500">
-                            <svg class="w-5 h-5 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
-                            <span>No portfolio tracking</span>
-                        </li>
-                    </ul>
-                    <a href="{{ url_for('auth.register') }}"
-                       class="block w-full py-4 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-xl text-center transition-all duration-300">
-                        Get Started Free
-                    </a>
-                </div>
-
-                <!-- Pro -->
-                <div class="bg-gradient-to-b from-blue-900/50 to-card rounded-2xl p-8 border-2 border-blue-500 relative transform md:scale-105 shadow-xl shadow-blue-500/20">
+                {% for plan_key, plan in plans.items() %}
+                {% set is_pro = plan_key == 'pro' %}
+                {% set is_premium = plan_key == 'premium' %}
+                <div class="{% if is_pro %}bg-gradient-to-b from-blue-900/50 to-card border-2 border-blue-500 relative transform md:scale-105 shadow-xl shadow-blue-500/20{% elif is_premium %}bg-gradient-to-b from-purple-900/30 to-card border border-purple-500/50 hover:border-purple-500{% else %}bg-card border border-gray-800 hover:border-gray-700{% endif %} rounded-2xl p-8 transition-all duration-300">
+                    {% if is_pro %}
                     <div class="absolute -top-4 left-1/2 transform -translate-x-1/2">
                         <span class="bg-gradient-to-r from-blue-500 to-blue-600 text-white px-6 py-1.5 rounded-full text-sm font-bold shadow-lg">
                             Most Popular
                         </span>
                     </div>
+                    {% endif %}
                     <div class="text-center mb-8">
-                        <div class="inline-flex items-center justify-center w-16 h-16 bg-blue-600/20 rounded-full mb-4">
+                        <div class="inline-flex items-center justify-center w-16 h-16 {% if is_pro %}bg-blue-600/20{% elif is_premium %}bg-purple-600/20{% else %}bg-gray-800{% endif %} rounded-full mb-4">
+                            {% if is_pro %}
                             <svg class="w-8 h-8 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
                             </svg>
-                        </div>
-                        <h3 class="text-2xl font-bold mb-2">Pro</h3>
-                        <p class="text-gray-400 text-sm">For active traders</p>
-                    </div>
-                    <div class="text-center mb-8">
-                        <span class="text-5xl font-bold text-blue-400">${{ plans.pro.price }}</span>
-                        <span class="text-gray-400 text-lg">/month</span>
-                    </div>
-                    <ul class="space-y-4 mb-8">
-                        <li class="flex items-start">
-                            <svg class="w-5 h-5 text-blue-400 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                            <span><strong>5 symbols</strong> (BTC, ETH, XRP, BNB, SOL)</span>
-                        </li>
-                        <li class="flex items-start">
-                            <svg class="w-5 h-5 text-blue-400 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                            <span><strong>20</strong> notifications per day</span>
-                        </li>
-                        <li class="flex items-start">
-                            <svg class="w-5 h-5 text-blue-400 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                            <span><strong>All 3</strong> pattern types (FVG, OB, Sweep)</span>
-                        </li>
-                        <li class="flex items-start">
-                            <svg class="w-5 h-5 text-blue-400 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                            <span><strong>1 portfolio</strong> with 5 trades/day</span>
-                        </li>
-                        <li class="flex items-start">
-                            <svg class="w-5 h-5 text-blue-400 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                            <span><strong>Real-time</strong> notifications</span>
-                        </li>
-                        <li class="flex items-start">
-                            <svg class="w-5 h-5 text-blue-400 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                            <span>Last <strong>100 patterns</strong> & <strong>50 signals</strong></span>
-                        </li>
-                    </ul>
-                    <a href="{{ url_for('auth.register') }}"
-                       class="block w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-center transition-all duration-300 shadow-lg shadow-blue-600/30">
-                        Get Pro
-                    </a>
-                </div>
-
-                <!-- Premium -->
-                <div class="bg-gradient-to-b from-purple-900/30 to-card rounded-2xl p-8 border border-purple-500/50 hover:border-purple-500 transition-all duration-300">
-                    <div class="text-center mb-8">
-                        <div class="inline-flex items-center justify-center w-16 h-16 bg-purple-600/20 rounded-full mb-4">
+                            {% elif is_premium %}
                             <svg class="w-8 h-8 text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 3v4M3 5h4M6 17v4m-2-2h4m5-16l2.286 6.857L21 12l-5.714 2.143L13 21l-2.286-6.857L5 12l5.714-2.143L13 3z"/>
                             </svg>
+                            {% else %}
+                            <svg class="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                            </svg>
+                            {% endif %}
                         </div>
-                        <h3 class="text-2xl font-bold mb-2">Premium</h3>
-                        <p class="text-gray-400 text-sm">For professional traders</p>
+                        <h3 class="text-2xl font-bold mb-2">{{ plan.name }}</h3>
+                        <p class="text-gray-400 text-sm">{{ plan.tagline }}</p>
                     </div>
                     <div class="text-center mb-8">
-                        <span class="text-5xl font-bold text-purple-400">${{ plans.premium.price }}</span>
-                        <span class="text-gray-400 text-lg">/month</span>
+                        <span class="text-5xl font-bold {% if is_pro %}text-blue-400{% elif is_premium %}text-purple-400{% endif %}">${{ plan.price }}</span>
+                        <span class="text-gray-400 text-lg">{% if plan.price == 0 %}/forever{% else %}/month{% endif %}</span>
                     </div>
                     <ul class="space-y-4 mb-8">
-                        <li class="flex items-start">
-                            <svg class="w-5 h-5 text-purple-400 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                            <span><strong>Unlimited</strong> symbols</span>
+                        {% for feature in plan.features %}
+                        <li class="flex items-start {% if not feature.included %}text-gray-500{% endif %}">
+                            {% if feature.included %}
+                            <svg class="w-5 h-5 {% if is_pro %}text-blue-400{% elif is_premium %}text-purple-400{% else %}text-green-400{% endif %} mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+                            {% else %}
+                            <svg class="w-5 h-5 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
+                            {% endif %}
+                            <span>{% if feature.highlight %}<strong>{{ feature.highlight }}</strong>{{ feature.text|replace(feature.highlight, '') }}{% else %}{{ feature.text }}{% endif %}</span>
                         </li>
-                        <li class="flex items-start">
-                            <svg class="w-5 h-5 text-purple-400 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                            <span><strong>Unlimited</strong> notifications</span>
-                        </li>
-                        <li class="flex items-start">
-                            <svg class="w-5 h-5 text-purple-400 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                            <span><strong>Unlimited</strong> portfolios & trades</span>
-                        </li>
-                        <li class="flex items-start">
-                            <svg class="w-5 h-5 text-purple-400 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                            <span><strong>Full history</strong> access</span>
-                        </li>
-                        <li class="flex items-start">
-                            <svg class="w-5 h-5 text-purple-400 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                            <span><strong>Backtesting</strong> engine</span>
-                        </li>
-                        <li class="flex items-start">
-                            <svg class="w-5 h-5 text-purple-400 mr-3 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                            <span><strong>REST API</strong> access</span>
-                        </li>
+                        {% endfor %}
                     </ul>
                     <a href="{{ url_for('auth.register') }}"
-                       class="block w-full py-4 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white font-bold rounded-xl text-center transition-all duration-300 shadow-lg shadow-purple-600/30">
-                        Get Premium
+                       class="block w-full py-4 {% if is_pro %}bg-blue-600 hover:bg-blue-500 shadow-lg shadow-blue-600/30{% elif is_premium %}bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 shadow-lg shadow-purple-600/30{% else %}bg-gray-700 hover:bg-gray-600{% endif %} text-white font-bold rounded-xl text-center transition-all duration-300">
+                        {% if plan.price == 0 %}Get Started Free{% else %}Get {{ plan.name }}{% endif %}
                     </a>
                 </div>
+                {% endfor %}
             </div>
 
             <div class="text-center mt-12">
