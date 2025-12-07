@@ -25,131 +25,61 @@
 
     <!-- Pricing Cards -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-        <!-- Free Plan -->
-        <div class="bg-card rounded-xl p-8 {% if current_plan == 'free' %}ring-2 ring-blue-500{% endif %}">
-            <div class="text-center mb-6">
-                <h3 class="text-2xl font-bold">Free</h3>
-                <div class="mt-4">
-                    <span class="text-4xl font-bold">$0</span>
-                    <span class="text-gray-400">/month</span>
-                </div>
-            </div>
+        {% for plan_key, plan in plans.items() %}
+        {% set is_pro = plan_key == 'pro' %}
+        {% set is_premium = plan_key == 'premium' %}
+        {% set is_free = plan_key == 'free' %}
 
-            <ul class="space-y-3 mb-8">
-                <li class="flex items-center">
-                    <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                    View patterns & signals
-                </li>
-                <li class="flex items-center">
-                    <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                    Basic analytics
-                </li>
-                <li class="flex items-center text-gray-500">
-                    <svg class="w-5 h-5 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
-                    No notifications
-                </li>
-                <li class="flex items-center text-gray-500">
-                    <svg class="w-5 h-5 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
-                    No portfolio tracking
-                </li>
-            </ul>
-
-            {% if current_plan == 'free' %}
-            <button disabled class="w-full py-3 bg-gray-700 text-gray-400 rounded-lg cursor-not-allowed">
-                Current Plan
-            </button>
-            {% else %}
-            <button disabled class="w-full py-3 bg-gray-700 text-gray-400 rounded-lg cursor-not-allowed">
-                Downgrade Not Available
-            </button>
-            {% endif %}
-        </div>
-
-        <!-- Pro Plan -->
-        <div class="bg-card rounded-xl p-8 relative {% if current_plan == 'pro' %}ring-2 ring-blue-500{% endif %}">
+        <div class="bg-card rounded-xl p-8 {% if is_pro %}relative{% endif %} {% if current_plan == plan_key %}ring-2 ring-blue-500{% endif %}">
+            {% if is_pro %}
             <div class="absolute -top-4 left-1/2 transform -translate-x-1/2">
                 <span class="bg-blue-600 text-white px-4 py-1 rounded-full text-sm font-medium">Popular</span>
             </div>
+            {% endif %}
 
             <div class="text-center mb-6">
-                <h3 class="text-2xl font-bold">Pro</h3>
+                <h3 class="text-2xl font-bold">{{ plan.name }}</h3>
+                <p class="text-sm text-gray-400 mt-1">{{ plan.tagline }}</p>
                 <div class="mt-4">
-                    <span class="text-4xl font-bold" id="pro-price">${{ plans.pro.price }}</span>
-                    <span class="text-gray-400" id="pro-period">/month</span>
+                    <span class="text-4xl font-bold {% if is_pro %}text-blue-400{% elif is_premium %}text-purple-400{% endif %}" {% if not is_free %}id="{{ plan_key }}-price"{% endif %}>${{ plan.price }}</span>
+                    <span class="text-gray-400" {% if not is_free %}id="{{ plan_key }}-period"{% endif %}>{% if is_free %}/forever{% else %}/month{% endif %}</span>
                 </div>
             </div>
 
             <ul class="space-y-3 mb-8">
-                <li class="flex items-center">
-                    <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                    Everything in Free
+                {% for feature in plan.features %}
+                <li class="flex items-center {% if not feature.included %}text-gray-500{% endif %}">
+                    {% if feature.included %}
+                    <svg class="w-5 h-5 {% if is_pro %}text-blue-400{% elif is_premium %}text-purple-400{% else %}text-green-400{% endif %} mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
+                    {% else %}
+                    <svg class="w-5 h-5 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"></path></svg>
+                    {% endif %}
+                    {% if feature.highlight %}<strong>{{ feature.highlight }}</strong>{{ feature.text|replace(feature.highlight, '') }}{% else %}{{ feature.text }}{% endif %}
                 </li>
-                <li class="flex items-center">
-                    <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                    Push notifications (NTFY)
-                </li>
-                <li class="flex items-center">
-                    <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                    Signal filters & preferences
-                </li>
-                <li class="flex items-center">
-                    <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                    Backtest signals
-                </li>
+                {% endfor %}
             </ul>
 
-            {% if current_plan == 'pro' %}
+            {% if current_plan == plan_key %}
             <button disabled class="w-full py-3 bg-gray-700 text-gray-400 rounded-lg cursor-not-allowed">
                 Current Plan
             </button>
-            {% else %}
+            {% elif is_free %}
+            <button disabled class="w-full py-3 bg-gray-700 text-gray-400 rounded-lg cursor-not-allowed">
+                Downgrade Not Available
+            </button>
+            {% elif is_pro %}
             <button onclick="showCheckout('pro')"
                     class="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition">
                 Upgrade to Pro
             </button>
-            {% endif %}
-        </div>
-
-        <!-- Premium Plan -->
-        <div class="bg-card rounded-xl p-8 {% if current_plan == 'premium' %}ring-2 ring-blue-500{% endif %}">
-            <div class="text-center mb-6">
-                <h3 class="text-2xl font-bold">Premium</h3>
-                <div class="mt-4">
-                    <span class="text-4xl font-bold" id="premium-price">${{ plans.premium.price }}</span>
-                    <span class="text-gray-400" id="premium-period">/month</span>
-                </div>
-            </div>
-
-            <ul class="space-y-3 mb-8">
-                <li class="flex items-center">
-                    <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                    Everything in Pro
-                </li>
-                <li class="flex items-center">
-                    <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                    Portfolio tracking
-                </li>
-                <li class="flex items-center">
-                    <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                    API access
-                </li>
-                <li class="flex items-center">
-                    <svg class="w-5 h-5 text-green-400 mr-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"></path></svg>
-                    Priority support
-                </li>
-            </ul>
-
-            {% if current_plan == 'premium' %}
-            <button disabled class="w-full py-3 bg-gray-700 text-gray-400 rounded-lg cursor-not-allowed">
-                Current Plan
-            </button>
-            {% else %}
+            {% elif is_premium %}
             <button onclick="showCheckout('premium')"
                     class="w-full py-3 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-bold rounded-lg transition">
                 Upgrade to Premium
             </button>
             {% endif %}
         </div>
+        {% endfor %}
     </div>
 
     <!-- Payment History Link -->
