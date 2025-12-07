@@ -157,41 +157,49 @@
         <h2 class="text-xl font-semibold mb-4">Actions</h2>
 
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <!-- Verify/Unverify -->
-            <form method="POST" action="{{ url_for('admin.user_action', user_id=user.id, action='verify' if not user.is_verified else 'unverify') }}">
+            <!-- Verify -->
+            {% if not user.is_verified %}
+            <form method="POST" action="{{ url_for('admin.verify_user_route', user_id=user.id) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="w-full px-4 py-2 rounded-lg text-sm
-                    {% if user.is_verified %}bg-yellow-700 hover:bg-yellow-600{% else %}bg-green-700 hover:bg-green-600{% endif %}">
-                    {% if user.is_verified %}Unverify{% else %}Verify{% endif %}
+                <button type="submit" class="w-full px-4 py-2 rounded-lg text-sm bg-green-700 hover:bg-green-600">
+                    Verify
                 </button>
             </form>
+            {% endif %}
 
             <!-- Activate/Deactivate -->
-            <form method="POST" action="{{ url_for('admin.user_action', user_id=user.id, action='activate' if not user.is_active else 'deactivate') }}">
+            {% if user.is_active %}
+            <form method="POST" action="{{ url_for('admin.deactivate_user_route', user_id=user.id) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="w-full px-4 py-2 rounded-lg text-sm
-                    {% if user.is_active %}bg-red-700 hover:bg-red-600{% else %}bg-blue-700 hover:bg-blue-600{% endif %}">
-                    {% if user.is_active %}Deactivate{% else %}Activate{% endif %}
+                <button type="submit" class="w-full px-4 py-2 rounded-lg text-sm bg-red-700 hover:bg-red-600">
+                    Deactivate
                 </button>
             </form>
+            {% else %}
+            <form method="POST" action="{{ url_for('admin.activate_user_route', user_id=user.id) }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="w-full px-4 py-2 rounded-lg text-sm bg-blue-700 hover:bg-blue-600">
+                    Activate
+                </button>
+            </form>
+            {% endif %}
 
             <!-- Admin Toggle -->
-            <form method="POST" action="{{ url_for('admin.user_action', user_id=user.id, action='make-admin' if not user.is_admin else 'revoke-admin') }}">
+            {% if user.is_admin %}
+            <form method="POST" action="{{ url_for('admin.revoke_admin_route', user_id=user.id) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="w-full px-4 py-2 rounded-lg text-sm
-                    {% if user.is_admin %}bg-gray-700 hover:bg-gray-600{% else %}bg-purple-700 hover:bg-purple-600{% endif %}">
-                    {% if user.is_admin %}Revoke Admin{% else %}Make Admin{% endif %}
+                <button type="submit" class="w-full px-4 py-2 rounded-lg text-sm bg-gray-700 hover:bg-gray-600">
+                    Revoke Admin
                 </button>
             </form>
-
-            <!-- Reset Password -->
-            <form method="POST" action="{{ url_for('admin.user_action', user_id=user.id, action='reset-password') }}">
+            {% else %}
+            <form method="POST" action="{{ url_for('admin.make_admin_route', user_id=user.id) }}">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="w-full px-4 py-2 rounded-lg text-sm bg-orange-700 hover:bg-orange-600"
-                        onclick="return confirm('Reset password to a random value?');">
-                    Reset Password
+                <button type="submit" class="w-full px-4 py-2 rounded-lg text-sm bg-purple-700 hover:bg-purple-600">
+                    Make Admin
                 </button>
             </form>
+            {% endif %}
 
             <!-- Unlock Account (only show if locked) -->
             {% if user.locked_until and user.locked_until > now %}

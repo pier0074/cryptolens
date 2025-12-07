@@ -382,3 +382,267 @@ class TestAPIAccess:
 
         response = client.get('/api/health')
         assert response.status_code == 200
+
+
+class TestSymbolFiltering:
+    """Test symbol filtering based on user tier"""
+
+    def test_filter_symbols_free_user(self, app):
+        """Free user should only see BTC/USDT"""
+        from app.decorators import filter_symbols_by_tier
+        from app.models import User, Subscription, Symbol
+
+        with app.app_context():
+            # Create a free user
+            user = User(
+                email='freesym@test.com',
+                username='freesym',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_freesym123'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='free',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=None,
+                status='active'
+            )
+            db.session.add(sub)
+            db.session.commit()
+
+            # Mock symbol list
+            class MockSymbol:
+                def __init__(self, symbol):
+                    self.symbol = symbol
+
+            symbols = [MockSymbol('BTC/USDT'), MockSymbol('ETH/USDT'), MockSymbol('XRP/USDT')]
+            filtered = filter_symbols_by_tier(symbols, user)
+
+            # Free user should only see BTC/USDT
+            assert len(filtered) == 1
+            assert filtered[0].symbol == 'BTC/USDT'
+
+    def test_filter_symbols_pro_user(self, app):
+        """Pro user should see up to 5 symbols"""
+        from app.decorators import filter_symbols_by_tier
+        from app.models import User, Subscription
+
+        with app.app_context():
+            user = User(
+                email='prosym@test.com',
+                username='prosym',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_prosym1234'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='pro',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                status='active'
+            )
+            db.session.add(sub)
+            db.session.commit()
+
+            class MockSymbol:
+                def __init__(self, symbol):
+                    self.symbol = symbol
+
+            symbols = [MockSymbol(f'SYM{i}/USDT') for i in range(10)]
+            filtered = filter_symbols_by_tier(symbols, user)
+
+            # Pro user should see max 5 symbols
+            assert len(filtered) == 5
+
+    def test_filter_symbols_premium_user(self, app):
+        """Premium user should see all symbols"""
+        from app.decorators import filter_symbols_by_tier
+        from app.models import User, Subscription
+
+        with app.app_context():
+            user = User(
+                email='premsym@test.com',
+                username='premsym',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_premsym12'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='premium',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                status='active'
+            )
+            db.session.add(sub)
+            db.session.commit()
+
+            class MockSymbol:
+                def __init__(self, symbol):
+                    self.symbol = symbol
+
+            symbols = [MockSymbol(f'SYM{i}/USDT') for i in range(20)]
+            filtered = filter_symbols_by_tier(symbols, user)
+
+            # Premium user should see all symbols
+            assert len(filtered) == 20
+
+
+class TestPortfolioRestrictions:
+    """Test portfolio access and limits based on tier"""
+
+    def test_portfolio_has_user_id(self, app):
+        """Portfolio should have user_id field"""
+        from app.models import Portfolio
+
+        with app.app_context():
+            portfolio = Portfolio(
+                user_id=1,
+                name='Test Portfolio',
+                initial_balance=10000,
+                current_balance=10000
+            )
+            assert portfolio.user_id == 1
+
+    def test_pro_portfolio_limit(self, app):
+        """Pro user should be limited to 1 portfolio"""
+        from app.models import User, Subscription, Portfolio
+        from app.routes.portfolio import can_create_portfolio, get_user_portfolio_count
+
+        with app.app_context():
+            user = User(
+                email='proport@test.com',
+                username='proport',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_proport12'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='pro',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                status='active'
+            )
+            db.session.add(sub)
+            db.session.commit()
+
+            # Initially can create
+            assert get_user_portfolio_count(user) == 0
+
+            # Create one portfolio
+            portfolio = Portfolio(
+                user_id=user.id,
+                name='Test Portfolio',
+                initial_balance=10000,
+                current_balance=10000
+            )
+            db.session.add(portfolio)
+            db.session.commit()
+
+            # Now count should be 1
+            assert get_user_portfolio_count(user) == 1
+
+    def test_premium_unlimited_portfolios(self, app):
+        """Premium user should have no portfolio limit"""
+        tier = SUBSCRIPTION_TIERS['premium']
+        assert tier['portfolio_limit'] is None
+
+    def test_pro_transaction_limit(self, app):
+        """Pro user should be limited to 5 transactions per day"""
+        tier = SUBSCRIPTION_TIERS['pro']
+        assert tier['transactions_limit'] == 5
+
+    def test_premium_unlimited_transactions(self, app):
+        """Premium user should have no transaction limit"""
+        tier = SUBSCRIPTION_TIERS['premium']
+        assert tier['transactions_limit'] is None
+
+    def test_portfolio_user_isolation(self, client, app):
+        """Users should only see their own portfolios"""
+        from app.models import User, Subscription, Portfolio
+
+        with app.app_context():
+            # Create user1
+            user1 = User(
+                email='portuser1@test.com',
+                username='portuser1',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_portu1123'
+            )
+            user1.set_password('TestPass123')
+            db.session.add(user1)
+            db.session.commit()
+
+            sub1 = Subscription(
+                user_id=user1.id,
+                plan='pro',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                status='active'
+            )
+            db.session.add(sub1)
+
+            # Create user2
+            user2 = User(
+                email='portuser2@test.com',
+                username='portuser2',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_portu2123'
+            )
+            user2.set_password('TestPass123')
+            db.session.add(user2)
+            db.session.commit()
+
+            sub2 = Subscription(
+                user_id=user2.id,
+                plan='pro',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+                status='active'
+            )
+            db.session.add(sub2)
+
+            # Create portfolios for each user
+            port1 = Portfolio(user_id=user1.id, name='User1 Portfolio', initial_balance=10000, current_balance=10000)
+            port2 = Portfolio(user_id=user2.id, name='User2 Portfolio', initial_balance=10000, current_balance=10000)
+            db.session.add(port1)
+            db.session.add(port2)
+            db.session.commit()
+
+            port1_id = port1.id
+            port2_id = port2.id
+
+        # Login as user1
+        client.post('/auth/login', data={
+            'email': 'portuser1@test.com',
+            'password': 'TestPass123'
+        })
+
+        # User1 can access their own portfolio
+        response = client.get(f'/portfolio/{port1_id}')
+        assert response.status_code == 200
+
+        # User1 cannot access user2's portfolio
+        response = client.get(f'/portfolio/{port2_id}')
+        assert response.status_code == 403

@@ -110,10 +110,33 @@
                         {{ user.created_at.strftime('%Y-%m-%d') }}
                     </td>
                     <td class="px-4 py-3">
-                        <a href="{{ url_for('admin.user_detail', user_id=user.id) }}"
-                           class="text-blue-400 hover:text-blue-300 text-sm">
-                            View
-                        </a>
+                        <div class="flex flex-wrap gap-2">
+                            <a href="{{ url_for('admin.user_detail', user_id=user.id) }}"
+                               class="text-blue-400 hover:text-blue-300 text-sm">View</a>
+                            {% if not user.is_verified %}
+                            <form method="POST" action="{{ url_for('admin.verify_user_route', user_id=user.id) }}" class="inline">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="text-green-400 hover:text-green-300 text-sm">Verify</button>
+                            </form>
+                            {% endif %}
+                            {% if user.is_active %}
+                            <form method="POST" action="{{ url_for('admin.deactivate_user_route', user_id=user.id) }}" class="inline">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="text-red-400 hover:text-red-300 text-sm">Deact</button>
+                            </form>
+                            {% else %}
+                            <form method="POST" action="{{ url_for('admin.activate_user_route', user_id=user.id) }}" class="inline">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="text-blue-400 hover:text-blue-300 text-sm">Activate</button>
+                            </form>
+                            {% endif %}
+                            {% if user.locked_until and user.locked_until > now %}
+                            <form method="POST" action="{{ url_for('admin.unlock_user_route', user_id=user.id) }}" class="inline">
+                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                <button type="submit" class="text-yellow-400 hover:text-yellow-300 text-sm">Unlock</button>
+                            </form>
+                            {% endif %}
+                        </div>
                     </td>
                 </tr>
                 {% else %}

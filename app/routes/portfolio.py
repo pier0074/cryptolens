@@ -3,7 +3,7 @@ Portfolio Routes
 CRUD operations for portfolios, trades, and journal entries.
 """
 from flask import Blueprint, render_template, request, jsonify, abort, redirect, url_for, flash
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from app.models import (
     Portfolio, Trade, JournalEntry, TradeTag, Signal, Symbol,
     TRADE_MOODS, TRADE_STATUSES
@@ -12,6 +12,43 @@ from app import db
 from app.decorators import login_required, feature_required, check_feature_limit, get_current_user
 
 portfolio_bp = Blueprint('portfolio', __name__)
+
+
+def get_user_portfolios(user):
+    """Get portfolios owned by the user."""
+    return Portfolio.query.filter_by(user_id=user.id, is_active=True).all()
+
+
+def get_user_portfolio_count(user):
+    """Get count of active portfolios owned by the user."""
+    return Portfolio.query.filter_by(user_id=user.id, is_active=True).count()
+
+
+def get_user_trades_today(user):
+    """Get count of trades created today by the user."""
+    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+    return Trade.query.join(Portfolio).filter(
+        Portfolio.user_id == user.id,
+        Trade.created_at >= today_start
+    ).count()
+
+
+def can_create_portfolio(user):
+    """Check if user can create a new portfolio based on tier limits."""
+    _, limit, _ = check_feature_limit('portfolio_limit')
+    if limit is None:
+        return True, None  # Unlimited
+    current_count = get_user_portfolio_count(user)
+    return current_count < limit, limit
+
+
+def can_create_trade(user):
+    """Check if user can create a new trade based on daily transaction limit."""
+    _, limit, _ = check_feature_limit('transactions_limit')
+    if limit is None:
+        return True, None  # Unlimited
+    current_count = get_user_trades_today(user)
+    return current_count < limit, limit
 
 
 # ==================== VALIDATION HELPERS ====================
@@ -62,16 +99,26 @@ def validate_optional_positive_float(value, field_name, min_val=0.00000001, max_
 @feature_required('portfolio')
 def index():
     """Portfolio list and overview (Pro+ required)"""
-    portfolios = Portfolio.query.filter_by(is_active=True).all()
+    user = get_current_user()
+    portfolios = get_user_portfolios(user)
 
     # Calculate summary stats
     total_balance = sum(p.current_balance for p in portfolios)
     total_pnl = sum(p.total_pnl for p in portfolios)
 
+    # Get tier limits for display
+    can_create, portfolio_limit = can_create_portfolio(user)
+    _, transactions_limit, _ = check_feature_limit('transactions_limit')
+    trades_today = get_user_trades_today(user)
+
     return render_template('portfolio/index.html',
                           portfolios=portfolios,
                           total_balance=total_balance,
-                          total_pnl=total_pnl)
+                          total_pnl=total_pnl,
+                          can_create_portfolio=can_create,
+                          portfolio_limit=portfolio_limit,
+                          transactions_limit=transactions_limit,
+                          trades_today=trades_today)
 
 
 @portfolio_bp.route('/create', methods=['GET', 'POST'])
@@ -79,6 +126,14 @@ def index():
 @feature_required('portfolio')
 def create():
     """Create a new portfolio (Pro+ required)"""
+    user = get_current_user()
+
+    # Check portfolio limit
+    can_create, limit = can_create_portfolio(user)
+    if not can_create:
+        flash(f'You have reached your portfolio limit ({limit}). Upgrade to create more.', 'warning')
+        return redirect(url_for('portfolio.index'))
+
     if request.method == 'POST':
         data = request.form
         try:
@@ -92,6 +147,7 @@ def create():
             )
 
             portfolio = Portfolio(
+                user_id=user.id,
                 name=name,
                 description=data.get('description', '').strip()[:500] if data.get('description') else None,
                 initial_balance=initial_balance,
@@ -109,14 +165,21 @@ def create():
 
 
 @portfolio_bp.route('/<int:portfolio_id>')
+@login_required
+@feature_required('portfolio')
 def detail(portfolio_id):
     """Portfolio detail view with trades"""
     from app.models import Candle
     from sqlalchemy import func, and_
 
+    user = get_current_user()
     portfolio = db.session.get(Portfolio, portfolio_id)
     if not portfolio:
         abort(404)
+
+    # Check ownership (allow viewing if user owns it or it has no owner - legacy)
+    if portfolio.user_id is not None and portfolio.user_id != user.id:
+        abort(403)
 
     # Get trades with filters
     status_filter = request.args.get('status', None)
@@ -256,11 +319,24 @@ def _get_current_prices():
 
 
 @portfolio_bp.route('/<int:portfolio_id>/trades/new', methods=['GET', 'POST'])
+@login_required
+@feature_required('portfolio')
 def new_trade(portfolio_id):
     """Create a new trade"""
+    user = get_current_user()
     portfolio = db.session.get(Portfolio, portfolio_id)
     if not portfolio:
         abort(404)
+
+    # Check ownership
+    if portfolio.user_id is not None and portfolio.user_id != user.id:
+        abort(403)
+
+    # Check transaction limit
+    can_trade, limit = can_create_trade(user)
+    if not can_trade:
+        flash(f'You have reached your daily transaction limit ({limit}). Upgrade for more trades.', 'warning')
+        return redirect(url_for('portfolio.detail', portfolio_id=portfolio_id))
 
     if request.method == 'POST':
         data = request.form
@@ -591,38 +667,62 @@ def delete_tag(tag_id):
 # ==================== API ENDPOINTS ====================
 
 @portfolio_bp.route('/api/portfolios')
+@login_required
+@feature_required('portfolio')
 def api_portfolios():
-    """API: Get all portfolios"""
-    portfolios = Portfolio.query.filter_by(is_active=True).all()
+    """API: Get user's portfolios"""
+    user = get_current_user()
+    portfolios = get_user_portfolios(user)
     return jsonify([p.to_dict() for p in portfolios])
 
 
 @portfolio_bp.route('/api/portfolios/<int:portfolio_id>')
+@login_required
+@feature_required('portfolio')
 def api_portfolio_detail(portfolio_id):
     """API: Get portfolio detail"""
+    user = get_current_user()
     portfolio = db.session.get(Portfolio, portfolio_id)
     if not portfolio:
         return jsonify({'error': 'Portfolio not found'}), 404
+    # Check ownership
+    if portfolio.user_id is not None and portfolio.user_id != user.id:
+        return jsonify({'error': 'Access denied'}), 403
     return jsonify(portfolio.to_dict())
 
 
 @portfolio_bp.route('/api/portfolios/<int:portfolio_id>/trades')
+@login_required
+@feature_required('portfolio')
 def api_portfolio_trades(portfolio_id):
     """API: Get trades for a portfolio"""
+    user = get_current_user()
     portfolio = db.session.get(Portfolio, portfolio_id)
     if not portfolio:
         return jsonify({'error': 'Portfolio not found'}), 404
+    # Check ownership
+    if portfolio.user_id is not None and portfolio.user_id != user.id:
+        return jsonify({'error': 'Access denied'}), 403
 
     trades = portfolio.trades.order_by(Trade.created_at.desc()).limit(100).all()
     return jsonify([t.to_dict() for t in trades])
 
 
 @portfolio_bp.route('/api/trade-from-pattern', methods=['POST'])
+@login_required
+@feature_required('portfolio')
 def api_trade_from_pattern():
     """Create a trade from a pattern with pre-filled data"""
     from app.models import Pattern
     from app.services.trading import get_trading_levels_for_pattern
     from app.routes.patterns import get_candles_df
+
+    user = get_current_user()
+
+    # Check transaction limit
+    can_trade, limit = can_create_trade(user)
+    if not can_trade:
+        return jsonify({'error': f'Daily transaction limit ({limit}) reached'}), 403
 
     data = request.get_json()
     pattern_id = data.get('pattern_id')
@@ -635,15 +735,25 @@ def api_trade_from_pattern():
     if not pattern:
         return jsonify({'error': 'Pattern not found'}), 404
 
-    # Get or create default portfolio
+    # Get or create user's portfolio
     if portfolio_id:
         portfolio = db.session.get(Portfolio, portfolio_id)
+        # Check ownership
+        if portfolio and portfolio.user_id is not None and portfolio.user_id != user.id:
+            return jsonify({'error': 'Access denied'}), 403
     else:
-        portfolio = Portfolio.query.filter_by(is_active=True).first()
+        # Get user's first portfolio
+        portfolio = Portfolio.query.filter_by(user_id=user.id, is_active=True).first()
 
     if not portfolio:
-        # Create a default portfolio if none exists
+        # Check if user can create a portfolio
+        can_create, p_limit = can_create_portfolio(user)
+        if not can_create:
+            return jsonify({'error': f'Portfolio limit ({p_limit}) reached'}), 403
+
+        # Create a default portfolio for this user
         portfolio = Portfolio(
+            user_id=user.id,
             name='Default Portfolio',
             initial_balance=10000,
             current_balance=10000,
@@ -682,8 +792,17 @@ def api_trade_from_pattern():
 
 
 @portfolio_bp.route('/api/trade-from-signal', methods=['POST'])
+@login_required
+@feature_required('portfolio')
 def api_trade_from_signal():
     """Create a trade from a signal with pre-filled data"""
+    user = get_current_user()
+
+    # Check transaction limit
+    can_trade, limit = can_create_trade(user)
+    if not can_trade:
+        return jsonify({'error': f'Daily transaction limit ({limit}) reached'}), 403
+
     data = request.get_json()
     signal_id = data.get('signal_id')
     portfolio_id = data.get('portfolio_id')
@@ -695,14 +814,23 @@ def api_trade_from_signal():
     if not signal:
         return jsonify({'error': 'Signal not found'}), 404
 
-    # Get or create default portfolio
+    # Get or create user's portfolio
     if portfolio_id:
         portfolio = db.session.get(Portfolio, portfolio_id)
+        # Check ownership
+        if portfolio and portfolio.user_id is not None and portfolio.user_id != user.id:
+            return jsonify({'error': 'Access denied'}), 403
     else:
-        portfolio = Portfolio.query.filter_by(is_active=True).first()
+        portfolio = Portfolio.query.filter_by(user_id=user.id, is_active=True).first()
 
     if not portfolio:
+        # Check if user can create a portfolio
+        can_create, p_limit = can_create_portfolio(user)
+        if not can_create:
+            return jsonify({'error': f'Portfolio limit ({p_limit}) reached'}), 403
+
         portfolio = Portfolio(
+            user_id=user.id,
             name='Default Portfolio',
             initial_balance=10000,
             current_balance=10000,

@@ -98,27 +98,5 @@
             </div>
         </form>
     </div>
-
-    <!-- Batch Import -->
-    <div class="mt-8 bg-card rounded-lg p-6">
-        <h2 class="text-lg font-semibold mb-4">Batch Import</h2>
-        <p class="text-gray-400 text-sm mb-4">
-            Import multiple users from a CSV file. Format: email,username,password,plan
-        </p>
-
-        <form method="POST" action="{{ url_for('admin.batch_import_users') }}" enctype="multipart/form-data">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-
-            <div class="mb-4">
-                <input type="file" name="csv_file" accept=".csv"
-                       class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg text-white">
-            </div>
-
-            <button type="submit"
-                    class="w-full bg-gray-700 hover:bg-gray-600 text-white py-2 px-4 rounded-lg transition">
-                Import Users
-            </button>
-        </form>
-    </div>
 </div>
 {% endblock %}

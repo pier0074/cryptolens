@@ -17,6 +17,7 @@ class Portfolio(db.Model):
     __tablename__ = 'portfolios'
 
     id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)  # Owner of the portfolio
     name = db.Column(db.String(100), nullable=False)
     description = db.Column(db.Text, nullable=True)
     initial_balance = db.Column(db.Float, default=10000.0)
@@ -28,7 +29,12 @@ class Portfolio(db.Model):
                           onupdate=lambda: datetime.now(timezone.utc))
 
     # Relationships
+    user = db.relationship('User', backref=db.backref('portfolios', lazy='dynamic'))
     trades = db.relationship('Trade', backref='portfolio', lazy='dynamic', cascade='all, delete-orphan')
+
+    __table_args__ = (
+        db.Index('idx_portfolio_user', 'user_id', 'is_active'),
+    )
 
     def __repr__(self):
         return f'<Portfolio {self.name}>'
@@ -53,6 +59,7 @@ class Portfolio(db.Model):
     def to_dict(self):
         return {
             'id': self.id,
+            'user_id': self.user_id,
             'name': self.name,
             'description': self.description,
             'initial_balance': self.initial_balance,

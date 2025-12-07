@@ -348,6 +348,21 @@ def migrate():
             db.session.execute(text("CREATE INDEX idx_scheduled_time ON scheduled_notifications (scheduled_for, status)"))
             changes.append("Created scheduled_notifications table")
 
+        # Portfolio user_id column (make portfolios user-specific)
+        if table_exists('portfolios'):
+            cols = get_table_columns('portfolios')
+            if 'user_id' not in cols:
+                db.session.execute(text("ALTER TABLE portfolios ADD COLUMN user_id INTEGER"))
+                changes.append("Added portfolios.user_id")
+
+            # Add index for portfolio user lookup
+            indexes = get_table_indexes('portfolios')
+            if 'idx_portfolio_user' not in indexes:
+                db.session.execute(text(
+                    "CREATE INDEX idx_portfolio_user ON portfolios (user_id, is_active)"
+                ))
+                changes.append("Added idx_portfolio_user index")
+
         db.session.commit()
 
         if changes:

@@ -3,7 +3,7 @@ import json
 from app.models import Symbol, Pattern, Candle, StatsCache
 from app.config import Config
 from app import db
-from app.decorators import feature_required, login_required, limit_query_results, get_current_user
+from app.decorators import feature_required, login_required, limit_query_results, get_current_user, check_feature_limit
 
 
 def _get_cached_prices():
@@ -44,11 +44,34 @@ def index():
     if status_filter:
         query = query.filter_by(status=status_filter)
 
-    # Paginate results (50 per page)
-    pagination = query.order_by(Pattern.detected_at.desc()).paginate(
-        page=page, per_page=PATTERNS_PER_PAGE, error_out=False
-    )
-    patterns = pagination.items
+    # Get tier-based patterns limit (Pro: 100, Premium: unlimited)
+    _, patterns_limit, _ = check_feature_limit('patterns_limit')
+
+    # Apply ordering
+    query = query.order_by(Pattern.detected_at.desc())
+
+    # Apply pagination with tier-based limits
+    if patterns_limit is not None and patterns_limit > 0:
+        # For limited tiers, calculate max pages allowed
+        per_page = min(PATTERNS_PER_PAGE, patterns_limit)
+        max_pages = (patterns_limit + per_page - 1) // per_page
+        # Clamp page to max allowed
+        page = min(page, max_pages) if max_pages > 0 else 1
+
+        # Paginate normally but only return items within the limit
+        pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+
+        # Ensure we don't exceed the tier limit
+        total_offset = (page - 1) * per_page
+        if total_offset >= patterns_limit:
+            patterns = []
+        else:
+            remaining = patterns_limit - total_offset
+            patterns = pagination.items[:remaining]
+    else:
+        # Unlimited - normal pagination
+        pagination = query.paginate(page=page, per_page=PATTERNS_PER_PAGE, error_out=False)
+        patterns = pagination.items
     symbols = Symbol.query.filter_by(is_active=True).all()
 
     # Get current prices from cache (fast - ~1ms instead of ~3s)

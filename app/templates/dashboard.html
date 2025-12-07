@@ -182,12 +182,13 @@
         {% if recent_signals %}
         <div class="space-y-2">
             {% for signal in recent_signals %}
-            <div class="flex items-center justify-between p-3 bg-gray-800/50 rounded">
+            <div class="flex items-center justify-between p-3 bg-gray-800/50 rounded flex-wrap gap-2">
                 <div class="flex items-center space-x-4">
-                    <span class="{% if signal.direction == 'long' %}bullish{% else %}bearish{% endif %} font-bold">
-                        {% if signal.direction == 'long' %}🟢 LONG{% else %}🔴 SHORT{% endif %}
+                    <span class="{% if signal.direction == 'bullish' %}bullish{% else %}bearish{% endif %} font-bold">
+                        {% if signal.direction == 'bullish' %}🟢 LONG{% else %}🔴 SHORT{% endif %}
                     </span>
-                    <span>{{ signal.symbol_id }}</span>
+                    <span class="font-medium">{{ signal.symbol_obj.symbol if signal.symbol_obj else 'N/A' }}</span>
+                    <span class="text-xs text-muted">{{ signal.created_at.strftime('%Y-%m-%d %H:%M') if signal.created_at else '' }}</span>
                 </div>
                 <div class="text-sm text-muted">
                     Entry: ${{ '%.2f'|format(signal.entry_price) }} |

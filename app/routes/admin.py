@@ -81,15 +81,27 @@ def users():
 @admin_required
 def user_detail(user_id):
     """User detail page"""
+    from app.models import UserNotification
+
     user = get_user_by_id(user_id)
     if not user:
         flash('User not found.', 'error')
         return redirect(url_for('admin.users'))
 
+    # Get user's subscription
+    subscription = user.subscription
+
+    # Get recent notifications for this user
+    notifications = UserNotification.query.filter_by(user_id=user_id).order_by(
+        UserNotification.sent_at.desc()
+    ).limit(10).all()
+
     # Use naive UTC for SQLite datetime comparison in templates
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     return render_template('admin/user_detail.html',
                            user=user,
+                           subscription=subscription,
+                           notifications=notifications,
                            plans=SUBSCRIPTION_PLANS,
                            now=now)
 
@@ -314,12 +326,16 @@ def subscriptions():
     query = query.order_by(Subscription.created_at.desc())
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
+    # Get subscription stats
+    stats = get_subscription_stats()
+
     return render_template('admin/subscriptions.html',
                            subscriptions=pagination.items,
                            pagination=pagination,
                            status=status,
                            plan=plan,
-                           plans=SUBSCRIPTION_PLANS)
+                           plans=SUBSCRIPTION_PLANS,
+                           stats=stats)
 
 
 @admin_bp.route('/subscriptions/expiring')

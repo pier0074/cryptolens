@@ -127,20 +127,10 @@
                         {% endif %}
                     </td>
                     <td class="px-4 py-3">
-                        <div class="flex space-x-2">
-                            <a href="{{ url_for('admin.user_detail', user_id=sub.user.id) }}"
-                               class="text-blue-400 hover:text-blue-300 text-sm">
-                                Manage
-                            </a>
-                            {% if sub.status == 'active' %}
-                            <form method="POST" action="{{ url_for('admin.quick_subscription_action', sub_id=sub.id, action='extend') }}" class="inline">
-                                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                                <button type="submit" class="text-green-400 hover:text-green-300 text-sm">
-                                    +30d
-                                </button>
-                            </form>
-                            {% endif %}
-                        </div>
+                        <a href="{{ url_for('admin.user_detail', user_id=sub.user.id) }}"
+                           class="text-blue-400 hover:text-blue-300 text-sm">
+                            Manage
+                        </a>
                     </td>
                 </tr>
                 {% else %}
@@ -170,37 +160,5 @@
     </div>
     {% endif %}
 
-    <!-- Bulk Actions -->
-    <div class="mt-8 bg-card rounded-lg p-6">
-        <h2 class="text-xl font-semibold mb-4">Bulk Actions</h2>
-
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <form method="POST" action="{{ url_for('admin.bulk_subscription_action') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="action" value="expire_overdue">
-                <button type="submit" class="w-full px-4 py-2 bg-red-700 hover:bg-red-600 rounded-lg text-sm"
-                        onclick="return confirm('Mark all overdue subscriptions as expired?');">
-                    Expire Overdue Subscriptions
-                </button>
-            </form>
-
-            <form method="POST" action="{{ url_for('admin.bulk_subscription_action') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="action" value="send_warnings">
-                <button type="submit" class="w-full px-4 py-2 bg-yellow-700 hover:bg-yellow-600 rounded-lg text-sm">
-                    Send Expiry Warnings
-                </button>
-            </form>
-
-            <form method="POST" action="{{ url_for('admin.bulk_subscription_action') }}">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <input type="hidden" name="action" value="cleanup_expired">
-                <button type="submit" class="w-full px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm"
-                        onclick="return confirm('Remove expired subscriptions older than 90 days?');">
-                    Cleanup Old Expired
-                </button>
-            </form>
-        </div>
-    </div>
 </div>
 {% endblock %}

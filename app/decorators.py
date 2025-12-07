@@ -309,9 +309,33 @@ def get_allowed_symbols(user=None):
     return allowed
 
 
+def get_max_symbols(user=None):
+    """
+    Get the maximum number of symbols a user can track.
+
+    Args:
+        user: User object (if None, fetches current user)
+
+    Returns:
+        int or None: Max symbols allowed, or None for unlimited
+    """
+    if user is None:
+        user = get_current_user()
+
+    if not user:
+        return 1  # Default for anonymous
+
+    features = user.tier_features
+    return features.get('max_symbols')
+
+
 def filter_symbols_by_tier(symbols, user=None):
     """
     Filter a list of symbols based on user's tier access.
+
+    For Free tier: Only BTC/USDT
+    For Pro tier: Any symbols, but limited to max_symbols (5)
+    For Premium tier: Unlimited
 
     Args:
         symbols: List of symbol strings or Symbol objects
@@ -320,18 +344,24 @@ def filter_symbols_by_tier(symbols, user=None):
     Returns:
         Filtered list of symbols
     """
+    if user is None:
+        user = get_current_user()
+
     allowed = get_allowed_symbols(user)
+    max_symbols = get_max_symbols(user)
 
-    # No restriction
-    if allowed is None:
-        return symbols
+    # Filter to allowed symbols first (Free tier: BTC/USDT only)
+    if allowed is not None:
+        result = []
+        for sym in symbols:
+            sym_str = sym if isinstance(sym, str) else sym.symbol
+            if sym_str in allowed:
+                result.append(sym)
+        return result
 
-    # Filter to allowed symbols
-    result = []
-    for sym in symbols:
-        # Handle both strings and Symbol objects
-        sym_str = sym if isinstance(sym, str) else sym.symbol
-        if sym_str in allowed:
-            result.append(sym)
+    # No specific symbol restriction, but apply max_symbols limit
+    if max_symbols is not None:
+        return list(symbols)[:max_symbols]
 
-    return result
+    # Unlimited
+    return symbols
