@@ -7,18 +7,33 @@
     <h1 class="text-3xl font-bold mb-8">Admin Dashboard</h1>
 
     <!-- Quick Links (Buttons) -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <a href="{{ url_for('admin.users') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold">Manage Users</h3>
+    <div class="grid grid-cols-3 md:grid-cols-5 gap-3 mb-8">
+        <a href="{{ url_for('admin.users') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold text-sm">Users</h3>
         </a>
-        <a href="{{ url_for('admin.subscriptions') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold">Manage Subscriptions</h3>
+        <a href="{{ url_for('admin.subscriptions') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold text-sm">Subscriptions</h3>
         </a>
-        <a href="{{ url_for('admin.crons') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold">Cron Jobs</h3>
+        <a href="{{ url_for('admin.crons') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold text-sm">Cron Jobs</h3>
         </a>
-        <a href="{{ url_for('admin.notifications') }}" class="bg-blue-900/30 border border-blue-700 rounded-lg p-4 hover:bg-blue-900/50 transition text-center">
-            <h3 class="font-semibold text-blue-400">Send Notifications</h3>
+        <a href="{{ url_for('admin.notifications') }}" class="bg-blue-900/30 border border-blue-700 rounded-lg p-3 hover:bg-blue-900/50 transition text-center">
+            <h3 class="font-semibold text-sm text-blue-400">Notifications</h3>
+        </a>
+        <a href="{{ url_for('admin.notification_templates') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold text-sm">Templates</h3>
+        </a>
+        <a href="{{ url_for('admin.create_user') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold text-sm">Create User</h3>
+        </a>
+        <a href="{{ url_for('admin.errors') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold text-sm">Error Logs</h3>
+        </a>
+        <a href="{{ url_for('docs.swagger_ui') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold text-sm">API Docs</h3>
+        </a>
+        <a href="{{ url_for('settings.index') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
+            <h3 class="font-semibold text-sm">Settings</h3>
         </a>
     </div>
 
@@ -49,7 +64,7 @@
     <div class="bg-card rounded-lg p-6 mb-8">
         <h2 class="text-xl font-semibold mb-4">Subscription Breakdown</h2>
 
-        <div class="grid grid-cols-4 gap-4">
+        <div class="grid grid-cols-3 gap-4">
             <div>
                 <p class="text-gray-400 text-sm">Free</p>
                 <p class="text-2xl font-bold">{{ stats.by_plan.free }}</p>
@@ -62,13 +77,13 @@
                 <p class="text-gray-400 text-sm">Premium</p>
                 <p class="text-2xl font-bold text-purple-400">{{ stats.by_plan.premium }}</p>
             </div>
-            <div>
-                <p class="text-gray-400 text-sm">Lifetime</p>
-                <p class="text-2xl font-bold text-green-400">{{ stats.lifetime }}</p>
-            </div>
         </div>
 
-        <div class="mt-4 grid grid-cols-3 gap-4">
+        <div class="mt-4 grid grid-cols-4 gap-4">
+            <div>
+                <p class="text-gray-400 text-sm">Lifetime</p>
+                <p class="text-xl font-bold text-green-400">{{ stats.lifetime }}</p>
+            </div>
             <div>
                 <p class="text-gray-400 text-sm">Expired</p>
                 <p class="text-xl font-bold text-red-400">{{ stats.expired }}</p>
@@ -128,25 +143,6 @@
             </p>
         </div>
         {% endif %}
-    </div>
-
-    <!-- Secondary Links -->
-    <div class="grid grid-cols-2 md:grid-cols-5 gap-4">
-        <a href="{{ url_for('admin.notification_templates') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold">Templates</h3>
-        </a>
-        <a href="{{ url_for('admin.create_user') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold">Create User</h3>
-        </a>
-        <a href="{{ url_for('admin.errors') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold">Error Logs</h3>
-        </a>
-        <a href="{{ url_for('docs.swagger_ui') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold">API Docs</h3>
-        </a>
-        <a href="{{ url_for('settings.index') }}" class="bg-card rounded-lg p-4 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold">Settings</h3>
-        </a>
     </div>
 </div>
 {% endblock %}
