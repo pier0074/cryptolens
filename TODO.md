@@ -1,8 +1,29 @@
 # CryptoLens - Future Enhancements
 
-> **Current Version**: v2.0.0
-> **Status**: All critical phases complete (security, infrastructure, performance, observability)
+> **Current Version**: v2.1.0
+> **Status**: Production-ready with 3-tier subscriptions, payments, and legal compliance
 > **Tests**: 386 passing
+
+---
+
+## Recently Completed
+
+### Legal & Compliance
+- [x] Comprehensive Terms of Service (20 sections)
+- [x] Privacy Policy
+- [x] Registration terms acknowledgment (checkbox)
+- [x] Age verification (18+)
+- [x] Personal account / no sharing policy
+- [x] NTFY channel code protection in ToS
+- [x] No refunds policy
+
+### UI/UX Improvements
+- [x] Login redirects to dashboard (not profile)
+- [x] Centralized plan features (DRY)
+- [x] Patterns section on landing page
+- [x] "Fair Value Gap" terminology consistency
+- [x] Tier-based upgrade buttons (no downgrade option)
+- [x] Fixed spacing issues in plan display
 
 ---
 
@@ -24,8 +45,7 @@
 ### Admin UI Improvements
 - [ ] Add admin UI to unlock locked accounts
 - [ ] Add bulk user management actions
-- [ ] Admin broadcast notification system
-- [ ] Notification templates (promotion, downtime, updates)
+- [ ] Scheduled notifications (downtime, promotions)
 
 ---
 
@@ -94,7 +114,6 @@
 - [ ] Stripe CH integration (Swiss cards)
 - [ ] PostFinance integration
 - [ ] TWINT support (Swiss mobile payment)
-- [ ] Evaluate free/low-cost options for private accounts
 
 ---
 

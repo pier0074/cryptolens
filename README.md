@@ -18,7 +18,7 @@ Automated detection of institutional trading patterns across multiple timeframes
 - **Portfolio & Journal**: Trade logging with PnL tracking and journal entries
 - **User Authentication**: Registration, login, email verification, password reset, 2FA (TOTP)
 - **3-Tier Subscriptions**: Free, Pro, and Premium plans with feature restrictions
-- **Payment Integration**: LemonSqueezy (card) and NOWPayments (50+ cryptocurrencies)
+- **Payment Integration**: LemonSqueezy (card) and NOWPayments (BTC, ETH, USDT)
 - **Notification Preferences**: Direction filter, confluence threshold, quiet hours
 - **Event-Driven**: Each symbol processed immediately after fetch
 
@@ -260,8 +260,8 @@ Patterns auto-expire based on timeframe significance:
 
 | Pattern Type | Free | Pro | Premium |
 |--------------|:----:|:---:|:-------:|
-| FVG (Imbalance) | ✓ | ✓ | ✓ |
-| Order Block | ✗ | ✓ | ✓ |
+| Fair Value Gap (FVG) | ✓ | ✓ | ✓ |
+| Order Block (OB) | ✗ | ✓ | ✓ |
 | Liquidity Sweep | ✗ | ✓ | ✓ |
 
 ---
@@ -270,8 +270,10 @@ Patterns auto-expire based on timeframe significance:
 
 ### Registration
 - Email verification required before full access
-- Unique NTFY topic generated per user
+- Unique NTFY topic generated per user (personal, non-transferable)
 - Password requirements: 8+ chars, uppercase, lowercase, digit
+- Terms of Service and Privacy Policy acknowledgment required
+- Users must confirm they are 18+ years old
 
 ### Password Reset
 - Request reset via email
@@ -411,7 +413,16 @@ cryptolens/
 
 ## Disclaimer
 
-This software is for educational purposes only. Trading cryptocurrencies involves significant risk of loss. Past pattern performance does not guarantee future results. Always use proper risk management.
+**IMPORTANT:** CryptoLens is for informational and educational purposes only. It does NOT provide financial, investment, legal, or tax advice.
+
+- Cryptocurrency trading involves SUBSTANTIAL RISK OF LOSS and is not suitable for all investors
+- You may lose some or all of your invested capital
+- Past pattern performance does NOT guarantee future results
+- You are SOLELY RESPONSIBLE for your own trading decisions
+- Accounts are personal and non-transferable; sharing is prohibited
+- All payments are non-refundable
+
+Always consult qualified financial professionals before making investment decisions.
 
 ## License
 

@@ -72,7 +72,8 @@ CryptoLens is a Flask-based web application for detecting Smart Money Concepts (
 | Task Queue | RQ (Redis Queue) | Background job processing |
 | Exchange API | CCXT | Cryptocurrency exchange data |
 | Notifications | NTFY | Push notifications |
-| Monitoring | Prometheus + Sentry | Metrics and error tracking |
+| Monitoring | Prometheus | Metrics collection |
+| Error Tracking | Self-hosted (PostgreSQL) | Error capture and alerting |
 
 ---
 
@@ -119,9 +120,9 @@ app/
 │   ├── lockout.py       # Account lockout
 │   ├── encryption.py    # Data encryption
 │   └── patterns/        # Pattern detectors
-│       ├── imbalance.py # FVG detection
-│       ├── order_block.py # OB detection
-│       └── liquidity.py # Sweep detection
+│       ├── imbalance.py # Fair Value Gap (FVG) detection
+│       ├── order_block.py # Order Block (OB) detection
+│       └── liquidity.py # Liquidity Sweep detection
 │
 ├── jobs/                # Background jobs
 │   ├── queue.py         # Queue configuration
@@ -496,8 +497,8 @@ For each symbol and timeframe:
 ┌─────────────────────────────────────────────────────────────┐
 │ 1. Load recent candles (configurable limit)                  │
 │ 2. Run pattern detectors:                                    │
-│    ├── Imbalance (FVG) detector                              │
-│    ├── Order Block detector                                  │
+│    ├── Fair Value Gap (FVG) detector                         │
+│    ├── Order Block (OB) detector                             │
 │    └── Liquidity Sweep detector                              │
 │ 3. For each detected pattern:                                │
 │    ├── Calculate zone boundaries                             │
