@@ -9,6 +9,7 @@ import pandas as pd
 from app.models import Symbol, Backtest
 from app.config import Config
 from app import db
+from app.services.logger import log_backtest
 
 
 def run_backtest(symbol: str, timeframe: str, start_date: str, end_date: str,
@@ -29,10 +30,23 @@ def run_backtest(symbol: str, timeframe: str, start_date: str, end_date: str,
     """
     from app.services.aggregator import get_candles_as_dataframe
 
+    log_backtest(
+        f"Starting backtest: {pattern_type} strategy, RR={rr_target}",
+        symbol=symbol,
+        timeframe=timeframe,
+        details={'start_date': start_date, 'end_date': end_date, 'pattern_type': pattern_type, 'rr_target': rr_target}
+    )
+
     # Get historical data
     df = get_candles_as_dataframe(symbol, timeframe, limit=5000)
 
     if df.empty:
+        log_backtest(
+            "Backtest failed: No data available",
+            symbol=symbol,
+            timeframe=timeframe,
+            level='WARNING'
+        )
         return {'error': 'No data available for backtesting'}
 
     # Filter by date range
@@ -42,7 +56,19 @@ def run_backtest(symbol: str, timeframe: str, start_date: str, end_date: str,
     df = df[(df['timestamp'] >= start_ts) & (df['timestamp'] <= end_ts)]
 
     if len(df) < 10:
+        log_backtest(
+            f"Backtest failed: Insufficient data ({len(df)} candles)",
+            symbol=symbol,
+            timeframe=timeframe,
+            level='WARNING'
+        )
         return {'error': 'Insufficient data for backtesting'}
+
+    log_backtest(
+        f"Processing {len(df)} candles for backtest",
+        symbol=symbol,
+        timeframe=timeframe
+    )
 
     # Run pattern detection and simulation
     trades = simulate_trades(df, pattern_type, rr_target)
@@ -69,6 +95,22 @@ def run_backtest(symbol: str, timeframe: str, start_date: str, end_date: str,
     )
     db.session.add(backtest)
     db.session.commit()
+
+    log_backtest(
+        f"Backtest complete: {stats['total_trades']} trades, {stats['win_rate']}% win rate, {stats['total_profit_pct']}% profit",
+        symbol=symbol,
+        timeframe=timeframe,
+        details={
+            'backtest_id': backtest.id,
+            'total_trades': stats['total_trades'],
+            'winning_trades': stats['winning_trades'],
+            'losing_trades': stats['losing_trades'],
+            'win_rate': stats['win_rate'],
+            'avg_rr': stats['avg_rr'],
+            'total_profit_pct': stats['total_profit_pct'],
+            'max_drawdown': stats['max_drawdown']
+        }
+    )
 
     return {
         'id': backtest.id,

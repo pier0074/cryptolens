@@ -11,6 +11,7 @@ from typing import Optional, Tuple
 
 from app import db
 from app.models import User, Subscription, SUBSCRIPTION_PLANS
+from app.services.logger import log_auth, log_admin
 
 
 # Password validation rules
@@ -143,6 +144,11 @@ def register_user(email: str, username: str, password: str,
 
     db.session.commit()
 
+    log_auth(
+        f"New user registered: {username} ({email})",
+        details={'user_id': user.id, 'username': username, 'email': email, 'auto_verified': auto_verify}
+    )
+
     return user
 
 
@@ -158,23 +164,40 @@ def authenticate_user(email: str, password: str) -> Optional[User]:
         User object if authentication successful, None otherwise
     """
     if not email or not password:
+        log_auth("Login attempt with missing credentials", level='WARNING')
         return None
 
     email = email.lower().strip()
     user = User.query.filter_by(email=email).first()
 
     if not user:
+        log_auth(f"Login failed: unknown email {email}", level='WARNING', details={'email': email})
         return None
 
     if not user.check_password(password):
+        log_auth(
+            f"Login failed: incorrect password for {user.username}",
+            level='WARNING',
+            details={'user_id': user.id, 'email': email}
+        )
         return None
 
     if not user.is_active:
+        log_auth(
+            f"Login failed: account deactivated for {user.username}",
+            level='WARNING',
+            details={'user_id': user.id, 'email': email}
+        )
         return None
 
     # Update last login
     user.last_login = datetime.now(timezone.utc)
     db.session.commit()
+
+    log_auth(
+        f"User logged in: {user.username}",
+        details={'user_id': user.id, 'email': email, 'tier': user.subscription.plan if user.subscription else 'none'}
+    )
 
     return user
 
@@ -199,6 +222,11 @@ def change_password(user_id: int, old_password: str, new_password: str) -> bool:
         raise AuthError("User not found")
 
     if not user.check_password(old_password):
+        log_auth(
+            f"Password change failed: incorrect current password for {user.username}",
+            level='WARNING',
+            details={'user_id': user_id}
+        )
         raise AuthError("Current password is incorrect")
 
     valid, error = validate_password(new_password)
@@ -207,6 +235,11 @@ def change_password(user_id: int, old_password: str, new_password: str) -> bool:
 
     user.set_password(new_password)
     db.session.commit()
+
+    log_auth(
+        f"Password changed for user: {user.username}",
+        details={'user_id': user_id}
+    )
 
     return True
 
@@ -233,6 +266,7 @@ def verify_user(user_id: int) -> bool:
         return False
     user.is_verified = True
     db.session.commit()
+    log_auth(f"Email verified for user: {user.username}", details={'user_id': user_id})
     return True
 
 
@@ -243,6 +277,7 @@ def deactivate_user(user_id: int) -> bool:
         return False
     user.is_active = False
     db.session.commit()
+    log_admin(f"User deactivated: {user.username}", details={'user_id': user_id})
     return True
 
 
@@ -253,6 +288,7 @@ def activate_user(user_id: int) -> bool:
         return False
     user.is_active = True
     db.session.commit()
+    log_admin(f"User activated: {user.username}", details={'user_id': user_id})
     return True
 
 
@@ -263,6 +299,7 @@ def make_admin(user_id: int) -> bool:
         return False
     user.is_admin = True
     db.session.commit()
+    log_admin(f"Admin privileges granted to: {user.username}", level='WARNING', details={'user_id': user_id})
     return True
 
 
@@ -273,6 +310,7 @@ def revoke_admin(user_id: int) -> bool:
         return False
     user.is_admin = False
     db.session.commit()
+    log_admin(f"Admin privileges revoked from: {user.username}", details={'user_id': user_id})
     return True
 
 

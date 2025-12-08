@@ -10,6 +10,7 @@ from app.models import (
 )
 from app import db
 from app.decorators import login_required, feature_required, check_feature_limit, get_current_user, filter_symbols_by_tier
+from app.services.logger import log_trade
 
 portfolio_bp = Blueprint('portfolio', __name__)
 
@@ -156,6 +157,12 @@ def create():
             )
             db.session.add(portfolio)
             db.session.commit()
+
+            log_trade(
+                f"Portfolio created: {name}",
+                details={'user_id': user.id, 'portfolio_id': portfolio.id, 'initial_balance': initial_balance}
+            )
+
             return redirect(url_for('portfolio.detail', portfolio_id=portfolio.id))
         except ValidationError as e:
             flash(str(e), 'error')
@@ -374,6 +381,19 @@ def new_trade(portfolio_id):
             db.session.add(trade)
             db.session.commit()
 
+            log_trade(
+                f"Trade created: {data.get('direction', 'long').upper()} {symbol}",
+                symbol=symbol,
+                details={
+                    'user_id': user.id,
+                    'trade_id': trade.id,
+                    'portfolio_id': portfolio_id,
+                    'direction': data.get('direction', 'long'),
+                    'entry_price': entry_price,
+                    'quantity': entry_quantity
+                }
+            )
+
             return redirect(url_for('portfolio.trade_detail', portfolio_id=portfolio_id, trade_id=trade.id))
         except ValidationError as e:
             flash(str(e), 'error')
@@ -496,6 +516,18 @@ def close_trade(portfolio_id, trade_id):
     trade.close(exit_price, f"Closed: {reason}")
 
     db.session.commit()
+
+    log_trade(
+        f"Trade closed: {trade.symbol} ({reason})",
+        symbol=trade.symbol,
+        details={
+            'trade_id': trade_id,
+            'exit_price': exit_price,
+            'pnl': trade.pnl_amount,
+            'pnl_percent': trade.pnl_percent,
+            'result': 'win' if trade.pnl_amount and trade.pnl_amount > 0 else 'loss'
+        }
+    )
 
     return redirect(url_for('portfolio.trade_detail', portfolio_id=portfolio_id, trade_id=trade_id))
 

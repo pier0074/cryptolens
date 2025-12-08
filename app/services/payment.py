@@ -9,6 +9,7 @@ import requests
 from datetime import datetime, timezone, timedelta
 from app import db
 from app.models import User, Subscription, Payment, SUBSCRIPTION_PLANS
+from app.services.logger import log_payment
 
 
 # API Configuration
@@ -128,11 +129,26 @@ def create_lemonsqueezy_checkout(user, plan, billing_cycle='monthly'):
             db.session.add(payment)
             db.session.commit()
 
+            log_payment(
+                f"Checkout created: {plan} ({billing_cycle}) for {user.username}",
+                details={'user_id': user.id, 'payment_id': payment.id, 'provider': 'lemonsqueezy', 'amount': price}
+            )
+
             return {'success': True, 'checkout_url': checkout_url, 'payment_id': payment.id}
         else:
+            log_payment(
+                f"Checkout creation failed for {user.username}",
+                level='ERROR',
+                details={'user_id': user.id, 'provider': 'lemonsqueezy', 'error': response.text[:200]}
+            )
             return {'success': False, 'error': response.text}
 
     except Exception as e:
+        log_payment(
+            f"Checkout exception for {user.username}: {str(e)}",
+            level='ERROR',
+            details={'user_id': user.id, 'provider': 'lemonsqueezy'}
+        )
         return {'success': False, 'error': str(e)}
 
 
@@ -160,19 +176,31 @@ def process_lemonsqueezy_webhook(event_name, data):
     - subscription_updated: Subscription changed
     - subscription_cancelled: Subscription cancelled
     """
+    log_payment(
+        f"LemonSqueezy webhook received: {event_name}",
+        details={'event': event_name, 'data_id': data.get('id')}
+    )
+
     custom_data = data.get('meta', {}).get('custom_data', {})
     user_id = custom_data.get('user_id')
 
     if not user_id:
+        log_payment("LemonSqueezy webhook missing user_id", level='WARNING')
         return {'success': False, 'error': 'Missing user_id'}
 
     user = db.session.get(User, int(user_id))
     if not user:
+        log_payment(f"LemonSqueezy webhook user not found: {user_id}", level='WARNING')
         return {'success': False, 'error': 'User not found'}
 
     if event_name in ['order_created', 'subscription_created']:
         plan = custom_data.get('plan', 'pro')
         billing_cycle = custom_data.get('billing_cycle', 'monthly')
+
+        log_payment(
+            f"Processing payment for {user.username}: {plan} ({billing_cycle})",
+            details={'user_id': user.id, 'event': event_name}
+        )
 
         # Activate subscription
         return activate_subscription(
@@ -189,6 +217,10 @@ def process_lemonsqueezy_webhook(event_name, data):
             user.subscription.status = 'cancelled'
             user.subscription.cancelled_at = datetime.now(timezone.utc)
             db.session.commit()
+            log_payment(
+                f"Subscription cancelled for {user.username}",
+                details={'user_id': user.id}
+            )
         return {'success': True}
 
     return {'success': True}
@@ -261,6 +293,11 @@ def create_nowpayments_invoice(user, plan, billing_cycle='monthly', crypto_curre
             db.session.add(payment)
             db.session.commit()
 
+            log_payment(
+                f"Crypto invoice created: {plan} ({billing_cycle}) for {user.username}",
+                details={'user_id': user.id, 'payment_id': payment.id, 'provider': 'nowpayments', 'currency': crypto_currency, 'amount': price}
+            )
+
             return {
                 'success': True,
                 'payment_id': payment.id,
@@ -271,9 +308,19 @@ def create_nowpayments_invoice(user, plan, billing_cycle='monthly', crypto_curre
                 'expires_at': payment.expires_at.isoformat()
             }
         else:
+            log_payment(
+                f"Crypto invoice creation failed for {user.username}",
+                level='ERROR',
+                details={'user_id': user.id, 'provider': 'nowpayments', 'error': response.text[:200]}
+            )
             return {'success': False, 'error': response.text}
 
     except Exception as e:
+        log_payment(
+            f"Crypto invoice exception for {user.username}: {str(e)}",
+            level='ERROR',
+            details={'user_id': user.id, 'provider': 'nowpayments'}
+        )
         return {'success': False, 'error': str(e)}
 
 
@@ -308,6 +355,11 @@ def process_nowpayments_webhook(data):
     payment_id = data.get('invoice_id') or data.get('payment_id')
     status = data.get('payment_status')
 
+    log_payment(
+        f"NOWPayments webhook received: {status}",
+        details={'payment_id': payment_id, 'status': status}
+    )
+
     # Find payment record
     payment = Payment.query.filter_by(
         provider='nowpayments',
@@ -315,6 +367,7 @@ def process_nowpayments_webhook(data):
     ).first()
 
     if not payment:
+        log_payment(f"NOWPayments payment not found: {payment_id}", level='WARNING')
         return {'success': False, 'error': 'Payment not found'}
 
     # Update payment status
@@ -326,6 +379,10 @@ def process_nowpayments_webhook(data):
         # Activate subscription
         user = db.session.get(User, payment.user_id)
         if user:
+            log_payment(
+                f"Crypto payment completed for {user.username}: {payment.plan}",
+                details={'user_id': user.id, 'amount': payment.crypto_amount, 'plan': payment.plan}
+            )
             activate_subscription(
                 user=user,
                 plan=payment.plan,
@@ -336,9 +393,15 @@ def process_nowpayments_webhook(data):
 
     elif status in ['failed', 'expired']:
         payment.status = status
+        log_payment(
+            f"Crypto payment {status}: {payment_id}",
+            level='WARNING',
+            details={'payment_id': payment_id, 'user_id': payment.user_id}
+        )
 
     elif status == 'confirming':
         payment.crypto_amount = data.get('actually_paid')
+        log_payment(f"Crypto payment confirming: {payment_id}", details={'amount': payment.crypto_amount})
 
     db.session.commit()
     return {'success': True}
@@ -403,6 +466,17 @@ def activate_subscription(user, plan, billing_cycle, provider, external_id=None)
         payment.completed_at = now
 
     db.session.commit()
+
+    log_payment(
+        f"Subscription activated: {user.username} -> {plan}",
+        details={
+            'user_id': user.id,
+            'plan': plan,
+            'billing_cycle': billing_cycle,
+            'provider': provider,
+            'expires_at': expires_at.isoformat() if expires_at else 'lifetime'
+        }
+    )
 
     return {
         'success': True,

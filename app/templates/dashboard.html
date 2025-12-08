@@ -20,17 +20,17 @@
         <button @click="selectedPattern = 'imbalance'"
                 :class="selectedPattern === 'imbalance' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'"
                 class="px-4 py-2 rounded-t text-sm font-medium transition-colors">
-            Fair Value Gap (FVG)
+            Fair Value Gap <span class="text-yellow-300">(F)</span>
         </button>
         <button @click="selectedPattern = 'order_block'"
                 :class="selectedPattern === 'order_block' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'"
                 class="px-4 py-2 rounded-t text-sm font-medium transition-colors">
-            Order Blocks
+            Order Block <span class="text-yellow-300">(O)</span>
         </button>
         <button @click="selectedPattern = 'liquidity_sweep'"
                 :class="selectedPattern === 'liquidity_sweep' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'"
                 class="px-4 py-2 rounded-t text-sm font-medium transition-colors">
-            Liquidity Sweeps
+            Liquidity Sweep <span class="text-yellow-300">(S)</span>
         </button>
     </div>
 
@@ -52,10 +52,6 @@
             <div class="w-4 h-4 rounded border-2 border-yellow-500"></div>
             <span>Multiple Patterns</span>
         </div>
-        <span class="text-muted ml-4">|</span>
-        <span class="text-muted"><strong>(F)</strong> = FVG</span>
-        <span class="text-muted"><strong>(O)</strong> = Order Block</span>
-        <span class="text-muted"><strong>(S)</strong> = Sweep</span>
     </div>
 
     <!-- Pattern Matrix -->
@@ -98,9 +94,9 @@
                             <a href="/patterns?symbol={{ symbol.symbol }}&timeframe={{ tf }}&type={{ ptype }}"
                                x-show="selectedPattern === 'all' || selectedPattern === '{{ ptype }}'"
                                x-cloak
-                               class="pattern-cell inline-flex items-center justify-center w-10 h-8 rounded cursor-pointer text-xs font-bold text-white {% if pattern.direction == 'bullish' %}bg-green-500 hover:bg-green-400{% else %}bg-red-500 hover:bg-red-400{% endif %} {% if cell_data.count > 1 %}border-2 border-yellow-400{% endif %} transition-colors"
+                               class="pattern-cell inline-flex items-center justify-center w-8 h-8 rounded cursor-pointer text-xs font-bold text-white {% if pattern.direction == 'bullish' %}bg-green-500 hover:bg-green-400{% else %}bg-red-500 hover:bg-red-400{% endif %} {% if cell_data.count > 1 %}border-2 border-yellow-400{% endif %} transition-colors"
                                title="{{ pattern.direction|capitalize }} {{ pattern_full }}&#10;Zone: ${{ '%.2f'|format(pattern.zone_low) }} - ${{ '%.2f'|format(pattern.zone_high) }}&#10;Click to view pattern details">
-                                ({{ pattern_name[:1] }})
+                                {{ pattern_name[:1] }}
                             </a>
                             {# Count patterns by type and direction #}
                             {% if pattern.direction == 'bullish' %}
@@ -121,13 +117,13 @@
                             <a href="/patterns?symbol={{ symbol.symbol }}&timeframe={{ tf }}&type={{ ptype }}"
                                x-show="selectedPattern === '{{ ptype }}'"
                                x-cloak
-                               class="inline-block w-10 h-8 rounded bg-gray-700 hover:bg-gray-600 transition-colors"
+                               class="inline-block w-8 h-8 rounded bg-gray-700 hover:bg-gray-600 transition-colors"
                                title="No {{ 'FVG' if ptype == 'imbalance' else ('Order Block' if ptype == 'order_block' else 'Liquidity Sweep') }} pattern&#10;Click to view all {{ symbol.symbol }} {{ tf }} patterns"></a>
                             {% endif %}
                             {% endfor %}
                         {% else %}
                             <a href="/patterns?symbol={{ symbol.symbol }}&timeframe={{ tf }}"
-                               class="inline-block w-10 h-8 rounded bg-gray-700 hover:bg-gray-600 transition-colors"
+                               class="inline-block w-8 h-8 rounded bg-gray-700 hover:bg-gray-600 transition-colors"
                                title="No patterns&#10;Click to view {{ symbol.symbol }} {{ tf }} patterns"></a>
                         {% endif %}
                     </td>

@@ -5,6 +5,7 @@ from app.config import Config
 from app import db
 from app.decorators import login_required, subscription_required, get_current_user
 from app.services.auth import hash_api_key
+from app.services.logger import log_user
 
 # Valid symbol pattern: BASE/QUOTE format (e.g., BTC/USDT, ETH/BTC)
 SYMBOL_PATTERN = re.compile(r'^[A-Z0-9]{2,10}/[A-Z0-9]{2,10}$')
@@ -24,21 +25,36 @@ def index():
 @subscription_required
 def save():
     """Save settings"""
+    user = get_current_user()
     data = request.form
+
+    # Track changed settings for logging
+    changed_settings = []
 
     # Save each setting (except api_key which needs special handling)
     for key in ['ntfy_topic', 'ntfy_priority', 'scan_interval',
                 'risk_per_trade', 'default_rr', 'min_confluence', 'log_level']:
         if key in data:
-            Setting.set(key, data[key])
+            old_value = Setting.get(key)
+            new_value = data[key]
+            if old_value != new_value:
+                changed_settings.append(key)
+            Setting.set(key, new_value)
 
     # Handle API key specially - hash it before storing
     if 'api_key' in data and data['api_key'].strip():
         api_key = data['api_key'].strip()
         Setting.set('api_key_hash', hash_api_key(api_key))
+        changed_settings.append('api_key')
 
     # Handle checkbox
     Setting.set('notifications_enabled', 'true' if 'notifications_enabled' in data else 'false')
+
+    if changed_settings:
+        log_user(
+            f"Settings updated by {user.username}",
+            details={'user_id': user.id, 'changed_settings': changed_settings}
+        )
 
     flash('Settings saved successfully!', 'success')
     return redirect(url_for('auth.profile'))
@@ -76,6 +92,7 @@ def manage_symbols():
         symbol = Symbol(symbol=symbol_name, exchange='binance')
         db.session.add(symbol)
         db.session.commit()
+        log_user(f"Symbol added: {symbol_name}", details={'user_id': user.id, 'symbol': symbol_name})
         return jsonify({'success': True, 'symbol': symbol.to_dict()})
 
     elif action == 'toggle':

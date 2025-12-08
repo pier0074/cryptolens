@@ -137,6 +137,41 @@ def log_error(message: str, symbol: str = None, timeframe: str = None, details: 
     log('error', message, level='ERROR', symbol=symbol, timeframe=timeframe, details=details)
 
 
+def log_auth(message: str, level: str = 'INFO', details: dict = None):
+    """Log authentication events (login, logout, register, password changes)"""
+    log('auth', message, level=level, details=details)
+
+
+def log_user(message: str, level: str = 'INFO', details: dict = None):
+    """Log user action events (profile updates, settings changes, preferences)"""
+    log('user', message, level=level, details=details)
+
+
+def log_trade(message: str, symbol: str = None, level: str = 'INFO', details: dict = None):
+    """Log trading events (portfolio, trades, positions)"""
+    log('trade', message, symbol=symbol, level=level, details=details)
+
+
+def log_payment(message: str, level: str = 'INFO', details: dict = None):
+    """Log payment and subscription events"""
+    log('payment', message, level=level, details=details)
+
+
+def log_backtest(message: str, symbol: str = None, timeframe: str = None, level: str = 'INFO', details: dict = None):
+    """Log backtesting events"""
+    log('backtest', message, symbol=symbol, timeframe=timeframe, level=level, details=details)
+
+
+def log_api(message: str, level: str = 'INFO', details: dict = None):
+    """Log API access events"""
+    log('api', message, level=level, details=details)
+
+
+def log_admin(message: str, level: str = 'INFO', details: dict = None):
+    """Log admin action events"""
+    log('admin', message, level=level, details=details)
+
+
 def get_recent_logs(limit: int = 100, category: str = None, level: str = None,
                     symbol: str = None, offset: int = 0):
     """
