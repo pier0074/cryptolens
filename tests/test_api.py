@@ -26,20 +26,21 @@ class TestHealthEndpoint:
     def test_health_contains_required_fields(self, client, app):
         """Test health response contains all required fields"""
         with app.app_context():
-            response = client.get('/api/health')
+            response = client.get('/api/health?quick=true')
             data = response.json
             assert 'status' in data
-            assert 'database' in data
+            assert 'dependencies' in data
+            assert 'database' in data['dependencies']
             assert 'timestamp' in data
             assert 'version' in data
 
     def test_health_status_healthy(self, client, app):
         """Test health status is 'healthy' when DB is connected"""
         with app.app_context():
-            response = client.get('/api/health')
+            response = client.get('/api/health?quick=true')
             data = response.json
             assert data['status'] == 'healthy'
-            assert data['database'] == 'connected'
+            assert data['dependencies']['database']['status'] == 'healthy'
 
     def test_health_no_auth_required(self, client, app):
         """Test health endpoint doesn't require authentication"""

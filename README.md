@@ -359,7 +359,7 @@ View and manage errors in Admin Panel > Error Tracking.
 ## Testing
 
 ```bash
-python -m pytest                    # All tests (583 tests)
+python -m pytest                    # All tests (607 tests)
 python -m pytest --cov=app          # With coverage
 python -m pytest tests/test_auth.py # Auth tests only
 ```

@@ -2,7 +2,7 @@
 
 > **Current Version**: v2.1.0
 > **Status**: Production-ready with 3-tier subscriptions, payments, and legal compliance
-> **Tests**: 583 passing
+> **Tests**: 607 passing
 
 ---
 
@@ -128,15 +128,15 @@
 ## Observability
 
 ### Logging & Monitoring
-- [ ] Include request ID in all log messages for tracing
+- [x] Include request ID in all log messages for tracing
 - [ ] Configure log aggregation (ELK/Datadog) - deployment-specific
 - [ ] Add Grafana dashboards for Prometheus metrics
-- [ ] Add readiness vs liveness health check endpoints
+- [x] Add readiness vs liveness health check endpoints (`/api/health/live`, `/api/health/ready`)
 
 ### Additional Health Checks
-- [ ] Add Exchange API (CCXT) reachability check
-- [ ] Add NTFY notification service reachability check
-- [ ] Add dependency health status in /api/health response
+- [x] Add Exchange API (CCXT) reachability check
+- [x] Add NTFY notification service reachability check
+- [x] Add dependency health status in /api/health response
 
 ---
 

@@ -1,5 +1,6 @@
 import os
 import time
+import uuid
 import logging
 import warnings
 from datetime import timedelta
@@ -190,19 +191,28 @@ def create_app(config_name=None):
         except Exception:
             return {'last_data_update': None}
 
-    # Request timing middleware
+    # Request ID and timing middleware
     @app.before_request
     def before_request():
+        # Generate unique request ID for tracing
+        # Check if client provided one (e.g., from load balancer)
+        g.request_id = request.headers.get('X-Request-ID') or str(uuid.uuid4())[:8]
         g.start_time = time.time()
 
     @app.after_request
     def after_request(response):
+        # Add request ID to response headers for client-side tracing
+        request_id = getattr(g, 'request_id', None)
+        if request_id:
+            response.headers['X-Request-ID'] = request_id
+
         if hasattr(g, 'start_time'):
             elapsed_ms = (time.time() - g.start_time) * 1000
             elapsed_sec = elapsed_ms / 1000
 
-            # Log level based on response time
-            log_msg = f"[{elapsed_ms:7.1f}ms] {request.method} {request.path} -> {response.status_code}"
+            # Log with request ID for tracing
+            req_id_prefix = f"[{request_id}] " if request_id else ""
+            log_msg = f"{req_id_prefix}[{elapsed_ms:7.1f}ms] {request.method} {request.path} -> {response.status_code}"
 
             # Get the cryptolens logger
             req_logger = logging.getLogger('cryptolens')

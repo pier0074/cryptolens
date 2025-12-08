@@ -86,54 +86,56 @@ def health_check() -> JsonResponse:
 
     Returns JSON with:
     - status: 'healthy', 'degraded', or 'unhealthy'
-    - database: 'connected' or 'error'
-    - cache: 'connected', 'memory', or 'error'
     - timestamp: current UTC timestamp
+    - version: application version
+    - dependencies: status of all external dependencies
+
+    Query params:
+    - full=true: Include slow checks (exchange API, NTFY) - default for /health
+    - quick=true: Only check database (for liveness probes)
     """
-    from datetime import datetime, timezone
-    from flask import current_app
+    from flask import request as flask_request
+    from app.services.health import get_liveness_status, get_readiness_status
 
-    health = {
-        'status': 'healthy',
-        'database': 'connected',
-        'cache': 'unknown',
-        'timestamp': datetime.now(timezone.utc).isoformat(),
-        'version': '2.0.0'
-    }
+    # Quick liveness check or full readiness check
+    quick_mode = flask_request.args.get('quick', 'false').lower() == 'true'
 
-    # Check database connectivity
-    try:
-        db.session.execute(db.text('SELECT 1'))
-        health['database'] = 'connected'
-    except Exception as e:
-        health['status'] = 'unhealthy'
-        health['database'] = 'error'
-        health['database_error'] = str(e)
-
-    # Check cache connectivity
-    try:
-        cache_type = current_app.config.get('CACHE_TYPE', 'SimpleCache')
-        if cache_type == 'RedisCache':
-            # Test Redis connection
-            cache.set('_health_check', '1', timeout=5)
-            if cache.get('_health_check') == '1':
-                health['cache'] = 'redis'
-            else:
-                health['cache'] = 'error'
-                health['status'] = 'degraded'
-        else:
-            health['cache'] = 'memory'
-    except Exception as e:
-        health['cache'] = 'error'
-        health['cache_error'] = str(e)
-        if health['status'] == 'healthy':
-            health['status'] = 'degraded'
+    if quick_mode:
+        health = get_liveness_status()
+    else:
+        health = get_readiness_status()
 
     # Return appropriate status code
     if health['status'] == 'unhealthy':
         return jsonify(health), 503
-    elif health['status'] == 'degraded':
-        return jsonify(health), 200  # Still return 200 for degraded
+    return jsonify(health), 200
+
+
+@api_bp.route('/health/live')
+def liveness_check() -> JsonResponse:
+    """
+    Kubernetes liveness probe - quick check if app is running.
+    Only checks database connectivity.
+    """
+    from app.services.health import get_liveness_status
+
+    health = get_liveness_status()
+    if health['status'] == 'unhealthy':
+        return jsonify(health), 503
+    return jsonify(health), 200
+
+
+@api_bp.route('/health/ready')
+def readiness_check() -> JsonResponse:
+    """
+    Kubernetes readiness probe - full check if app is ready for traffic.
+    Includes all dependency checks (database, cache, exchange, NTFY).
+    """
+    from app.services.health import get_readiness_status
+
+    health = get_readiness_status()
+    if health['status'] == 'unhealthy':
+        return jsonify(health), 503
     return jsonify(health), 200
 
 

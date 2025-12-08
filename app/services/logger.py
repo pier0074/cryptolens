@@ -21,6 +21,17 @@ _db_log_failures = 0
 _MAX_DB_FAILURES_LOGGED = 3
 
 
+def get_request_id() -> str:
+    """Get the current request ID if in request context."""
+    try:
+        from flask import g, has_request_context
+        if has_request_context() and hasattr(g, 'request_id'):
+            return g.request_id
+    except Exception:
+        pass
+    return None
+
+
 def log(category: str, message: str, level: str = 'INFO',
         symbol: str = None, timeframe: str = None, details: dict = None):
     """
@@ -34,9 +45,13 @@ def log(category: str, message: str, level: str = 'INFO',
         timeframe: Optional related timeframe
         details: Optional dict with extra details
     """
-    # Console log
+    # Get request ID for tracing
+    request_id = get_request_id()
+
+    # Console log with request ID if available
     log_func = getattr(console_logger, level.lower(), console_logger.info)
-    prefix = f"[{category.upper()}]"
+    req_prefix = f"[{request_id}] " if request_id else ""
+    prefix = f"{req_prefix}[{category.upper()}]"
     if symbol:
         prefix += f" {symbol}"
     if timeframe:
