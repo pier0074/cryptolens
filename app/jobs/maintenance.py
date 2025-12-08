@@ -15,64 +15,75 @@ def cleanup_old_data_job(
     notification_retention_days: int = 30
 ) -> Dict[str, Any]:
     """
-    Background job to clean up old data.
+    Background job to report on old data (NO DELETION).
 
-    Args:
-        log_retention_days: Days to keep logs
-        pattern_retention_days: Days to keep expired patterns
-        notification_retention_days: Days to keep notification records
+    All historical data is preserved for analysis:
+    - Logs: kept indefinitely
+    - Patterns: kept indefinitely (status changes to 'expired')
+    - Signals: kept indefinitely
+    - Notifications: kept indefinitely
+
+    This job only reports statistics, it does NOT delete anything.
 
     Returns:
-        Dict with cleanup results
+        Dict with data statistics (no deletions)
     """
     from app import create_app, db
-    from app.models import Log, Pattern, Notification, UserNotification
+    from app.models import Log, Pattern, Signal, Notification, UserNotification
 
     app = create_app()
     with app.app_context():
         start_time = datetime.now(timezone.utc)
         results = {}
 
-        # Clean old logs
+        # Count old logs (NOT deleted)
         log_cutoff = datetime.now(timezone.utc) - timedelta(days=log_retention_days)
-        deleted_logs = Log.query.filter(Log.timestamp < log_cutoff).delete()
-        results['logs_deleted'] = deleted_logs
+        old_logs = Log.query.filter(Log.timestamp < log_cutoff).count()
+        results['old_logs_count'] = old_logs
+        results['total_logs'] = Log.query.count()
 
-        # Clean old expired patterns
+        # Count expired patterns (NOT deleted)
         pattern_cutoff_ms = int(
             (datetime.now(timezone.utc) - timedelta(days=pattern_retention_days)).timestamp() * 1000
         )
-        deleted_patterns = Pattern.query.filter(
+        old_expired_patterns = Pattern.query.filter(
             Pattern.status == 'expired',
             Pattern.detected_at < pattern_cutoff_ms
-        ).delete()
-        results['patterns_deleted'] = deleted_patterns
+        ).count()
+        results['old_expired_patterns_count'] = old_expired_patterns
+        results['total_patterns'] = Pattern.query.count()
+        results['active_patterns'] = Pattern.query.filter_by(status='active').count()
+        results['expired_patterns'] = Pattern.query.filter_by(status='expired').count()
 
-        # Clean old notifications
+        # Count signals
+        results['total_signals'] = Signal.query.count()
+
+        # Count old notifications (NOT deleted)
         notification_cutoff = datetime.now(timezone.utc) - timedelta(days=notification_retention_days)
-        deleted_notifications = Notification.query.filter(
+        old_notifications = Notification.query.filter(
             Notification.sent_at < notification_cutoff
-        ).delete()
-        results['notifications_deleted'] = deleted_notifications
+        ).count()
+        results['old_notifications_count'] = old_notifications
+        results['total_notifications'] = Notification.query.count()
 
-        # Clean old user notifications
-        deleted_user_notifications = UserNotification.query.filter(
+        # Count old user notifications (NOT deleted)
+        old_user_notifications = UserNotification.query.filter(
             UserNotification.sent_at < notification_cutoff
-        ).delete()
-        results['user_notifications_deleted'] = deleted_user_notifications
-
-        db.session.commit()
+        ).count()
+        results['old_user_notifications_count'] = old_user_notifications
+        results['total_user_notifications'] = UserNotification.query.count()
 
         elapsed = (datetime.now(timezone.utc) - start_time).total_seconds()
         results['elapsed_seconds'] = elapsed
 
-        total_deleted = (
-            deleted_logs + deleted_patterns +
-            deleted_notifications + deleted_user_notifications
-        )
+        # No deletions - data is preserved
+        results['deleted'] = 0
+        results['policy'] = 'Data preservation enabled - no automatic deletion'
 
         logger.info(
-            f"[JOB] Cleanup complete: {total_deleted} records deleted in {elapsed:.2f}s"
+            f"[JOB] Data check complete: {results['total_patterns']} patterns, "
+            f"{results['total_signals']} signals, {results['total_logs']} logs "
+            f"(all preserved, no deletions)"
         )
 
         return results

@@ -342,23 +342,28 @@ def get_error_stats(days: int = 7) -> Dict[str, Any]:
 
 
 def cleanup_old_errors(days: int = 30) -> int:
-    """Delete old resolved errors to prevent table bloat"""
-    from app import db
+    """
+    Count old resolved errors (NO DELETION).
+
+    Error logs are preserved for historical analysis.
+    This function only returns a count, it does NOT delete anything.
+    """
     from app.models.errors import ErrorLog
 
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     try:
-        deleted = ErrorLog.query.filter(
+        # Count only - no deletion (data preservation policy)
+        old_count = ErrorLog.query.filter(
             ErrorLog.status.in_(['resolved', 'ignored']),
             ErrorLog.created_at < cutoff
-        ).delete(synchronize_session=False)
+        ).count()
 
-        db.session.commit()
-        logger.info(f"Cleaned up {deleted} old error logs")
-        return deleted
+        total_count = ErrorLog.query.count()
+
+        logger.info(f"Error log stats: {old_count} old resolved/ignored, {total_count} total (preserved, no deletion)")
+        return 0  # Return 0 as nothing is deleted
 
     except Exception as e:
-        logger.exception(f"Failed to cleanup errors: {e}")
-        db.session.rollback()
+        logger.exception(f"Failed to count errors: {e}")
         return 0

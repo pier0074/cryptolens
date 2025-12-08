@@ -122,16 +122,19 @@ class TestMaintenanceJobs:
     """Tests for maintenance background jobs"""
 
     def test_cleanup_old_data_job(self, app):
-        """Test cleanup job execution"""
+        """Test cleanup job execution (data preservation - no deletion)"""
         from app.jobs.maintenance import cleanup_old_data_job
 
         with app.app_context():
             result = cleanup_old_data_job()
 
-            assert 'logs_deleted' in result
-            assert 'patterns_deleted' in result
-            assert 'notifications_deleted' in result
+            # Data preservation policy - job only reports stats, no deletion
+            assert 'total_logs' in result
+            assert 'total_patterns' in result
+            assert 'total_notifications' in result
             assert 'elapsed_seconds' in result
+            assert result['deleted'] == 0  # No data is deleted
+            assert 'policy' in result
 
     def test_update_stats_cache_job(self, app):
         """Test stats cache update job"""
