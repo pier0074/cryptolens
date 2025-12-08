@@ -225,9 +225,19 @@
                 <a href="#" @click.prevent="activeSection = 'tiers'" class="docs-nav-link" :class="{ active: activeSection === 'tiers' }">Subscription Tiers</a>
             </div>
 
+            <!-- Backend -->
+            <div class="docs-nav-section">
+                <div class="docs-nav-title">Backend</div>
+                <a href="#" @click.prevent="activeSection = 'scripts'" class="docs-nav-link" :class="{ active: activeSection === 'scripts' }">Scripts & Cron Jobs</a>
+                <a href="#" @click.prevent="activeSection = 'services'" class="docs-nav-link" :class="{ active: activeSection === 'services' }">Services Architecture</a>
+                <a href="#" @click.prevent="activeSection = 'models'" class="docs-nav-link" :class="{ active: activeSection === 'models' }">Database Models</a>
+                <a href="#" @click.prevent="activeSection = 'retention'" class="docs-nav-link" :class="{ active: activeSection === 'retention' }">Data Retention</a>
+            </div>
+
             <!-- Technical -->
             <div class="docs-nav-section">
                 <div class="docs-nav-title">Technical Reference</div>
+                <a href="#" @click.prevent="activeSection = 'testing'" class="docs-nav-link" :class="{ active: activeSection === 'testing' }">Testing</a>
                 <a href="#" @click.prevent="activeSection = 'logs'" class="docs-nav-link" :class="{ active: activeSection === 'logs' }">Logging System</a>
                 <a href="#" @click.prevent="activeSection = 'api'" class="docs-nav-link" :class="{ active: activeSection === 'api' }">API Reference</a>
                 <a href="#" @click.prevent="activeSection = 'config'" class="docs-nav-link" :class="{ active: activeSection === 'config' }">Configuration</a>
@@ -1016,6 +1026,489 @@ server {
         proxy_set_header X-Request-ID $request_id;
     }
 }
+            </div>
+        </section>
+
+        <!-- ==================== SCRIPTS & CRON ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'scripts' }">
+            <h1 class="docs-h1">Scripts & Cron Jobs</h1>
+
+            <p class="docs-p">
+                CryptoLens uses several Python scripts for background processing. These run via cron jobs
+                to keep data fresh, detect patterns, and maintain system health.
+            </p>
+
+            <h2 class="docs-h2">Scripts Overview</h2>
+            <table class="docs-table">
+                <tr><th>Script</th><th>Location</th><th>Purpose</th></tr>
+                <tr><td><code class="docs-code">fetch.py</code></td><td>scripts/</td><td>Main data pipeline - fetch, aggregate, detect, notify</td></tr>
+                <tr><td><code class="docs-code">compute_stats.py</code></td><td>scripts/</td><td>Cache statistics for fast page loads</td></tr>
+                <tr><td><code class="docs-code">db_health.py</code></td><td>scripts/</td><td>Data integrity verification and repair</td></tr>
+                <tr><td><code class="docs-code">fetch_historical.py</code></td><td>scripts/</td><td>Initial data load and gap backfill</td></tr>
+                <tr><td><code class="docs-code">migrate_all.py</code></td><td>scripts/</td><td>Database schema migrations</td></tr>
+                <tr><td><code class="docs-code">create_admin.py</code></td><td>scripts/</td><td>Create admin and test accounts</td></tr>
+            </table>
+
+            <h2 class="docs-h2">fetch.py - Main Data Pipeline</h2>
+            <p class="docs-p">The core script that runs every minute. Executes the full data pipeline:</p>
+
+            <div class="docs-diagram">1. Fetch 1m Candles    -> CCXT fetches latest candles from Binance
+       |
+2. Aggregate           -> 1m candles -> 5m, 15m, 1h, 4h, 1d
+       |
+3. Detect Patterns     -> FVG, OB, Sweep detection on all TFs
+       |
+4. Expire Patterns     -> Mark old patterns as 'expired'
+       |
+5. Generate Signals    -> Calculate confluence, create signals
+       |
+6. Send Notifications  -> Push to NTFY for matching users</div>
+
+            <h3 class="docs-h3">Command Line Options</h3>
+            <div class="docs-codeblock">python scripts/fetch.py                    # Normal run
+python scripts/fetch.py -v                 # Verbose output
+python scripts/fetch.py --symbol BTC/USDT  # Single symbol only
+python scripts/fetch.py --skip-notify      # Skip notifications</div>
+
+            <h3 class="docs-h3">What It Does Step by Step</h3>
+            <ol class="docs-list">
+                <li><strong>Fetch Candles</strong> - Gets latest 1m candles from Binance via CCXT for each active symbol</li>
+                <li><strong>Aggregate</strong> - Combines 1m candles into higher timeframes (5m needs 5 candles, etc.)</li>
+                <li><strong>Pattern Detection</strong> - Runs FVG, Order Block, and Sweep detectors on all timeframes</li>
+                <li><strong>Expire Patterns</strong> - Marks patterns as 'expired' based on timeframe rules (1m=4h, 1d=14d)</li>
+                <li><strong>Signal Generation</strong> - When 2+ timeframes align, creates a trade signal</li>
+                <li><strong>Notifications</strong> - Sends push notifications to users matching their preferences</li>
+            </ol>
+
+            <h2 class="docs-h2">compute_stats.py - Statistics Cache</h2>
+            <p class="docs-p">Pre-computes statistics to make page loads fast. Runs every 5 minutes.</p>
+
+            <h3 class="docs-h3">What It Caches</h3>
+            <ul class="docs-list">
+                <li><strong>Global Stats</strong> - Total symbols, patterns, signals, users</li>
+                <li><strong>Per-Symbol Stats</strong> - Pattern counts, candle counts, last update time</li>
+                <li><strong>Candle Verification</strong> - Gap detection, data integrity status</li>
+            </ul>
+
+            <div class="docs-codeblock">python scripts/compute_stats.py            # Normal run
+python scripts/compute_stats.py -v         # Verbose with details</div>
+
+            <h2 class="docs-h2">db_health.py - Data Integrity</h2>
+            <p class="docs-p">Verifies candle data integrity and optionally fixes issues. Runs daily at 3 AM.</p>
+
+            <h3 class="docs-h3">Checks Performed</h3>
+            <table class="docs-table">
+                <tr><th>Check</th><th>Description</th><th>Fix Action</th></tr>
+                <tr><td>OHLCV Validity</td><td>High >= Low, prices > 0, volume >= 0</td><td>Delete invalid candle</td></tr>
+                <tr><td>Timestamp Alignment</td><td>Timestamps align to timeframe boundaries</td><td>Delete misaligned candle</td></tr>
+                <tr><td>Duplicate Detection</td><td>No duplicate timestamps per symbol/TF</td><td>Keep newest, delete old</td></tr>
+                <tr><td>Gap Detection</td><td>Identifies missing candles</td><td>Report only (refetch manually)</td></tr>
+            </table>
+
+            <div class="docs-codeblock">python scripts/db_health.py                # Check only (no changes)
+python scripts/db_health.py --fix          # Check and fix issues
+python scripts/db_health.py -v             # Verbose output
+python scripts/db_health.py --symbol BTC/USDT  # Single symbol</div>
+
+            <h2 class="docs-h2">fetch_historical.py - Initial Data Load</h2>
+            <p class="docs-p">Fetches historical candle data for new symbols or to fill gaps.</p>
+
+            <div class="docs-codeblock">python scripts/fetch_historical.py         # Fetch all symbols
+python scripts/fetch_historical.py -v      # Verbose
+python scripts/fetch_historical.py --symbol ETH/USDT  # Single symbol
+python scripts/fetch_historical.py --days 30          # Last 30 days only
+python scripts/fetch_historical.py --delete           # DELETE ALL DATA (requires confirmation)</div>
+
+            <div class="docs-alert docs-alert-warning">
+                <strong>Warning:</strong> The <code class="docs-code">--delete</code> flag will delete ALL candles, patterns, signals, and notifications. Use with caution!
+            </div>
+
+            <h2 class="docs-h2">Cron Schedule</h2>
+            <p class="docs-p">Default crontab configuration:</p>
+
+            <div class="docs-codeblock"># Install: crontab crontab.txt
+
+# Real-time data pipeline (every minute)
+* * * * * cd /path/to/cryptolens && /path/to/venv/bin/python scripts/fetch.py >> logs/fetch.log 2>&1
+
+# Statistics cache (every 5 minutes)
+*/5 * * * * cd /path/to/cryptolens && /path/to/venv/bin/python scripts/compute_stats.py >> logs/stats.log 2>&1
+
+# Data integrity check (daily at 3 AM)
+0 3 * * * cd /path/to/cryptolens && /path/to/venv/bin/python scripts/db_health.py --fix >> logs/health.log 2>&1</div>
+
+            <h3 class="docs-h3">Cron Job Monitoring</h3>
+            <p class="docs-p">
+                View cron job status in Admin > Cron Jobs. Each run is logged with:
+            </p>
+            <ul class="docs-list">
+                <li>Start/end timestamps</li>
+                <li>Duration</li>
+                <li>Success/failure status</li>
+                <li>Records affected</li>
+            </ul>
+        </section>
+
+        <!-- ==================== SERVICES ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'services' }">
+            <h1 class="docs-h1">Services Architecture</h1>
+
+            <p class="docs-p">
+                The <code class="docs-code">app/services/</code> directory contains all business logic, separated from routes.
+                This keeps routes thin and logic testable.
+            </p>
+
+            <h2 class="docs-h2">Service Files</h2>
+            <table class="docs-table">
+                <tr><th>Service</th><th>Purpose</th></tr>
+                <tr><td><code class="docs-code">auth.py</code></td><td>User authentication, session management, 2FA</td></tr>
+                <tr><td><code class="docs-code">email.py</code></td><td>Email sending (verification, password reset)</td></tr>
+                <tr><td><code class="docs-code">notifier.py</code></td><td>NTFY push notification sending</td></tr>
+                <tr><td><code class="docs-code">async_notifier.py</code></td><td>Async notification sending with connection pooling</td></tr>
+                <tr><td><code class="docs-code">data_fetcher.py</code></td><td>CCXT exchange data fetching</td></tr>
+                <tr><td><code class="docs-code">aggregator.py</code></td><td>Candle aggregation (1m -> higher TFs)</td></tr>
+                <tr><td><code class="docs-code">signals.py</code></td><td>Confluence calculation, signal generation</td></tr>
+                <tr><td><code class="docs-code">subscription.py</code></td><td>Subscription management, tier checks</td></tr>
+                <tr><td><code class="docs-code">payment.py</code></td><td>LemonSqueezy, NOWPayments integration</td></tr>
+                <tr><td><code class="docs-code">backtester.py</code></td><td>Historical strategy backtesting</td></tr>
+                <tr><td><code class="docs-code">logger.py</code></td><td>Database logging with categories</td></tr>
+                <tr><td><code class="docs-code">error_tracker.py</code></td><td>Exception tracking and email alerts</td></tr>
+                <tr><td><code class="docs-code">lockout.py</code></td><td>Account lockout after failed logins</td></tr>
+                <tr><td><code class="docs-code">encryption.py</code></td><td>Fernet encryption for sensitive data</td></tr>
+                <tr><td><code class="docs-code">health.py</code></td><td>System health checks for monitoring</td></tr>
+                <tr><td><code class="docs-code">scheduler.py</code></td><td>Notification scheduling</td></tr>
+                <tr><td><code class="docs-code">broadcast.py</code></td><td>Admin mass notification broadcasts</td></tr>
+                <tr><td><code class="docs-code">trading.py</code></td><td>Portfolio and trade management</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Pattern Detectors</h2>
+            <p class="docs-p">
+                Pattern detection logic is in <code class="docs-code">app/services/patterns/</code>:
+            </p>
+            <table class="docs-table">
+                <tr><th>File</th><th>Pattern</th><th>Key Function</th></tr>
+                <tr><td><code class="docs-code">fair_value_gap.py</code></td><td>FVG</td><td><code class="docs-code">detect_fvg(candles)</code></td></tr>
+                <tr><td><code class="docs-code">order_block.py</code></td><td>Order Block</td><td><code class="docs-code">detect_order_blocks(candles)</code></td></tr>
+                <tr><td><code class="docs-code">liquidity.py</code></td><td>Liquidity Sweep</td><td><code class="docs-code">detect_sweeps(candles)</code></td></tr>
+                <tr><td><code class="docs-code">base.py</code></td><td>Base class</td><td>Common pattern utilities</td></tr>
+                <tr><td><code class="docs-code">__init__.py</code></td><td>Orchestration</td><td><code class="docs-code">scan_all_patterns()</code></td></tr>
+            </table>
+
+            <h2 class="docs-h2">Route Blueprints</h2>
+            <p class="docs-p">
+                Routes in <code class="docs-code">app/routes/</code> handle HTTP requests:
+            </p>
+            <table class="docs-table">
+                <tr><th>Blueprint</th><th>Prefix</th><th>Purpose</th></tr>
+                <tr><td><code class="docs-code">main</code></td><td>/</td><td>Landing page, health checks</td></tr>
+                <tr><td><code class="docs-code">auth</code></td><td>/auth</td><td>Login, register, password reset, profile</td></tr>
+                <tr><td><code class="docs-code">dashboard</code></td><td>/</td><td>Dashboard, pattern matrix</td></tr>
+                <tr><td><code class="docs-code">patterns</code></td><td>/patterns</td><td>Pattern list and detail views</td></tr>
+                <tr><td><code class="docs-code">signals</code></td><td>/signals</td><td>Signal list (also in /patterns tab)</td></tr>
+                <tr><td><code class="docs-code">portfolio</code></td><td>/portfolio</td><td>Portfolio and trade management</td></tr>
+                <tr><td><code class="docs-code">backtest</code></td><td>/backtest</td><td>Backtesting interface</td></tr>
+                <tr><td><code class="docs-code">api</code></td><td>/api</td><td>REST API endpoints</td></tr>
+                <tr><td><code class="docs-code">admin</code></td><td>/admin</td><td>Admin panel</td></tr>
+                <tr><td><code class="docs-code">payments</code></td><td>/payments</td><td>Payment processing, webhooks</td></tr>
+                <tr><td><code class="docs-code">settings</code></td><td>/settings</td><td>User and system settings</td></tr>
+                <tr><td><code class="docs-code">docs</code></td><td>/api/docs</td><td>Swagger UI, OpenAPI spec</td></tr>
+                <tr><td><code class="docs-code">metrics</code></td><td>/metrics</td><td>Prometheus metrics endpoint</td></tr>
+            </table>
+        </section>
+
+        <!-- ==================== DATABASE MODELS ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'models' }">
+            <h1 class="docs-h1">Database Models</h1>
+
+            <p class="docs-p">
+                Database models are in <code class="docs-code">app/models/</code>, organized by domain.
+                All models use SQLAlchemy ORM.
+            </p>
+
+            <h2 class="docs-h2">Model Files</h2>
+            <table class="docs-table">
+                <tr><th>File</th><th>Models</th></tr>
+                <tr><td><code class="docs-code">user.py</code></td><td>User, Subscription, UserNotification</td></tr>
+                <tr><td><code class="docs-code">trading.py</code></td><td>Symbol, Candle, Pattern, Signal</td></tr>
+                <tr><td><code class="docs-code">portfolio.py</code></td><td>Portfolio, Trade, JournalEntry, TradeTag</td></tr>
+                <tr><td><code class="docs-code">system.py</code></td><td>Setting, Log, CronJob, Notification, StatsCache</td></tr>
+                <tr><td><code class="docs-code">errors.py</code></td><td>ErrorLog</td></tr>
+                <tr><td><code class="docs-code">base.py</code></td><td>Constants, enums, utility functions</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Core Tables</h2>
+
+            <h3 class="docs-h3">users</h3>
+            <p class="docs-p">User accounts with authentication and preferences.</p>
+            <table class="docs-table">
+                <tr><th>Column</th><th>Type</th><th>Description</th></tr>
+                <tr><td>id</td><td>Integer</td><td>Primary key</td></tr>
+                <tr><td>email</td><td>String</td><td>Unique email address</td></tr>
+                <tr><td>username</td><td>String</td><td>Display name</td></tr>
+                <tr><td>password_hash</td><td>String</td><td>PBKDF2 hashed password</td></tr>
+                <tr><td>is_admin</td><td>Boolean</td><td>Admin privileges</td></tr>
+                <tr><td>is_verified</td><td>Boolean</td><td>Email verified</td></tr>
+                <tr><td>totp_secret</td><td>String</td><td>2FA secret (encrypted)</td></tr>
+                <tr><td>ntfy_topic</td><td>String</td><td>Unique notification topic</td></tr>
+                <tr><td>notify_*</td><td>Various</td><td>Notification preferences</td></tr>
+                <tr><td>user_timezone</td><td>String</td><td>Display timezone preference</td></tr>
+            </table>
+
+            <h3 class="docs-h3">candles</h3>
+            <p class="docs-p">OHLCV price data for all symbols and timeframes.</p>
+            <table class="docs-table">
+                <tr><th>Column</th><th>Type</th><th>Description</th></tr>
+                <tr><td>id</td><td>Integer</td><td>Primary key</td></tr>
+                <tr><td>symbol_id</td><td>FK</td><td>Reference to symbols table</td></tr>
+                <tr><td>timeframe</td><td>String</td><td>1m, 5m, 15m, 1h, 4h, 1d</td></tr>
+                <tr><td>timestamp</td><td>BigInteger</td><td>Unix timestamp (ms)</td></tr>
+                <tr><td>open, high, low, close</td><td>Float</td><td>Price data</td></tr>
+                <tr><td>volume</td><td>Float</td><td>Trading volume</td></tr>
+            </table>
+            <p class="docs-p"><strong>Index:</strong> <code class="docs-code">(symbol_id, timeframe, timestamp DESC)</code> for fast queries.</p>
+
+            <h3 class="docs-h3">patterns</h3>
+            <p class="docs-p">Detected trading patterns.</p>
+            <table class="docs-table">
+                <tr><th>Column</th><th>Type</th><th>Description</th></tr>
+                <tr><td>id</td><td>Integer</td><td>Primary key</td></tr>
+                <tr><td>symbol_id</td><td>FK</td><td>Reference to symbols</td></tr>
+                <tr><td>timeframe</td><td>String</td><td>Pattern timeframe</td></tr>
+                <tr><td>pattern_type</td><td>String</td><td>fvg, ob, sweep</td></tr>
+                <tr><td>direction</td><td>String</td><td>bullish, bearish</td></tr>
+                <tr><td>zone_high, zone_low</td><td>Float</td><td>Pattern zone boundaries</td></tr>
+                <tr><td>status</td><td>String</td><td>active, filled, expired</td></tr>
+                <tr><td>strength</td><td>Float</td><td>Pattern quality score (0-1)</td></tr>
+                <tr><td>detected_at</td><td>BigInteger</td><td>Detection timestamp (ms)</td></tr>
+            </table>
+
+            <h3 class="docs-h3">signals</h3>
+            <p class="docs-p">Trade signals generated from pattern confluence.</p>
+            <table class="docs-table">
+                <tr><th>Column</th><th>Type</th><th>Description</th></tr>
+                <tr><td>id</td><td>Integer</td><td>Primary key</td></tr>
+                <tr><td>symbol_id</td><td>FK</td><td>Reference to symbols</td></tr>
+                <tr><td>direction</td><td>String</td><td>long, short</td></tr>
+                <tr><td>entry_price</td><td>Float</td><td>Suggested entry</td></tr>
+                <tr><td>stop_loss</td><td>Float</td><td>Stop loss level</td></tr>
+                <tr><td>take_profit_1, take_profit_2</td><td>Float</td><td>Profit targets</td></tr>
+                <tr><td>confluence</td><td>Integer</td><td>Number of aligned TFs</td></tr>
+                <tr><td>timeframes</td><td>String</td><td>JSON array of aligned TFs</td></tr>
+                <tr><td>status</td><td>String</td><td>active, filled, expired</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Entity Relationships</h2>
+            <div class="docs-diagram">User 1--N Subscription
+User 1--N Portfolio 1--N Trade 1--N JournalEntry
+User 1--N UserNotification
+
+Symbol 1--N Candle
+Symbol 1--N Pattern
+Symbol 1--N Signal
+
+Pattern N--1 Symbol
+Signal N--1 Symbol</div>
+        </section>
+
+        <!-- ==================== DATA RETENTION ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'retention' }">
+            <h1 class="docs-h1">Data Retention Policy</h1>
+
+            <p class="docs-p">
+                CryptoLens preserves all historical data indefinitely. Nothing is automatically deleted.
+                This ensures you always have access to historical patterns, signals, and logs for analysis.
+            </p>
+
+            <h2 class="docs-h2">Data Preservation</h2>
+            <table class="docs-table">
+                <tr><th>Data Type</th><th>Retention</th><th>Notes</th></tr>
+                <tr><td><strong>Candles</strong></td><td>Forever</td><td>All historical price data preserved</td></tr>
+                <tr><td><strong>Patterns</strong></td><td>Forever</td><td>Status changes (active → expired), not deleted</td></tr>
+                <tr><td><strong>Signals</strong></td><td>Forever</td><td>All trade signals preserved</td></tr>
+                <tr><td><strong>Logs</strong></td><td>Forever</td><td>All system logs preserved</td></tr>
+                <tr><td><strong>Notifications</strong></td><td>Forever</td><td>Notification history preserved</td></tr>
+                <tr><td><strong>Error Logs</strong></td><td>Forever</td><td>All errors preserved for debugging</td></tr>
+                <tr><td><strong>Users</strong></td><td>Forever</td><td>Soft delete (is_active=false)</td></tr>
+            </table>
+
+            <div class="docs-alert docs-alert-success">
+                <strong>Data Preservation Policy:</strong> All historical data is kept for analysis.
+                The cleanup job only reports statistics - it does NOT delete any records.
+            </div>
+
+            <h2 class="docs-h2">Status Changes (Not Deletion)</h2>
+            <p class="docs-p">Instead of deleting, records change status:</p>
+
+            <h3 class="docs-h3">Patterns</h3>
+            <table class="docs-table">
+                <tr><th>From</th><th>To</th><th>When</th></tr>
+                <tr><td>active</td><td>filled</td><td>Price touches pattern zone</td></tr>
+                <tr><td>active</td><td>expired</td><td>Pattern exceeds timeframe expiry</td></tr>
+            </table>
+
+            <h3 class="docs-h3">Pattern Expiry Times</h3>
+            <table class="docs-table">
+                <tr><th>Timeframe</th><th>Expiry After</th></tr>
+                <tr><td>1m</td><td>4 hours</td></tr>
+                <tr><td>5m</td><td>12 hours</td></tr>
+                <tr><td>15m</td><td>24 hours</td></tr>
+                <tr><td>1h</td><td>3 days</td></tr>
+                <tr><td>4h</td><td>7 days</td></tr>
+                <tr><td>1d</td><td>14 days</td></tr>
+            </table>
+
+            <h3 class="docs-h3">Subscriptions</h3>
+            <table class="docs-table">
+                <tr><th>From</th><th>To</th><th>When</th></tr>
+                <tr><td>active</td><td>expired</td><td>Past expiry date + 3 day grace period</td></tr>
+                <tr><td>active</td><td>cancelled</td><td>User cancels subscription</td></tr>
+            </table>
+
+            <h2 class="docs-h2">DB Health Check (Only Fix Invalid Data)</h2>
+            <p class="docs-p">
+                The <code class="docs-code">db_health.py --fix</code> command only deletes <strong>invalid candles</strong>:
+            </p>
+            <ul class="docs-list">
+                <li>Candles with high &lt; low (impossible price data)</li>
+                <li>Candles with price ≤ 0</li>
+                <li>Candles with misaligned timestamps</li>
+            </ul>
+            <p class="docs-p">
+                Valid historical data is never deleted, even if old.
+            </p>
+
+            <h2 class="docs-h2">Manual Data Cleanup</h2>
+            <p class="docs-p">
+                If you need to clean up data manually (e.g., reduce database size), use SQL directly:
+            </p>
+            <div class="docs-codeblock">-- Example: Delete candles older than 90 days (CAUTION!)
+DELETE FROM candles
+WHERE timestamp < (strftime('%s', 'now') - 90*24*60*60) * 1000;
+
+-- Example: Delete expired patterns older than 60 days
+DELETE FROM patterns
+WHERE status = 'expired'
+AND detected_at < (strftime('%s', 'now') - 60*24*60*60) * 1000;</div>
+
+            <div class="docs-alert docs-alert-warning">
+                <strong>Caution:</strong> Always backup before manual deletions. Historical data cannot be recovered once deleted.
+            </div>
+        </section>
+
+        <!-- ==================== TESTING ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'testing' }">
+            <h1 class="docs-h1">Testing</h1>
+
+            <p class="docs-p">
+                CryptoLens has a comprehensive test suite with 607+ tests covering all major functionality.
+                Tests use pytest with fixtures for database and application context.
+            </p>
+
+            <h2 class="docs-h2">Test Statistics</h2>
+            <table class="docs-table">
+                <tr><th>Metric</th><th>Value</th></tr>
+                <tr><td>Total Tests</td><td><span class="docs-badge docs-badge-green">607</span></td></tr>
+                <tr><td>Test Files</td><td>20 files</td></tr>
+                <tr><td>Average Run Time</td><td>~100 seconds</td></tr>
+                <tr><td>Framework</td><td>pytest</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Test Files</h2>
+            <table class="docs-table">
+                <tr><th>File</th><th>Coverage Area</th><th>Tests</th></tr>
+                <tr><td><code class="docs-code">test_auth.py</code></td><td>Login, register, 2FA, password reset</td><td>Authentication flows</td></tr>
+                <tr><td><code class="docs-code">test_api.py</code></td><td>REST API endpoints</td><td>All API routes</td></tr>
+                <tr><td><code class="docs-code">test_routes.py</code></td><td>Web routes, page loads</td><td>Frontend routes</td></tr>
+                <tr><td><code class="docs-code">test_tiers.py</code></td><td>Subscription tier access</td><td>Feature restrictions</td></tr>
+                <tr><td><code class="docs-code">test_tier_access.py</code></td><td>Tier-based permissions</td><td>Access control</td></tr>
+                <tr><td><code class="docs-code">test_access.py</code></td><td>General access control</td><td>Auth decorators</td></tr>
+                <tr><td><code class="docs-code">test_pattern_scanning.py</code></td><td>Pattern detection</td><td>FVG, OB, Sweep detectors</td></tr>
+                <tr><td><code class="docs-code">test_signals.py</code></td><td>Signal generation</td><td>Confluence calculation</td></tr>
+                <tr><td><code class="docs-code">test_notifier.py</code></td><td>Push notifications</td><td>NTFY integration</td></tr>
+                <tr><td><code class="docs-code">test_async_notifier.py</code></td><td>Async notifications</td><td>Connection pooling</td></tr>
+                <tr><td><code class="docs-code">test_payments.py</code></td><td>Payment processing</td><td>LemonSqueezy, NOWPayments</td></tr>
+                <tr><td><code class="docs-code">test_subscription.py</code></td><td>Subscription management</td><td>Upgrades, expiry</td></tr>
+                <tr><td><code class="docs-code">test_backtester.py</code></td><td>Backtesting engine</td><td>Strategy simulation</td></tr>
+                <tr><td><code class="docs-code">test_services.py</code></td><td>Service layer</td><td>Business logic</td></tr>
+                <tr><td><code class="docs-code">test_jobs.py</code></td><td>Background jobs</td><td>Maintenance tasks</td></tr>
+                <tr><td><code class="docs-code">test_db_health.py</code></td><td>Data integrity</td><td>Health checks</td></tr>
+                <tr><td><code class="docs-code">test_security.py</code></td><td>Security features</td><td>CSRF, rate limiting</td></tr>
+                <tr><td><code class="docs-code">test_observability.py</code></td><td>Monitoring</td><td>Metrics, health checks</td></tr>
+                <tr><td><code class="docs-code">test_admin_notifications.py</code></td><td>Admin features</td><td>Broadcasts, templates</td></tr>
+                <tr><td><code class="docs-code">test_integration.py</code></td><td>End-to-end flows</td><td>Full user journeys</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Running Tests</h2>
+            <div class="docs-codeblock"># Run all tests
+python -m pytest tests/
+
+# Run with verbose output
+python -m pytest tests/ -v
+
+# Run specific test file
+python -m pytest tests/test_auth.py
+
+# Run specific test class
+python -m pytest tests/test_auth.py::TestLogin
+
+# Run specific test
+python -m pytest tests/test_auth.py::TestLogin::test_login_success
+
+# Run with coverage report
+python -m pytest tests/ --cov=app --cov-report=html
+
+# Run tests quickly (stop on first failure)
+python -m pytest tests/ -x
+
+# Run tests in parallel (requires pytest-xdist)
+python -m pytest tests/ -n auto</div>
+
+            <h2 class="docs-h2">Test Fixtures</h2>
+            <p class="docs-p">Common fixtures defined in <code class="docs-code">conftest.py</code>:</p>
+            <table class="docs-table">
+                <tr><th>Fixture</th><th>Scope</th><th>Purpose</th></tr>
+                <tr><td><code class="docs-code">app</code></td><td>function</td><td>Flask application with test config</td></tr>
+                <tr><td><code class="docs-code">client</code></td><td>function</td><td>Test client for HTTP requests</td></tr>
+                <tr><td><code class="docs-code">db</code></td><td>function</td><td>Database session (in-memory SQLite)</td></tr>
+                <tr><td><code class="docs-code">user</code></td><td>function</td><td>Test user (free tier)</td></tr>
+                <tr><td><code class="docs-code">admin_user</code></td><td>function</td><td>Test admin user</td></tr>
+                <tr><td><code class="docs-code">pro_user</code></td><td>function</td><td>Test pro tier user</td></tr>
+                <tr><td><code class="docs-code">premium_user</code></td><td>function</td><td>Test premium tier user</td></tr>
+                <tr><td><code class="docs-code">symbol</code></td><td>function</td><td>Test symbol (BTC/USDT)</td></tr>
+                <tr><td><code class="docs-code">candles</code></td><td>function</td><td>Sample candle data</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Test Categories</h2>
+
+            <h3 class="docs-h3">Backend Tests</h3>
+            <ul class="docs-list">
+                <li><strong>Unit Tests</strong> - Test individual functions and methods</li>
+                <li><strong>Service Tests</strong> - Test business logic in services</li>
+                <li><strong>Model Tests</strong> - Test SQLAlchemy models and relationships</li>
+                <li><strong>API Tests</strong> - Test REST API endpoints</li>
+            </ul>
+
+            <h3 class="docs-h3">Frontend Tests</h3>
+            <ul class="docs-list">
+                <li><strong>Route Tests</strong> - Test page loads and redirects</li>
+                <li><strong>Form Tests</strong> - Test form submissions and validation</li>
+                <li><strong>Access Tests</strong> - Test tier-based access control</li>
+            </ul>
+
+            <h3 class="docs-h3">Integration Tests</h3>
+            <ul class="docs-list">
+                <li><strong>User Flows</strong> - Complete registration to trading flow</li>
+                <li><strong>Payment Flows</strong> - Checkout to subscription activation</li>
+                <li><strong>Notification Flows</strong> - Pattern detection to push notification</li>
+            </ul>
+
+            <h2 class="docs-h2">Coverage Report</h2>
+            <p class="docs-p">Generate HTML coverage report:</p>
+            <div class="docs-codeblock">python -m pytest tests/ --cov=app --cov-report=html
+# Open htmlcov/index.html in browser</div>
+
+            <div class="docs-alert docs-alert-info">
+                <strong>CI/CD:</strong> Tests run automatically on every push. All tests must pass before merging.
             </div>
         </section>
 
