@@ -160,6 +160,30 @@ sudo systemctl enable redis-server
 sudo systemctl restart redis-server
 ```
 
+### 3. Redis Usage in CryptoLens
+
+Redis is used for:
+
+1. **Cache**: Session data, API responses, computed stats
+2. **Rate Limiting**: API and login rate limits (Flask-Limiter)
+3. **Job Queues**: Background job processing (RQ)
+
+**Environment variables:**
+
+```bash
+# Redis URL for cache and jobs
+REDIS_URL=redis://localhost:6379/0
+
+# Rate limiter storage (REQUIRED for production)
+RATELIMIT_STORAGE_URL=redis://localhost:6379/1
+
+# If Redis has a password:
+REDIS_URL=redis://:your-redis-password@localhost:6379/0
+RATELIMIT_STORAGE_URL=redis://:your-redis-password@localhost:6379/1
+```
+
+> **Important**: Without `RATELIMIT_STORAGE_URL`, rate limiting uses in-memory storage which doesn't work across multiple workers or server restarts.
+
 ---
 
 ## Application Setup

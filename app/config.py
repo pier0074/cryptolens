@@ -89,8 +89,11 @@ class Config:
     ]
 
     # Timeframes
-    TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']  # All timeframes (for UI)
-    PATTERN_TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d']  # For pattern detection (1m too noisy)
+    # UI displays these 6 timeframes
+    TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
+    # Pattern detection excludes 1m (too noisy)
+    PATTERN_TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d']
+    # Note: scripts/fetch.py aggregates additional timeframes (30m, 2h) for data completeness
 
     # Exchange (binance has better rate limits and 1000 candles/request)
     EXCHANGE = 'binance'

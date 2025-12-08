@@ -120,9 +120,9 @@ app/
 │   ├── lockout.py       # Account lockout
 │   ├── encryption.py    # Data encryption
 │   └── patterns/        # Pattern detectors
-│       ├── imbalance.py # FVG detection
-│       ├── order_block.py # OB detection
-│       └── liquidity.py # Sweep detection
+│       ├── fair_value_gap.py # Fair Value Gap (FVG) detection
+│       ├── order_block.py    # Order Block (OB) detection
+│       └── liquidity.py      # Liquidity Sweep (Sweep) detection
 │
 ├── jobs/                # Background jobs
 │   ├── queue.py         # Queue configuration
@@ -497,9 +497,9 @@ For each symbol and timeframe:
 ┌─────────────────────────────────────────────────────────────┐
 │ 1. Load recent candles (configurable limit)                  │
 │ 2. Run pattern detectors:                                    │
-│    ├── FVG detector                                          │
-│    ├── OB detector                                           │
-│    └── Sweep detector                                        │
+│    ├── Fair Value Gap (FVG) detector                         │
+│    ├── Order Block (OB) detector                             │
+│    └── Liquidity Sweep detector                              │
 │ 3. For each detected pattern:                                │
 │    ├── Calculate zone boundaries                             │
 │    ├── Calculate strength score (0-1)                        │

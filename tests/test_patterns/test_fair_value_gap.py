@@ -1,20 +1,20 @@
 """
-Tests for Pattern Detection
+Tests for Fair Value Gap (FVG) Pattern Detection
 """
 import pytest
 from app.models import Pattern, Symbol, Candle
-from app.services.patterns.imbalance import ImbalanceDetector
+from app.services.patterns.fair_value_gap import FVGDetector, ImbalanceDetector
 from app.config import Config
 from app import db
 
 
-class TestImbalanceDetector:
-    """Tests for Fair Value Gap (Imbalance) detection"""
+class TestFVGDetector:
+    """Tests for Fair Value Gap (FVG) detection"""
 
     def test_detect_bullish_fvg(self, app, sample_candles_bullish_fvg):
         """Test detection of bullish Fair Value Gap"""
         with app.app_context():
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
             patterns = detector.detect('BTC/USDT', '1h')
 
             assert len(patterns) >= 1
@@ -31,7 +31,7 @@ class TestImbalanceDetector:
     def test_detect_bearish_fvg(self, app, sample_candles_bearish_fvg):
         """Test detection of bearish Fair Value Gap"""
         with app.app_context():
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
             patterns = detector.detect('BTC/USDT', '1h')
 
             assert len(patterns) >= 1
@@ -46,7 +46,7 @@ class TestImbalanceDetector:
     def test_no_fvg_overlapping_wicks(self, app, sample_candles_no_fvg):
         """Test that overlapping wicks don't create FVG"""
         with app.app_context():
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
             patterns = detector.detect('BTC/USDT', '1h')
 
             # Should not detect any imbalances when wicks overlap
@@ -55,7 +55,7 @@ class TestImbalanceDetector:
     def test_small_fvg_filtered(self, app, sample_candles_small_fvg):
         """Test that FVGs smaller than minimum size are filtered out"""
         with app.app_context():
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
             patterns = detector.detect('BTC/USDT', '1h')
 
             # Small FVGs should be filtered out
@@ -64,7 +64,7 @@ class TestImbalanceDetector:
     def test_pattern_saved_to_database(self, app, sample_candles_bullish_fvg):
         """Test that detected patterns are saved to database"""
         with app.app_context():
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
             patterns = detector.detect('BTC/USDT', '1h')
 
             # Check patterns in database
@@ -79,7 +79,7 @@ class TestImbalanceDetector:
     def test_no_duplicate_patterns(self, app, sample_candles_bullish_fvg):
         """Test that running detection twice doesn't create duplicates"""
         with app.app_context():
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
 
             # Run detection twice
             patterns1 = detector.detect('BTC/USDT', '1h')
@@ -95,7 +95,7 @@ class TestImbalanceDetector:
     def test_empty_candles(self, app, sample_symbol):
         """Test detection with no candles"""
         with app.app_context():
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
             patterns = detector.detect('BTC/USDT', '1h')
 
             assert patterns == []
@@ -114,7 +114,7 @@ class TestImbalanceDetector:
                 db.session.add(candle)
             db.session.commit()
 
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
             patterns = detector.detect('BTC/USDT', '1h')
 
             assert patterns == []
@@ -122,7 +122,7 @@ class TestImbalanceDetector:
     def test_unknown_symbol(self, app):
         """Test detection with non-existent symbol"""
         with app.app_context():
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
             patterns = detector.detect('UNKNOWN/PAIR', '1h')
 
             assert patterns == []
@@ -134,7 +134,7 @@ class TestFillDetection:
     def test_bullish_fvg_not_filled(self, app, sample_candles_bullish_fvg):
         """Test bullish FVG not filled when price above zone"""
         with app.app_context():
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
             patterns = detector.detect('BTC/USDT', '1h')
 
             pattern = [p for p in patterns if p['direction'] == 'bullish'][0]
@@ -148,7 +148,7 @@ class TestFillDetection:
     def test_bullish_fvg_partially_filled(self, app, sample_candles_bullish_fvg):
         """Test bullish FVG partially filled when price in zone"""
         with app.app_context():
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
             patterns = detector.detect('BTC/USDT', '1h')
 
             pattern = [p for p in patterns if p['direction'] == 'bullish'][0]
@@ -163,7 +163,7 @@ class TestFillDetection:
     def test_bullish_fvg_fully_filled(self, app, sample_candles_bullish_fvg):
         """Test bullish FVG fully filled when price below zone"""
         with app.app_context():
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
             patterns = detector.detect('BTC/USDT', '1h')
 
             pattern = [p for p in patterns if p['direction'] == 'bullish'][0]
@@ -177,7 +177,7 @@ class TestFillDetection:
     def test_bearish_fvg_fully_filled(self, app, sample_candles_bearish_fvg):
         """Test bearish FVG fully filled when price above zone"""
         with app.app_context():
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
             patterns = detector.detect('BTC/USDT', '1h')
 
             pattern = [p for p in patterns if p['direction'] == 'bearish'][0]
@@ -195,7 +195,7 @@ class TestZoneSize:
     def test_is_zone_tradeable_valid(self, app):
         """Test zone size validation for valid zones"""
         with app.app_context():
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
 
             # 1% zone should be tradeable
             assert detector.is_zone_tradeable(100.0, 101.0) is True
@@ -209,7 +209,7 @@ class TestZoneSize:
     def test_is_zone_tradeable_too_small(self, app):
         """Test zone size validation for zones too small"""
         with app.app_context():
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
 
             # 0.1% zone should NOT be tradeable
             assert detector.is_zone_tradeable(100.0, 100.1) is False
@@ -220,7 +220,7 @@ class TestZoneSize:
     def test_is_zone_tradeable_zero_low(self, app):
         """Test zone size validation with zero low price"""
         with app.app_context():
-            detector = ImbalanceDetector()
+            detector = FVGDetector()
 
             # Zero or negative low should not be tradeable
             assert detector.is_zone_tradeable(0, 100.0) is False

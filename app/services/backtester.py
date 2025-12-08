@@ -81,40 +81,225 @@ def simulate_trades(df: pd.DataFrame, pattern_type: str, rr_target: float) -> Li
     """
     Simulate trades based on detected patterns
 
+    Args:
+        df: DataFrame with OHLCV data
+        pattern_type: 'imbalance', 'order_block', or 'liquidity_sweep'
+        rr_target: Target risk/reward ratio
+
     Returns:
         List of simulated trades
     """
+    if pattern_type == 'imbalance':
+        return _detect_imbalance_trades(df, rr_target)
+    elif pattern_type == 'order_block':
+        return _detect_order_block_trades(df, rr_target)
+    elif pattern_type == 'liquidity_sweep':
+        return _detect_liquidity_sweep_trades(df, rr_target)
+    else:
+        # Default to imbalance for unknown types
+        return _detect_imbalance_trades(df, rr_target)
+
+
+def _detect_imbalance_trades(df: pd.DataFrame, rr_target: float) -> List[Dict]:
+    """Detect and simulate FVG/Imbalance pattern trades"""
     trades = []
 
-    for i in range(2, len(df) - 10):  # Leave room for trade to play out
+    for i in range(2, len(df) - 10):
         c1 = df.iloc[i - 2]
-        c2 = df.iloc[i - 1]
         c3 = df.iloc[i]
 
         pattern = None
 
-        # Detect bullish imbalance
+        # Bullish FVG: Gap between c1 high and c3 low
         if c1['high'] < c3['low']:
             pattern = {
                 'direction': 'bullish',
                 'zone_high': c3['low'],
                 'zone_low': c1['high'],
-                'detected_at': i
+                'detected_at': i,
+                'pattern_type': 'imbalance'
             }
 
-        # Detect bearish imbalance
+        # Bearish FVG: Gap between c1 low and c3 high
         elif c1['low'] > c3['high']:
             pattern = {
                 'direction': 'bearish',
                 'zone_high': c1['low'],
                 'zone_low': c3['high'],
-                'detected_at': i
+                'detected_at': i,
+                'pattern_type': 'imbalance'
             }
 
         if pattern:
-            # Simulate the trade
             trade = simulate_single_trade(df, i, pattern, rr_target)
             if trade:
+                trade['pattern_type'] = 'imbalance'
+                trades.append(trade)
+
+    return trades
+
+
+def _detect_order_block_trades(df: pd.DataFrame, rr_target: float) -> List[Dict]:
+    """Detect and simulate Order Block pattern trades"""
+    trades = []
+
+    # Calculate candle body and move strength
+    df = df.copy()
+    df['body'] = df['close'] - df['open']
+    df['body_size'] = abs(df['body'])
+    df['is_bullish'] = df['body'] > 0
+    df['is_bearish'] = df['body'] < 0
+
+    # Calculate average body size for comparison
+    avg_body = df['body_size'].rolling(20).mean()
+
+    for i in range(3, len(df) - 10):
+        current_body = df.iloc[i]['body_size']
+
+        if pd.isna(avg_body.iloc[i]) or avg_body.iloc[i] == 0:
+            continue
+
+        # Check for strong move (body larger than 1.5x average)
+        is_strong_move = current_body > (avg_body.iloc[i] * Config.ORDER_BLOCK_STRENGTH_MULTIPLIER)
+        if not is_strong_move:
+            continue
+
+        pattern = None
+
+        # Bullish OB: Last bearish candle before strong bullish move
+        if df.iloc[i]['is_bullish']:
+            # Look back for last bearish candle
+            for j in range(i - 1, max(i - 4, 0), -1):
+                if df.iloc[j]['is_bearish']:
+                    zone_high = max(df.iloc[j]['open'], df.iloc[j]['close'])
+                    zone_low = min(df.iloc[j]['open'], df.iloc[j]['close'])
+                    pattern = {
+                        'direction': 'bullish',
+                        'zone_high': zone_high,
+                        'zone_low': zone_low,
+                        'detected_at': i,
+                        'pattern_type': 'order_block'
+                    }
+                    break
+
+        # Bearish OB: Last bullish candle before strong bearish move
+        elif df.iloc[i]['is_bearish']:
+            for j in range(i - 1, max(i - 4, 0), -1):
+                if df.iloc[j]['is_bullish']:
+                    zone_high = max(df.iloc[j]['open'], df.iloc[j]['close'])
+                    zone_low = min(df.iloc[j]['open'], df.iloc[j]['close'])
+                    pattern = {
+                        'direction': 'bearish',
+                        'zone_high': zone_high,
+                        'zone_low': zone_low,
+                        'detected_at': i,
+                        'pattern_type': 'order_block'
+                    }
+                    break
+
+        if pattern:
+            trade = simulate_single_trade(df, i, pattern, rr_target)
+            if trade:
+                trade['pattern_type'] = 'order_block'
+                trades.append(trade)
+
+    return trades
+
+
+def _find_swing_points(df: pd.DataFrame, lookback: int = 5) -> tuple:
+    """Find swing highs and swing lows for liquidity sweep detection"""
+    swing_highs = []
+    swing_lows = []
+
+    for i in range(lookback, len(df) - lookback):
+        # Check for swing high
+        is_swing_high = True
+        for j in range(1, lookback + 1):
+            if df.iloc[i]['high'] <= df.iloc[i - j]['high'] or \
+               df.iloc[i]['high'] <= df.iloc[i + j]['high']:
+                is_swing_high = False
+                break
+
+        if is_swing_high:
+            swing_highs.append({
+                'index': i,
+                'price': df.iloc[i]['high']
+            })
+
+        # Check for swing low
+        is_swing_low = True
+        for j in range(1, lookback + 1):
+            if df.iloc[i]['low'] >= df.iloc[i - j]['low'] or \
+               df.iloc[i]['low'] >= df.iloc[i + j]['low']:
+                is_swing_low = False
+                break
+
+        if is_swing_low:
+            swing_lows.append({
+                'index': i,
+                'price': df.iloc[i]['low']
+            })
+
+    return swing_highs, swing_lows
+
+
+def _detect_liquidity_sweep_trades(df: pd.DataFrame, rr_target: float) -> List[Dict]:
+    """Detect and simulate Liquidity Sweep pattern trades"""
+    trades = []
+
+    # Find swing points
+    swing_highs, swing_lows = _find_swing_points(df, lookback=3)
+
+    for i in range(10, len(df) - 10):
+        current = df.iloc[i]
+        pattern = None
+
+        # Check for bullish sweep (sweep of lows)
+        for swing_low in swing_lows:
+            # Skip if swing is too recent or too old
+            if swing_low['index'] >= i - 3 or swing_low['index'] < i - 50:
+                continue
+
+            # Check if current candle swept the low and reversed
+            if current['low'] < swing_low['price'] and current['close'] > swing_low['price']:
+                zone_low = current['low']
+                zone_high = swing_low['price']
+
+                # Ensure zone is valid
+                if zone_high > zone_low:
+                    pattern = {
+                        'direction': 'bullish',
+                        'zone_high': zone_high,
+                        'zone_low': zone_low,
+                        'detected_at': i,
+                        'pattern_type': 'liquidity_sweep'
+                    }
+                    break
+
+        # Check for bearish sweep (sweep of highs)
+        if pattern is None:
+            for swing_high in swing_highs:
+                if swing_high['index'] >= i - 3 or swing_high['index'] < i - 50:
+                    continue
+
+                if current['high'] > swing_high['price'] and current['close'] < swing_high['price']:
+                    zone_high = current['high']
+                    zone_low = swing_high['price']
+
+                    if zone_high > zone_low:
+                        pattern = {
+                            'direction': 'bearish',
+                            'zone_high': zone_high,
+                            'zone_low': zone_low,
+                            'detected_at': i,
+                            'pattern_type': 'liquidity_sweep'
+                        }
+                        break
+
+        if pattern:
+            trade = simulate_single_trade(df, i, pattern, rr_target)
+            if trade:
+                trade['pattern_type'] = 'liquidity_sweep'
                 trades.append(trade)
 
     return trades

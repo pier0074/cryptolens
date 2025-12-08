@@ -3,7 +3,7 @@ Pattern Detection Package
 """
 import logging
 from app.services.patterns.base import PatternDetector
-from app.services.patterns.imbalance import ImbalanceDetector
+from app.services.patterns.fair_value_gap import FVGDetector, ImbalanceDetector  # ImbalanceDetector is alias for backward compat
 from app.services.patterns.order_block import OrderBlockDetector
 from app.services.patterns.liquidity import LiquiditySweepDetector
 
@@ -86,7 +86,7 @@ def deduplicate_patterns(patterns: list, threshold: float = OVERLAP_THRESHOLD) -
 def get_detector(pattern_type: str) -> PatternDetector:
     """Get the appropriate pattern detector"""
     detectors = {
-        'imbalance': ImbalanceDetector,
+        'imbalance': FVGDetector,
         'order_block': OrderBlockDetector,
         'liquidity_sweep': LiquiditySweepDetector,
     }
@@ -99,7 +99,7 @@ def get_detector(pattern_type: str) -> PatternDetector:
 def get_all_detectors() -> list:
     """Get all pattern detectors"""
     return [
-        ImbalanceDetector(),
+        FVGDetector(),
         OrderBlockDetector(),
         LiquiditySweepDetector(),
     ]

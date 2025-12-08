@@ -1,7 +1,7 @@
 """
-Imbalance (Fair Value Gap) Pattern Detector
+Fair Value Gap (FVG) Pattern Detector
 
-Detects price imbalances where:
+Detects price gaps where:
 - Bullish: Candle 1 High < Candle 3 Low (gap up)
 - Bearish: Candle 1 Low > Candle 3 High (gap down)
 
@@ -14,12 +14,12 @@ from app.models import Symbol
 from app import db
 
 
-class ImbalanceDetector(PatternDetector):
-    """Detector for Fair Value Gaps (Imbalances)"""
+class FVGDetector(PatternDetector):
+    """Detector for Fair Value Gaps (FVG)"""
 
     @property
     def pattern_type(self) -> str:
-        return 'imbalance'
+        return 'imbalance'  # Keep database value for compatibility
 
     def detect(
         self,
@@ -29,7 +29,7 @@ class ImbalanceDetector(PatternDetector):
         df: Optional[pd.DataFrame] = None
     ) -> List[Dict[str, Any]]:
         """
-        Detect imbalances in the given symbol/timeframe
+        Detect Fair Value Gaps in the given symbol/timeframe
 
         Args:
             symbol: Trading pair (e.g., 'BTC/USDT')
@@ -38,7 +38,7 @@ class ImbalanceDetector(PatternDetector):
             df: Optional pre-loaded DataFrame (avoids redundant DB queries)
 
         Returns:
-            List of detected imbalance patterns
+            List of detected FVG patterns
         """
         if df is None:
             df = self.get_candles_df(symbol, timeframe, limit)
@@ -56,7 +56,7 @@ class ImbalanceDetector(PatternDetector):
             c1 = df.iloc[i - 2]  # First candle
             c3 = df.iloc[i]      # Third candle
 
-            # Bullish Imbalance: Gap between c1 high and c3 low
+            # Bullish FVG: Gap between c1 high and c3 low
             if c1['high'] < c3['low']:
                 zone_low = c1['high']
                 zone_high = c3['low']
@@ -69,7 +69,7 @@ class ImbalanceDetector(PatternDetector):
                     if pattern_dict:
                         patterns.append(pattern_dict)
 
-            # Bearish Imbalance: Gap between c1 low and c3 high
+            # Bearish FVG: Gap between c1 low and c3 high
             if c1['low'] > c3['high']:
                 zone_high = c1['low']
                 zone_low = c3['high']
@@ -94,3 +94,7 @@ class ImbalanceDetector(PatternDetector):
         if self.has_overlapping_pattern(symbol_id, timeframe, direction, zone_low, zone_high):
             return False
         return True
+
+
+# Backward compatibility alias
+ImbalanceDetector = FVGDetector

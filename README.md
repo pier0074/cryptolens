@@ -260,9 +260,9 @@ Patterns auto-expire based on timeframe significance:
 
 | Pattern Type | Free | Pro | Premium |
 |--------------|:----:|:---:|:-------:|
-| FVG (Fair Value Gap) | ✓ | ✓ | ✓ |
-| OB (Order Block) | ✗ | ✓ | ✓ |
-| Sweep (Liquidity Sweep) | ✗ | ✓ | ✓ |
+| Fair Value Gap (FVG) | ✓ | ✓ | ✓ |
+| Order Block (OB) | ✗ | ✓ | ✓ |
+| Liquidity Sweep (Sweep) | ✗ | ✓ | ✓ |
 
 ---
 
@@ -359,7 +359,7 @@ View and manage errors in Admin Panel > Error Tracking.
 ## Testing
 
 ```bash
-python -m pytest                    # All tests (358 tests)
+python -m pytest                    # All tests (583 tests)
 python -m pytest --cov=app          # With coverage
 python -m pytest tests/test_auth.py # Auth tests only
 ```

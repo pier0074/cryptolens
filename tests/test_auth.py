@@ -285,9 +285,35 @@ class TestLoginRoutes:
             'email': 'newuser@example.com',
             'username': 'newuser',
             'password': 'ValidPass123',
-            'confirm_password': 'ValidPass123'
+            'confirm_password': 'ValidPass123',
+            'accept_terms': 'on'
         }, follow_redirects=True)
         assert response.status_code == 200
+
+    def test_register_without_terms_fails(self, client):
+        """Test that registration fails without accepting terms"""
+        response = client.post('/auth/register', data={
+            'email': 'newuser2@example.com',
+            'username': 'newuser2',
+            'password': 'ValidPass123',
+            'confirm_password': 'ValidPass123'
+            # Missing: accept_terms
+        }, follow_redirects=True)
+        assert response.status_code == 200
+        assert b'You must accept the Terms' in response.data
+
+    def test_register_with_terms_succeeds(self, client):
+        """Test that registration succeeds when terms are accepted"""
+        response = client.post('/auth/register', data={
+            'email': 'newuser3@example.com',
+            'username': 'newuser3',
+            'password': 'ValidPass123',
+            'confirm_password': 'ValidPass123',
+            'accept_terms': 'on'
+        }, follow_redirects=True)
+        assert response.status_code == 200
+        # Should redirect to login or show success message
+        assert b'You must accept' not in response.data
 
 
 class TestAccountLockout:

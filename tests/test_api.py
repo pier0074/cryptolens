@@ -532,3 +532,53 @@ class TestJSONResponses:
             assert response.status_code == 404
             assert response.content_type == 'application/json'
             assert 'error' in response.json
+
+
+class TestMetricsEndpoint:
+    """Tests for /metrics endpoint (Prometheus)"""
+
+    def test_metrics_endpoint_returns_200(self, client, app):
+        """Test metrics endpoint returns 200"""
+        with app.app_context():
+            response = client.get('/metrics')
+            assert response.status_code == 200
+
+    def test_metrics_returns_prometheus_format(self, client, app):
+        """Test metrics endpoint returns Prometheus format"""
+        with app.app_context():
+            response = client.get('/metrics')
+            assert response.status_code == 200
+            # Prometheus format should have text content
+            assert b'cryptolens' in response.data
+
+    def test_metrics_contains_app_info(self, client, app):
+        """Test metrics contains application info"""
+        with app.app_context():
+            response = client.get('/metrics')
+            # Should contain app info metric
+            assert b'cryptolens_info' in response.data or b'cryptolens' in response.data
+
+    def test_metrics_contains_pattern_gauges(self, client, app):
+        """Test metrics contains pattern count gauges"""
+        with app.app_context():
+            response = client.get('/metrics')
+            # Should contain pattern metrics
+            assert b'cryptolens_patterns_active' in response.data
+
+    def test_metrics_contains_user_metrics(self, client, app):
+        """Test metrics contains user-related metrics"""
+        with app.app_context():
+            response = client.get('/metrics')
+            # Should contain user metrics
+            assert b'cryptolens_users_active' in response.data
+
+    def test_metrics_no_auth_required(self, client, app):
+        """Test metrics endpoint doesn't require authentication"""
+        with app.app_context():
+            # Set API key
+            Setting.set('api_key_hash', hash_api_key('test-secret-key'))
+            db.session.commit()
+
+            # Metrics should still work without auth
+            response = client.get('/metrics')
+            assert response.status_code == 200
