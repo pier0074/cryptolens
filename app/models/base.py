@@ -32,7 +32,14 @@ LOG_CATEGORIES = {
     'signal': 'Signal Generation',
     'notify': 'Notifications',
     'system': 'System',
-    'error': 'Errors'
+    'error': 'Errors',
+    'auth': 'Authentication',
+    'user': 'User Actions',
+    'trade': 'Trading',
+    'payment': 'Payments',
+    'backtest': 'Backtesting',
+    'api': 'API Access',
+    'admin': 'Admin Actions'
 }
 
 # Log levels
