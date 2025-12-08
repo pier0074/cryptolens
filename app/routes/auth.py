@@ -258,6 +258,34 @@ def change_password_route():
     return redirect(url_for('auth.profile'))
 
 
+@auth_bp.route('/update-preferences', methods=['POST'])
+@login_required
+def update_preferences():
+    """Update user display preferences (timezone, etc.)"""
+    from app.services.logger import log_user
+
+    user = get_current_user()
+    user_timezone = request.form.get('user_timezone', 'UTC')
+
+    # Validate timezone (simple validation)
+    valid_timezones = [
+        'UTC', 'America/New_York', 'America/Chicago', 'America/Denver',
+        'America/Los_Angeles', 'Europe/London', 'Europe/Paris', 'Europe/Berlin',
+        'Asia/Dubai', 'Asia/Singapore', 'Asia/Tokyo', 'Asia/Shanghai',
+        'Australia/Sydney'
+    ]
+
+    if user_timezone in valid_timezones:
+        user.user_timezone = user_timezone
+        db.session.commit()
+        log_user(f"User {user.username} updated timezone to {user_timezone}")
+        flash('Settings saved successfully.', 'success')
+    else:
+        flash('Invalid timezone selected.', 'error')
+
+    return redirect(url_for('auth.profile') + '#account')
+
+
 @auth_bp.route('/subscription')
 @login_required
 def subscription():

@@ -5,10 +5,13 @@
 {% block content %}
 <div x-data="profileApp()" x-init="init()" class="max-w-5xl mx-auto">
     <div class="flex items-center justify-between mb-6">
-        <h1 class="text-3xl font-bold">Your Profile</h1>
+        <h1 class="text-3xl font-bold">Profile</h1>
         <a href="{{ url_for('auth.logout') }}"
-           class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition">
-            Logout
+           class="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center space-x-2">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"></path>
+            </svg>
+            <span>Logout</span>
         </a>
     </div>
 
@@ -19,6 +22,11 @@
                 class="px-4 py-3 border-b-2 font-medium text-sm transition">
             Account
         </button>
+        <button @click="activeTab = 'security'"
+                :class="activeTab === 'security' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300'"
+                class="px-4 py-3 border-b-2 font-medium text-sm transition">
+            Security
+        </button>
         <button @click="activeTab = 'notifications'"
                 :class="activeTab === 'notifications' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300'"
                 class="px-4 py-3 border-b-2 font-medium text-sm transition">
@@ -28,6 +36,11 @@
                 :class="activeTab === 'trading' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300'"
                 class="px-4 py-3 border-b-2 font-medium text-sm transition">
             Trading
+        </button>
+        <button @click="activeTab = 'subscription'"
+                :class="activeTab === 'subscription' ? 'border-blue-500 text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-300'"
+                class="px-4 py-3 border-b-2 font-medium text-sm transition">
+            Subscription
         </button>
         {% if user.is_admin %}
         <button @click="activeTab = 'system'"
@@ -46,90 +59,91 @@
                 <h2 class="text-xl font-semibold mb-4">Account Information</h2>
 
                 <div class="space-y-4">
-                    <div>
-                        <label class="block text-sm text-gray-400">Email</label>
-                        <p class="text-lg">{{ user.email }}</p>
+                    <div class="flex items-center space-x-4">
+                        <div class="w-16 h-16 bg-gray-700 rounded-full flex items-center justify-center">
+                            <span class="text-2xl font-bold">{{ user.username[:2].upper() }}</span>
+                        </div>
+                        <div>
+                            <p class="text-xl font-semibold">{{ user.username }}</p>
+                            <p class="text-gray-400">{{ user.email }}</p>
+                        </div>
                     </div>
 
-                    <div>
-                        <label class="block text-sm text-gray-400">Username</label>
-                        <p class="text-lg">{{ user.username }}</p>
-                    </div>
-
-                    <div>
-                        <label class="block text-sm text-gray-400">Account Status</label>
-                        <p class="text-lg">
-                            {% if user.is_verified %}
-                                <span class="text-green-400">Verified</span>
-                            {% else %}
-                                <span class="text-yellow-400">Pending Verification</span>
+                    <div class="pt-4 border-t border-gray-700">
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <label class="block text-sm text-gray-400">Status</label>
+                                <p class="text-base">
+                                    {% if user.is_verified %}
+                                        <span class="text-green-400">Verified</span>
+                                    {% else %}
+                                        <span class="text-yellow-400">Pending</span>
+                                    {% endif %}
+                                </p>
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-400">Member Since</label>
+                                <p class="text-base">{{ user.created_at.strftime('%b %Y') }}</p>
+                            </div>
+                            <div>
+                                <label class="block text-sm text-gray-400">Current Plan</label>
+                                <p class="text-base">
+                                    <span class="{% if user.subscription_tier == 'premium' %}text-purple-400{% elif user.subscription_tier == 'pro' %}text-blue-400{% else %}text-gray-400{% endif %}">
+                                        {{ user.subscription_tier|title }}
+                                    </span>
+                                </p>
+                            </div>
+                            {% if user.is_admin %}
+                            <div>
+                                <label class="block text-sm text-gray-400">Role</label>
+                                <span class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-purple-900 text-purple-200">
+                                    Admin
+                                </span>
+                            </div>
                             {% endif %}
-                        </p>
+                        </div>
                     </div>
-
-                    <div>
-                        <label class="block text-sm text-gray-400">Member Since</label>
-                        <p class="text-lg">{{ user.created_at.strftime('%d %B %Y') }}</p>
-                    </div>
-
-                    {% if user.is_admin %}
-                    <div>
-                        <span class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-purple-900 text-purple-200">
-                            Admin
-                        </span>
-                    </div>
-                    {% endif %}
                 </div>
             </div>
 
-            <!-- Subscription Info -->
+            <!-- Timezone Settings -->
             <div class="bg-card rounded-lg p-6">
-                <h2 class="text-xl font-semibold mb-4">Subscription</h2>
+                <h2 class="text-xl font-semibold mb-4">Display Settings</h2>
 
-                {% if subscription %}
-                    <div class="space-y-4">
-                        <div>
-                            <label class="block text-sm text-gray-400">Plan</label>
-                            <p class="text-lg font-medium">{{ subscription.plan_name }}</p>
-                        </div>
+                <form method="POST" action="{{ url_for('auth.update_preferences') }}" class="space-y-4">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 
-                        <div>
-                            <label class="block text-sm text-gray-400">Status</label>
-                            <p class="text-lg">
-                                {% if subscription.is_valid %}
-                                    <span class="text-green-400">{{ subscription.status_display }}</span>
-                                {% else %}
-                                    <span class="text-red-400">{{ subscription.status_display }}</span>
-                                {% endif %}
-                            </p>
-                        </div>
-
-                        {% if not subscription.is_lifetime %}
-                        <div>
-                            <label class="block text-sm text-gray-400">Expires</label>
-                            <p class="text-lg">
-                                {% if subscription.expires_at %}
-                                    {{ subscription.expires_at[:10] }}
-                                    {% if subscription.days_remaining <= 7 and subscription.days_remaining > 0 %}
-                                        <span class="text-yellow-400">({{ subscription.days_remaining }} days left)</span>
-                                    {% endif %}
-                                {% else %}
-                                    Never
-                                {% endif %}
-                            </p>
-                        </div>
-                        {% endif %}
+                    <div>
+                        <label class="block text-sm font-medium text-gray-300 mb-2">Timezone</label>
+                        <select name="user_timezone" class="w-full px-4 py-2 bg-darker border border-gray-700 rounded-lg focus:outline-none focus:border-blue-500 text-white">
+                            <option value="UTC" {% if user.user_timezone == 'UTC' or not user.user_timezone %}selected{% endif %}>UTC</option>
+                            <option value="America/New_York" {% if user.user_timezone == 'America/New_York' %}selected{% endif %}>Eastern Time (US)</option>
+                            <option value="America/Chicago" {% if user.user_timezone == 'America/Chicago' %}selected{% endif %}>Central Time (US)</option>
+                            <option value="America/Denver" {% if user.user_timezone == 'America/Denver' %}selected{% endif %}>Mountain Time (US)</option>
+                            <option value="America/Los_Angeles" {% if user.user_timezone == 'America/Los_Angeles' %}selected{% endif %}>Pacific Time (US)</option>
+                            <option value="Europe/London" {% if user.user_timezone == 'Europe/London' %}selected{% endif %}>London (UK)</option>
+                            <option value="Europe/Paris" {% if user.user_timezone == 'Europe/Paris' %}selected{% endif %}>Paris (CET)</option>
+                            <option value="Europe/Berlin" {% if user.user_timezone == 'Europe/Berlin' %}selected{% endif %}>Berlin (CET)</option>
+                            <option value="Asia/Dubai" {% if user.user_timezone == 'Asia/Dubai' %}selected{% endif %}>Dubai (GST)</option>
+                            <option value="Asia/Singapore" {% if user.user_timezone == 'Asia/Singapore' %}selected{% endif %}>Singapore (SGT)</option>
+                            <option value="Asia/Tokyo" {% if user.user_timezone == 'Asia/Tokyo' %}selected{% endif %}>Tokyo (JST)</option>
+                            <option value="Asia/Shanghai" {% if user.user_timezone == 'Asia/Shanghai' %}selected{% endif %}>Shanghai (CST)</option>
+                            <option value="Australia/Sydney" {% if user.user_timezone == 'Australia/Sydney' %}selected{% endif %}>Sydney (AEST)</option>
+                        </select>
+                        <p class="text-xs text-gray-500 mt-1">All times will be displayed in your selected timezone</p>
                     </div>
-                {% else %}
-                    <p class="text-gray-400">No active subscription.</p>
-                {% endif %}
 
-                <a href="{{ url_for('auth.subscription') }}"
-                   class="mt-4 inline-block text-blue-400 hover:text-blue-300">
-                    View Subscription Details
-                </a>
+                    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg transition">
+                        Save Settings
+                    </button>
+                </form>
             </div>
+        </div>
+    </div>
 
+    <!-- ===================== SECURITY TAB ===================== -->
+    <div x-show="activeTab === 'security'" x-cloak>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <!-- Two-Factor Authentication -->
             <div class="bg-card rounded-lg p-6">
                 <h2 class="text-xl font-semibold mb-4">Two-Factor Authentication</h2>
@@ -526,6 +540,170 @@
                     {% endfor %}
                 </div>
                 <p class="text-xs text-gray-500">Muting a symbol only affects your notifications. Other users are unaffected.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- ===================== SUBSCRIPTION TAB ===================== -->
+    <div x-show="activeTab === 'subscription'" x-cloak>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Current Subscription -->
+            <div class="bg-card rounded-lg p-6 lg:col-span-2">
+                <h2 class="text-xl font-semibold mb-4">Current Subscription</h2>
+
+                {% if subscription %}
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                    <div>
+                        <label class="block text-sm text-gray-400">Plan</label>
+                        <p class="text-lg font-bold {% if subscription.tier == 'premium' %}text-purple-400{% elif subscription.tier == 'pro' %}text-blue-400{% else %}text-gray-400{% endif %}">
+                            {{ subscription.plan_name }}
+                        </p>
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400">Status</label>
+                        <p class="text-lg">
+                            {% if subscription.is_valid %}
+                                <span class="text-green-400">{{ subscription.status_display }}</span>
+                            {% else %}
+                                <span class="text-red-400">{{ subscription.status_display }}</span>
+                            {% endif %}
+                        </p>
+                    </div>
+                    {% if not subscription.is_lifetime %}
+                    <div>
+                        <label class="block text-sm text-gray-400">Expires</label>
+                        <p class="text-lg">
+                            {% if subscription.expires_at %}
+                                {{ subscription.expires_at[:10] }}
+                            {% else %}
+                                Never
+                            {% endif %}
+                        </p>
+                    </div>
+                    <div>
+                        <label class="block text-sm text-gray-400">Days Remaining</label>
+                        <p class="text-lg {% if subscription.days_remaining <= 7 and subscription.days_remaining > 0 %}text-yellow-400{% elif subscription.days_remaining <= 0 %}text-red-400{% else %}text-green-400{% endif %}">
+                            {% if subscription.days_remaining > 0 %}{{ subscription.days_remaining }}{% else %}Expired{% endif %}
+                        </p>
+                    </div>
+                    {% else %}
+                    <div class="col-span-2">
+                        <label class="block text-sm text-gray-400">Duration</label>
+                        <p class="text-lg text-green-400">Lifetime Access</p>
+                    </div>
+                    {% endif %}
+                </div>
+                {% else %}
+                <p class="text-gray-400 mb-6">No active subscription.</p>
+                {% endif %}
+
+                <!-- Plan Comparison -->
+                <h3 class="text-lg font-semibold mb-3 border-t border-gray-700 pt-4">Plan Features</h3>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm">
+                        <thead>
+                            <tr class="border-b border-gray-700">
+                                <th class="text-left py-2 text-gray-400">Feature</th>
+                                <th class="text-center py-2 text-gray-400">Free</th>
+                                <th class="text-center py-2 text-blue-400">Pro</th>
+                                <th class="text-center py-2 text-purple-400">Premium</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr class="border-b border-gray-800">
+                                <td class="py-2">Symbols</td>
+                                <td class="text-center py-2">BTC only</td>
+                                <td class="text-center py-2">5 symbols</td>
+                                <td class="text-center py-2">Unlimited</td>
+                            </tr>
+                            <tr class="border-b border-gray-800">
+                                <td class="py-2">Daily Notifications</td>
+                                <td class="text-center py-2">1</td>
+                                <td class="text-center py-2">20</td>
+                                <td class="text-center py-2">Unlimited</td>
+                            </tr>
+                            <tr class="border-b border-gray-800">
+                                <td class="py-2">Pattern Types</td>
+                                <td class="text-center py-2">FVG only</td>
+                                <td class="text-center py-2">FVG, OB, Sweep</td>
+                                <td class="text-center py-2">All</td>
+                            </tr>
+                            <tr class="border-b border-gray-800">
+                                <td class="py-2">Portfolio Tracking</td>
+                                <td class="text-center py-2 text-red-400">✗</td>
+                                <td class="text-center py-2 text-green-400">✓</td>
+                                <td class="text-center py-2 text-green-400">✓</td>
+                            </tr>
+                            <tr class="border-b border-gray-800">
+                                <td class="py-2">Backtesting</td>
+                                <td class="text-center py-2 text-red-400">✗</td>
+                                <td class="text-center py-2 text-red-400">✗</td>
+                                <td class="text-center py-2 text-green-400">✓</td>
+                            </tr>
+                            <tr>
+                                <td class="py-2">API Access</td>
+                                <td class="text-center py-2 text-red-400">✗</td>
+                                <td class="text-center py-2 text-red-400">✗</td>
+                                <td class="text-center py-2 text-green-400">✓</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Upgrade Options -->
+            <div class="bg-card rounded-lg p-6">
+                <h2 class="text-xl font-semibold mb-4">Upgrade</h2>
+
+                {% if user.subscription_tier == 'free' %}
+                <div class="space-y-4">
+                    <div class="p-4 bg-blue-900/30 border border-blue-700 rounded-lg">
+                        <h3 class="font-bold text-blue-400">Pro - $19/mo</h3>
+                        <p class="text-sm text-gray-300 mt-1">5 symbols, 20 notifications, portfolio tracking</p>
+                        <a href="{{ url_for('payments.checkout', plan='pro') }}"
+                           class="mt-3 block text-center bg-blue-600 hover:bg-blue-700 py-2 rounded font-medium">
+                            Upgrade to Pro
+                        </a>
+                    </div>
+                    <div class="p-4 bg-purple-900/30 border border-purple-700 rounded-lg">
+                        <h3 class="font-bold text-purple-400">Premium - $49/mo</h3>
+                        <p class="text-sm text-gray-300 mt-1">Unlimited everything, backtesting, API access</p>
+                        <a href="{{ url_for('payments.checkout', plan='premium') }}"
+                           class="mt-3 block text-center bg-purple-600 hover:bg-purple-700 py-2 rounded font-medium">
+                            Upgrade to Premium
+                        </a>
+                    </div>
+                </div>
+                {% elif user.subscription_tier == 'pro' %}
+                <div class="p-4 bg-purple-900/30 border border-purple-700 rounded-lg">
+                    <h3 class="font-bold text-purple-400">Premium - $49/mo</h3>
+                    <p class="text-sm text-gray-300 mt-1">Unlimited everything, backtesting, API access</p>
+                    <a href="{{ url_for('payments.checkout', plan='premium') }}"
+                       class="mt-3 block text-center bg-purple-600 hover:bg-purple-700 py-2 rounded font-medium">
+                        Upgrade to Premium
+                    </a>
+                </div>
+                {% else %}
+                <p class="text-gray-400">You have the highest tier plan. Thank you for your support!</p>
+                {% endif %}
+
+                {% if user.is_admin %}
+                <!-- Admin: Test subscription change -->
+                <div class="mt-6 pt-4 border-t border-gray-700">
+                    <h3 class="font-semibold text-yellow-400 mb-2">Admin: Test Subscription</h3>
+                    <form method="POST" action="{{ url_for('auth.change_subscription') }}" class="space-y-2">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <select name="plan" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
+                            <option value="free">Free</option>
+                            <option value="pro">Pro</option>
+                            <option value="premium">Premium</option>
+                        </select>
+                        <button type="submit" class="w-full bg-yellow-600 hover:bg-yellow-700 py-2 rounded text-sm font-medium">
+                            Change Plan (Test)
+                        </button>
+                    </form>
+                </div>
                 {% endif %}
             </div>
         </div>

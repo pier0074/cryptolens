@@ -6,35 +6,96 @@
 <div class="max-w-6xl mx-auto">
     <h1 class="text-3xl font-bold mb-8">Admin Dashboard</h1>
 
-    <!-- Quick Links (Buttons) -->
-    <div class="grid grid-cols-3 md:grid-cols-5 gap-3 mb-8">
-        <a href="{{ url_for('admin.users') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold text-sm">Users</h3>
-        </a>
-        <a href="{{ url_for('admin.subscriptions') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold text-sm">Subscriptions</h3>
-        </a>
-        <a href="{{ url_for('admin.crons') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold text-sm">Cron Jobs</h3>
-        </a>
-        <a href="{{ url_for('admin.notifications') }}" class="bg-blue-900/30 border border-blue-700 rounded-lg p-3 hover:bg-blue-900/50 transition text-center">
-            <h3 class="font-semibold text-sm text-blue-400">Notifications</h3>
-        </a>
-        <a href="{{ url_for('admin.notification_templates') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold text-sm">Templates</h3>
-        </a>
-        <a href="{{ url_for('admin.create_user') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold text-sm">Create User</h3>
-        </a>
-        <a href="{{ url_for('admin.errors') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold text-sm">Error Logs</h3>
-        </a>
-        <a href="{{ url_for('docs.swagger_ui') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold text-sm">API Docs</h3>
-        </a>
-        <a href="{{ url_for('settings.index') }}" class="bg-card rounded-lg p-3 hover:bg-gray-700 transition text-center">
-            <h3 class="font-semibold text-sm">Settings</h3>
-        </a>
+    <!-- Quick Actions -->
+    <div class="bg-card rounded-lg p-4 mb-8">
+        <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Quick Actions</h2>
+        <div class="flex flex-wrap gap-3">
+            <form action="{{ url_for('admin.quick_scan') }}" method="POST" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium transition flex items-center space-x-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
+                    <span>Scan Now</span>
+                </button>
+            </form>
+            <form action="{{ url_for('admin.quick_refresh_stats') }}" method="POST" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition flex items-center space-x-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
+                    <span>Refresh Stats</span>
+                </button>
+            </form>
+            <form action="{{ url_for('admin.quick_cleanup') }}" method="POST" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="px-4 py-2 bg-orange-600 hover:bg-orange-700 rounded-lg text-sm font-medium transition flex items-center space-x-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
+                    <span>Cleanup</span>
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Navigation Groups -->
+    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <!-- Users -->
+        <div class="bg-card rounded-lg p-4">
+            <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Users</h3>
+            <div class="space-y-2">
+                <a href="{{ url_for('admin.users') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
+                    Users
+                </a>
+                <a href="{{ url_for('admin.create_user') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
+                    Create User
+                </a>
+                <a href="{{ url_for('admin.subscriptions') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
+                    Subscriptions
+                </a>
+            </div>
+        </div>
+
+        <!-- System -->
+        <div class="bg-card rounded-lg p-4">
+            <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">System</h3>
+            <div class="space-y-2">
+                <a href="{{ url_for('admin.crons') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
+                    Cron Jobs
+                </a>
+                <a href="{{ url_for('admin.errors') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
+                    Error Logs
+                </a>
+                <a href="{{ url_for('settings.index') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
+                    Settings
+                </a>
+            </div>
+        </div>
+
+        <!-- Communications -->
+        <div class="bg-card rounded-lg p-4">
+            <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Communications</h3>
+            <div class="space-y-2">
+                <a href="{{ url_for('admin.notifications') }}" class="block px-3 py-2 bg-blue-900/30 border border-blue-700/50 rounded hover:bg-blue-900/50 transition text-sm text-blue-400">
+                    Notifications
+                </a>
+                <a href="{{ url_for('admin.notification_templates') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
+                    Templates
+                </a>
+                <a href="{{ url_for('admin.schedule_notification') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
+                    Schedule Broadcast
+                </a>
+            </div>
+        </div>
+
+        <!-- Reference -->
+        <div class="bg-card rounded-lg p-4">
+            <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Reference</h3>
+            <div class="space-y-2">
+                <a href="{{ url_for('admin.documentation') }}" class="block px-3 py-2 bg-indigo-900/30 border border-indigo-700/50 rounded hover:bg-indigo-900/50 transition text-sm text-indigo-400">
+                    Documentation
+                </a>
+                <a href="{{ url_for('docs.swagger_ui') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
+                    API Docs
+                </a>
+            </div>
+        </div>
     </div>
 
     <!-- Stats Grid -->

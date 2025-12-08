@@ -57,30 +57,24 @@
                         <a href="/" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if request.endpoint == 'dashboard.index' %}bg-gray-800{% endif %}">
                             Dashboard
                         </a>
-                        <a href="/patterns" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'patterns' in request.endpoint %}bg-gray-800{% endif %}">
+                        <a href="/patterns" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'patterns' in request.endpoint or 'signals' in request.endpoint %}bg-gray-800{% endif %}">
                             Patterns
-                        </a>
-                        <a href="/signals" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'signals' in request.endpoint %}bg-gray-800{% endif %}">
-                            Signals
                         </a>
                         <a href="/portfolio" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'portfolio' in request.endpoint %}bg-gray-800{% endif %}">
                             Portfolio
                         </a>
-                        <a href="/backtest" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'backtest' in request.endpoint %}bg-gray-800{% endif %}">
-                            Backtest
-                        </a>
                         <a href="/analytics" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'analytics' in request.endpoint %}bg-gray-800{% endif %}">
                             Analytics
+                        </a>
+                        <a href="/backtest" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'backtest' in request.endpoint %}bg-gray-800{% endif %}">
+                            Backtest
                         </a>
                         <a href="/api" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if request.endpoint and 'docs' in request.endpoint %}bg-gray-800{% endif %}">
                             API
                         </a>
                         {% if g.user.is_admin %}
-                        <a href="/logs" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'logs' in request.endpoint %}bg-gray-800{% endif %}">
-                            Logs
-                        </a>
-                        <a href="/stats" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'stats' in request.endpoint %}bg-gray-800{% endif %}">
-                            Stats
+                        <a href="/admin" class="px-3 py-2 rounded-md text-sm font-medium text-yellow-400 hover:bg-gray-800 {% if 'admin' in request.endpoint %}bg-gray-800{% endif %}">
+                            Admin
                         </a>
                         {% endif %}
                     </div>
@@ -91,47 +85,12 @@
                         <span :class="statusColor" class="w-2 h-2 rounded-full" :style="isLive && 'animation: pulse 2s infinite'"></span>
                         <span class="text-gray-400" x-text="statusText"></span>
                     </div>
-                    {% if g.user.is_admin %}
-                    <!-- Manual Scan (Admin only) -->
-                    <button onclick="triggerScan()" class="bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded text-sm font-medium">
-                        Scan Now
-                    </button>
-                    {% endif %}
-                    <!-- Profile Dropdown -->
-                    <div class="relative" x-data="{ open: false }">
-                        <button @click="open = !open" class="flex items-center space-x-2 text-gray-400 hover:text-white transition">
-                            <div class="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center">
-                                <span class="text-sm font-medium">{{ g.user.username[:2].upper() }}</span>
-                            </div>
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path>
-                            </svg>
-                        </button>
-                        <div x-show="open" @click.away="open = false" x-cloak
-                             class="absolute right-0 mt-2 w-48 bg-gray-800 rounded-md shadow-lg py-1 z-50 border border-gray-700">
-                            <div class="px-4 py-2 border-b border-gray-700">
-                                <p class="text-sm font-medium text-white">{{ g.user.username }}</p>
-                                <p class="text-xs text-gray-400">{{ g.user.email }}</p>
-                                <p class="text-xs text-blue-400 mt-1">{{ g.user.subscription_tier|title }} Plan</p>
-                            </div>
-                            <a href="{{ url_for('auth.profile') }}" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">
-                                Profile & Settings
-                            </a>
-                            <a href="{{ url_for('auth.subscription') }}" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">
-                                Subscription
-                            </a>
-                            {% if g.user.is_admin %}
-                            <a href="/admin" class="block px-4 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white">
-                                Admin
-                            </a>
-                            {% endif %}
-                            <div class="border-t border-gray-700">
-                                <a href="{{ url_for('auth.logout') }}" class="block px-4 py-2 text-sm text-red-400 hover:bg-gray-700 hover:text-red-300">
-                                    Logout
-                                </a>
-                            </div>
+                    <!-- Profile Avatar Link -->
+                    <a href="{{ url_for('auth.profile') }}" class="flex items-center space-x-2 text-gray-400 hover:text-white transition">
+                        <div class="w-8 h-8 bg-gray-700 rounded-full flex items-center justify-center border-2 border-transparent hover:border-blue-500 transition">
+                            <span class="text-sm font-medium">{{ g.user.username[:2].upper() }}</span>
                         </div>
-                    </div>
+                    </a>
                 </div>
             </div>
         </div>

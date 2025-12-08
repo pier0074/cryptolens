@@ -969,3 +969,79 @@ def api_audience_count():
 
     count = query.count()
     return jsonify({'count': count, 'target': target})
+
+
+# ----- DOCUMENTATION -----
+
+@admin_bp.route('/documentation')
+@admin_required
+def documentation():
+    """Comprehensive admin documentation"""
+    section = request.args.get('section', 'overview')
+    return render_template('admin/documentation.html', active_section=section)
+
+
+# ----- QUICK ACTIONS -----
+
+@admin_bp.route('/quick/scan', methods=['POST'])
+@admin_required
+def quick_scan():
+    """Trigger a manual pattern scan"""
+    from app.services.patterns import scan_all_patterns
+    from app.services.logger import log_admin
+
+    try:
+        result = scan_all_patterns()
+        log_admin(f"Quick Action: Pattern scan triggered by admin")
+        flash(f'Scan complete! Found {result.get("patterns_found", 0)} patterns.', 'success')
+    except Exception as e:
+        log_admin(f"Quick Action: Pattern scan failed - {str(e)}")
+        flash(f'Scan failed: {str(e)}', 'error')
+
+    return redirect(url_for('admin.index'))
+
+
+@admin_bp.route('/quick/refresh-stats', methods=['POST'])
+@admin_required
+def quick_refresh_stats():
+    """Trigger stats computation"""
+    from app.services.logger import log_admin
+
+    try:
+        # Import and run compute_stats directly
+        from scripts.compute_stats import compute_stats
+        result = compute_stats()
+        log_admin(f"Quick Action: Stats refresh triggered by admin")
+        flash(f'Stats refreshed! {result.get("symbols_count", 0)} symbols, {result.get("total_candles", 0):,} candles.', 'success')
+    except Exception as e:
+        log_admin(f"Quick Action: Stats refresh failed - {str(e)}")
+        flash(f'Stats refresh failed: {str(e)}', 'error')
+
+    return redirect(url_for('admin.index'))
+
+
+@admin_bp.route('/quick/cleanup', methods=['POST'])
+@admin_required
+def quick_cleanup():
+    """Trigger database health check and cleanup"""
+    from app.services.logger import log_admin
+
+    try:
+        # Import and run db_health check
+        from scripts.db_health import run_health_check
+        result = run_health_check(fix=True, verbose=False)
+        verified = result.get('verified', 0) if result else 0
+        errors = result.get('errors', {}) if result else {}
+        error_count = sum(errors.values()) if errors else 0
+
+        log_admin(f"Quick Action: DB cleanup triggered by admin - verified {verified}, errors {error_count}")
+
+        if error_count > 0:
+            flash(f'Cleanup complete. Verified {verified} candles, fixed {error_count} issues.', 'warning')
+        else:
+            flash(f'Cleanup complete. Verified {verified} candles, no issues found.', 'success')
+    except Exception as e:
+        log_admin(f"Quick Action: DB cleanup failed - {str(e)}")
+        flash(f'Cleanup failed: {str(e)}', 'error')
+
+    return redirect(url_for('admin.index'))

@@ -53,6 +53,9 @@ class User(db.Model):
     quiet_hours_start = db.Column(db.Integer, default=22)  # 0-23 hour UTC
     quiet_hours_end = db.Column(db.Integer, default=7)  # 0-23 hour UTC
 
+    # Display preferences
+    user_timezone = db.Column(db.String(50), default='UTC')  # User's preferred timezone
+
     # Timestamps
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     last_login = db.Column(db.DateTime, nullable=True)
