@@ -99,12 +99,10 @@ app/
 │
 ├── routes/              # HTTP endpoints
 │   ├── api.py           # REST API
-│   ├── auth.py          # Authentication
+│   ├── auth.py          # Authentication + Profile
 │   ├── dashboard.py     # Main dashboard
-│   ├── patterns.py      # Pattern views
-│   ├── signals.py       # Signal views
-│   ├── settings.py      # User settings
-│   ├── admin.py         # Admin panel
+│   ├── patterns.py      # Patterns + Signals (tabbed)
+│   ├── admin.py         # Admin panel (Quick Actions + grouped nav)
 │   ├── payments.py      # Payment processing
 │   ├── metrics.py       # Prometheus metrics
 │   └── docs.py          # API documentation

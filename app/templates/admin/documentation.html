@@ -1,0 +1,1124 @@
+{% extends "base.html" %}
+
+{% block title %}Documentation - CryptoLens Admin{% endblock %}
+
+{% block extra_css %}
+<style>
+    .docs-container {
+        display: flex;
+        min-height: calc(100vh - 64px);
+    }
+    .docs-sidebar {
+        width: 280px;
+        min-width: 280px;
+        background: var(--bg-card);
+        border-right: 1px solid var(--border-color);
+        padding: 1.5rem;
+        overflow-y: auto;
+        position: sticky;
+        top: 64px;
+        height: calc(100vh - 64px);
+    }
+    .docs-content {
+        flex: 1;
+        padding: 2rem 3rem;
+        max-width: 900px;
+        overflow-y: auto;
+    }
+    .docs-nav-section {
+        margin-bottom: 1.5rem;
+    }
+    .docs-nav-title {
+        font-size: 0.75rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        color: var(--text-muted);
+        margin-bottom: 0.5rem;
+        letter-spacing: 0.05em;
+    }
+    .docs-nav-link {
+        display: block;
+        padding: 0.4rem 0.75rem;
+        margin: 0.1rem 0;
+        border-radius: 0.375rem;
+        color: var(--text-muted);
+        text-decoration: none;
+        font-size: 0.875rem;
+        transition: all 0.15s;
+    }
+    .docs-nav-link:hover {
+        background: var(--bg-darker);
+        color: var(--text-primary);
+    }
+    .docs-nav-link.active {
+        background: #3b82f6;
+        color: white;
+    }
+    .docs-section {
+        display: none;
+        animation: fadeIn 0.3s ease;
+    }
+    .docs-section.active {
+        display: block;
+    }
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .docs-h1 {
+        font-size: 2rem;
+        font-weight: 700;
+        margin-bottom: 1rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 2px solid var(--border-color);
+    }
+    .docs-h2 {
+        font-size: 1.5rem;
+        font-weight: 600;
+        margin: 2rem 0 1rem 0;
+        color: #60a5fa;
+    }
+    .docs-h3 {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin: 1.5rem 0 0.75rem 0;
+    }
+    .docs-p {
+        margin-bottom: 1rem;
+        line-height: 1.7;
+        color: var(--text-secondary);
+    }
+    .docs-table {
+        width: 100%;
+        border-collapse: collapse;
+        margin: 1rem 0;
+        font-size: 0.875rem;
+    }
+    .docs-table th, .docs-table td {
+        padding: 0.75rem 1rem;
+        text-align: left;
+        border: 1px solid var(--border-color);
+    }
+    .docs-table th {
+        background: var(--bg-darker);
+        font-weight: 600;
+    }
+    .docs-table tr:hover {
+        background: var(--bg-darker);
+    }
+    .docs-code {
+        background: var(--bg-darker);
+        padding: 0.2rem 0.5rem;
+        border-radius: 0.25rem;
+        font-family: monospace;
+        font-size: 0.875rem;
+        color: #f472b6;
+    }
+    .docs-codeblock {
+        background: var(--bg-darker);
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 1rem 0;
+        overflow-x: auto;
+        font-family: monospace;
+        font-size: 0.875rem;
+        line-height: 1.5;
+    }
+    .docs-list {
+        margin: 1rem 0 1rem 1.5rem;
+        line-height: 1.8;
+    }
+    .docs-list li {
+        margin: 0.25rem 0;
+    }
+    .docs-alert {
+        padding: 1rem 1.25rem;
+        border-radius: 0.5rem;
+        margin: 1rem 0;
+    }
+    .docs-alert-info {
+        background: rgba(59, 130, 246, 0.1);
+        border-left: 4px solid #3b82f6;
+    }
+    .docs-alert-warning {
+        background: rgba(245, 158, 11, 0.1);
+        border-left: 4px solid #f59e0b;
+    }
+    .docs-alert-success {
+        background: rgba(34, 197, 94, 0.1);
+        border-left: 4px solid #22c55e;
+    }
+    .docs-badge {
+        display: inline-block;
+        padding: 0.2rem 0.5rem;
+        border-radius: 0.25rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+    }
+    .docs-badge-green { background: #22c55e; color: white; }
+    .docs-badge-red { background: #ef4444; color: white; }
+    .docs-badge-blue { background: #3b82f6; color: white; }
+    .docs-badge-yellow { background: #f59e0b; color: black; }
+    .docs-badge-purple { background: #a855f7; color: white; }
+    .docs-badge-cyan { background: #06b6d4; color: white; }
+    .docs-badge-gray { background: #6b7280; color: white; }
+    .docs-badge-pink { background: #ec4899; color: white; }
+    .docs-badge-violet { background: #8b5cf6; color: white; }
+    .docs-badge-emerald { background: #10b981; color: white; }
+    .docs-badge-orange { background: #f97316; color: white; }
+    .docs-badge-teal { background: #14b8a6; color: white; }
+    .docs-badge-indigo { background: #6366f1; color: white; }
+    .docs-badge-darkred { background: #dc2626; color: white; }
+    .pattern-diagram {
+        background: var(--bg-darker);
+        padding: 1.5rem;
+        border-radius: 0.5rem;
+        font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', 'Menlo', 'Consolas', monospace;
+        white-space: pre;
+        margin: 1rem 0;
+        overflow-x: auto;
+        line-height: 1.4;
+    }
+    .docs-diagram {
+        background: var(--bg-darker);
+        padding: 1.5rem;
+        border-radius: 0.5rem;
+        font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Source Code Pro', 'Menlo', 'Consolas', monospace;
+        white-space: pre;
+        margin: 1rem 0;
+        overflow-x: auto;
+        line-height: 1.3;
+        font-size: 0.8rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="docs-container" x-data="{ activeSection: '{{ active_section }}' }">
+    <!-- Sidebar Navigation -->
+    <aside class="docs-sidebar">
+        <div class="text-xl font-bold mb-6 text-blue-400">Documentation</div>
+
+        <nav>
+            <!-- Getting Started -->
+            <div class="docs-nav-section">
+                <div class="docs-nav-title">Getting Started</div>
+                <a href="#" @click.prevent="activeSection = 'overview'" class="docs-nav-link" :class="{ active: activeSection === 'overview' }">Overview</a>
+                <a href="#" @click.prevent="activeSection = 'architecture'" class="docs-nav-link" :class="{ active: activeSection === 'architecture' }">Architecture</a>
+            </div>
+
+            <!-- Trading Concepts -->
+            <div class="docs-nav-section">
+                <div class="docs-nav-title">Trading Concepts</div>
+                <a href="#" @click.prevent="activeSection = 'patterns'" class="docs-nav-link" :class="{ active: activeSection === 'patterns' }">Pattern Types</a>
+                <a href="#" @click.prevent="activeSection = 'signals'" class="docs-nav-link" :class="{ active: activeSection === 'signals' }">Signals & Confluence</a>
+                <a href="#" @click.prevent="activeSection = 'backtest'" class="docs-nav-link" :class="{ active: activeSection === 'backtest' }">Backtesting</a>
+            </div>
+
+            <!-- Features -->
+            <div class="docs-nav-section">
+                <div class="docs-nav-title">Features</div>
+                <a href="#" @click.prevent="activeSection = 'dashboard'" class="docs-nav-link" :class="{ active: activeSection === 'dashboard' }">Dashboard & Navigation</a>
+                <a href="#" @click.prevent="activeSection = 'portfolio'" class="docs-nav-link" :class="{ active: activeSection === 'portfolio' }">Portfolio & Trading</a>
+                <a href="#" @click.prevent="activeSection = 'profile'" class="docs-nav-link" :class="{ active: activeSection === 'profile' }">Profile Settings</a>
+                <a href="#" @click.prevent="activeSection = 'notifications'" class="docs-nav-link" :class="{ active: activeSection === 'notifications' }">Notifications</a>
+                <a href="#" @click.prevent="activeSection = 'tiers'" class="docs-nav-link" :class="{ active: activeSection === 'tiers' }">Subscription Tiers</a>
+            </div>
+
+            <!-- Technical -->
+            <div class="docs-nav-section">
+                <div class="docs-nav-title">Technical Reference</div>
+                <a href="#" @click.prevent="activeSection = 'logs'" class="docs-nav-link" :class="{ active: activeSection === 'logs' }">Logging System</a>
+                <a href="#" @click.prevent="activeSection = 'api'" class="docs-nav-link" :class="{ active: activeSection === 'api' }">API Reference</a>
+                <a href="#" @click.prevent="activeSection = 'config'" class="docs-nav-link" :class="{ active: activeSection === 'config' }">Configuration</a>
+                <a href="#" @click.prevent="activeSection = 'deployment'" class="docs-nav-link" :class="{ active: activeSection === 'deployment' }">Deployment</a>
+            </div>
+
+            <!-- Admin -->
+            <div class="docs-nav-section">
+                <div class="docs-nav-title">Administration</div>
+                <a href="#" @click.prevent="activeSection = 'admin'" class="docs-nav-link" :class="{ active: activeSection === 'admin' }">Admin Panel</a>
+                <a href="#" @click.prevent="activeSection = 'security'" class="docs-nav-link" :class="{ active: activeSection === 'security' }">Security</a>
+            </div>
+        </nav>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="docs-content">
+
+        <!-- ==================== OVERVIEW ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'overview' }">
+            <h1 class="docs-h1">CryptoLens Overview</h1>
+
+            <p class="docs-p">
+                CryptoLens is a <strong>Smart Money Concepts (SMC) pattern detection platform</strong> for cryptocurrency trading.
+                It automatically identifies institutional trading patterns across multiple timeframes and sends push notifications
+                when high-probability setups occur.
+            </p>
+
+            <h2 class="docs-h2">Key Features</h2>
+            <ul class="docs-list">
+                <li><strong>Pattern Detection</strong> - Fair Value Gaps, Order Blocks, and Liquidity Sweeps</li>
+                <li><strong>Multi-Timeframe Analysis</strong> - 1m, 5m, 15m, 1h, 4h, 1d timeframes</li>
+                <li><strong>Confluence Signals</strong> - Higher reliability when patterns align across timeframes</li>
+                <li><strong>Push Notifications</strong> - Real-time alerts via NTFY.sh</li>
+                <li><strong>Portfolio Management</strong> - Track trades and journal entries</li>
+                <li><strong>Backtesting</strong> - Test strategies on historical data</li>
+                <li><strong>3-Tier Subscriptions</strong> - Free, Pro, and Premium plans</li>
+            </ul>
+
+            <h2 class="docs-h2">Technology Stack</h2>
+            <table class="docs-table">
+                <tr><th>Component</th><th>Technology</th></tr>
+                <tr><td>Backend</td><td>Python 3.9+, Flask 3.0</td></tr>
+                <tr><td>Database</td><td>SQLite (dev) / PostgreSQL (prod)</td></tr>
+                <tr><td>Exchange Data</td><td>CCXT (Binance)</td></tr>
+                <tr><td>Notifications</td><td>NTFY.sh</td></tr>
+                <tr><td>Payments</td><td>LemonSqueezy (fiat), NOWPayments (crypto)</td></tr>
+                <tr><td>Frontend</td><td>Jinja2, Alpine.js, TailwindCSS</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Version History</h2>
+            <p class="docs-p">Current version: <span class="docs-badge docs-badge-blue">v2.1.0</span></p>
+            <p class="docs-p">Status: <span class="docs-badge docs-badge-green">Production Ready</span></p>
+        </section>
+
+        <!-- ==================== ARCHITECTURE ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'architecture' }">
+            <h1 class="docs-h1">Architecture</h1>
+
+            <h2 class="docs-h2">System Components</h2>
+            <div class="docs-diagram">+----------------------------------------------------------+
+|                       CryptoLens                         |
++----------------------------------------------------------+
+|  +----------+  +----------+  +----------+  +----------+  |
+|  |  Flask   |  |  CCXT    |  |  NTFY    |  | Payments |  |
+|  |  Web App |  |  Data    |  |  Push    |  | Gateway  |  |
+|  +----+-----+  +----+-----+  +----+-----+  +----+-----+  |
+|       |             |             |             |         |
+|  +----v-------------v-------------v-------------v----+   |
+|  |              Service Layer                        |   |
+|  |  +---------+ +---------+ +---------+ +---------+  |   |
+|  |  | Pattern | | Signal  | | Notif   | | Payment |  |   |
+|  |  | Detect  | | Generate| | Service | | Service |  |   |
+|  |  +---------+ +---------+ +---------+ +---------+  |   |
+|  +------------------------+--------------------------|   |
+|                           |                              |
+|  +------------------------v--------------------------+   |
+|  |              SQLAlchemy ORM                       |   |
+|  +------------------------+--------------------------+   |
+|                           |                              |
+|  +------------------------v--------------------------+   |
+|  |           SQLite / PostgreSQL Database            |   |
+|  +---------------------------------------------------+   |
++----------------------------------------------------------+</div>
+
+            <h2 class="docs-h2">Data Flow</h2>
+            <ol class="docs-list">
+                <li><strong>Fetch</strong> - CCXT fetches candle data from Binance every minute</li>
+                <li><strong>Aggregate</strong> - Raw 1m candles aggregated to higher timeframes</li>
+                <li><strong>Detect</strong> - Pattern detectors scan for FVG, OB, and Sweep patterns</li>
+                <li><strong>Signal</strong> - Confluence calculator generates trade signals</li>
+                <li><strong>Notify</strong> - NTFY sends push notifications to subscribers</li>
+                <li><strong>Expire</strong> - Old patterns expired based on timeframe rules</li>
+            </ol>
+
+            <h2 class="docs-h2">Directory Structure</h2>
+            <div class="docs-diagram">cryptolens/
+|-- app/
+|   |-- routes/          # Web routes (api, auth, dashboard, etc.)
+|   |-- services/        # Business logic
+|   |   +-- patterns/    # FVG, OB, Sweep detectors
+|   |-- models/          # SQLAlchemy models
+|   |-- templates/       # Jinja2 HTML templates
+|   |-- static/          # CSS, JS, images
+|   +-- jobs/            # Background job definitions
+|-- scripts/
+|   |-- fetch.py         # Main data pipeline (cron)
+|   |-- compute_stats.py # Stats caching (cron)
+|   +-- db_health.py     # Data integrity check (cron)
+|-- tests/               # Test suite (607 tests)
++-- run.py               # Development server</div>
+
+            <h2 class="docs-h2">Background Jobs (Cron)</h2>
+            <table class="docs-table">
+                <tr><th>Job</th><th>Frequency</th><th>Purpose</th></tr>
+                <tr><td>fetch.py</td><td>Every 1 min</td><td>Fetch candles, detect patterns, send notifications</td></tr>
+                <tr><td>compute_stats.py</td><td>Every 5 min</td><td>Cache statistics for fast page loads</td></tr>
+                <tr><td>db_health.py</td><td>Daily 3 AM</td><td>Verify data integrity, clean old data</td></tr>
+            </table>
+        </section>
+
+        <!-- ==================== PATTERNS ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'patterns' }">
+            <h1 class="docs-h1">Trading Pattern Types</h1>
+
+            <p class="docs-p">
+                CryptoLens detects three Smart Money Concepts (SMC) patterns that indicate institutional activity.
+                These patterns represent areas where large players have placed orders or hunted liquidity.
+            </p>
+
+            <!-- FVG -->
+            <h2 class="docs-h2">Fair Value Gap (FVG) <span class="docs-badge docs-badge-green">F</span></h2>
+
+            <p class="docs-p">
+                A <strong>Fair Value Gap</strong> is a 3-candle pattern where aggressive buying or selling creates a gap
+                between candle 1's wick and candle 3's wick. This gap represents unfilled orders where price moved too fast.
+            </p>
+
+            <h3 class="docs-h3">Detection Logic</h3>
+            <ul class="docs-list">
+                <li><strong>Bullish FVG</strong>: Candle 1 high &lt; Candle 3 low (gap up)</li>
+                <li><strong>Bearish FVG</strong>: Candle 1 low &gt; Candle 3 high (gap down)</li>
+                <li>Minimum gap size: Configurable (default 0.1% of price)</li>
+            </ul>
+
+            <div class="docs-diagram">Bullish FVG:
+                    +-----+
+                    |     | &lt;- Candle 3
+              +-----+     |
+    ==========|=====|=====|======  &lt;- FVG Zone (entry area)
+              |     +-----+
+        +-----+ &lt;- Candle 1
+        |     |
+        +-----+
+
+Bearish FVG:
+        +-----+
+        |     | &lt;- Candle 1
+        |     +-----+
+    ====|=====|=====|============  &lt;- FVG Zone (entry area)
+        +-----+     |
+                    |     | &lt;- Candle 3
+                    +-----+</div>
+
+            <h3 class="docs-h3">How to Trade</h3>
+            <ol class="docs-list">
+                <li>Wait for price to retrace back into the FVG zone</li>
+                <li><strong>Entry</strong>: At the zone edge (conservative) or midpoint (aggressive)</li>
+                <li><strong>Stop Loss</strong>: Beyond the opposite edge of the zone + buffer</li>
+                <li><strong>Take Profit</strong>: 1:2 or 1:3 risk-reward ratio</li>
+            </ol>
+
+            <div class="docs-alert docs-alert-info">
+                <strong>Pro Tip:</strong> FVGs on higher timeframes (4h, 1d) are more significant than lower timeframes.
+            </div>
+
+            <!-- Order Block -->
+            <h2 class="docs-h2">Order Block (OB) <span class="docs-badge docs-badge-purple">O</span></h2>
+
+            <p class="docs-p">
+                An <strong>Order Block</strong> is the last opposing candle before a strong impulsive move.
+                It represents where institutions placed large orders that caused the subsequent move.
+            </p>
+
+            <h3 class="docs-h3">Detection Logic</h3>
+            <ul class="docs-list">
+                <li><strong>Bullish OB</strong>: Last red (bearish) candle before a strong green impulse</li>
+                <li><strong>Bearish OB</strong>: Last green (bullish) candle before a strong red impulse</li>
+                <li>Impulse must be &gt; 1.5x average body size</li>
+                <li>Impulse should break recent structure (swing high/low)</li>
+            </ul>
+
+            <div class="docs-diagram">Bullish Order Block:
+        +-----+
+        | ^^^ | &lt;- Strong impulse up
+        | ^^^ |
+   =====|=====|=====  &lt;- Order Block zone
+        | v   | &lt;- Last red candle (OB)
+        +-----+
+
+Bearish Order Block:
+        +-----+
+        | ^   | &lt;- Last green candle (OB)
+   =====|=====|=====  &lt;- Order Block zone
+        | vvv |
+        | vvv | &lt;- Strong impulse down
+        +-----+</div>
+
+            <h3 class="docs-h3">How to Trade</h3>
+            <ol class="docs-list">
+                <li>Mark the order block candle's body (open to close)</li>
+                <li>Wait for price to return to this zone</li>
+                <li><strong>Entry</strong>: Within the OB body</li>
+                <li><strong>Stop Loss</strong>: Beyond the OB wick</li>
+                <li><strong>Take Profit</strong>: Previous swing high/low or 1:2 RR</li>
+            </ol>
+
+            <!-- Liquidity Sweep -->
+            <h2 class="docs-h2">Liquidity Sweep (Sweep) <span class="docs-badge docs-badge-yellow">S</span></h2>
+
+            <p class="docs-p">
+                A <strong>Liquidity Sweep</strong> occurs when price takes out obvious highs/lows (where stop losses cluster)
+                before reversing. Institutions hunt these liquidity pools to fill large orders.
+            </p>
+
+            <h3 class="docs-h3">Detection Logic</h3>
+            <ul class="docs-list">
+                <li>Identify swing highs/lows (using lookback period)</li>
+                <li><strong>Bullish Sweep</strong>: Price wicks below swing low, closes back above</li>
+                <li><strong>Bearish Sweep</strong>: Price wicks above swing high, closes back below</li>
+                <li>The sweep should be followed by reversal momentum</li>
+            </ul>
+
+            <div class="docs-diagram">Bearish Liquidity Sweep:
+   ------------ Previous High (liquidity)
+        |
+   =====|===== &lt;- Sweep wick (takes out stops)
+        |
+   -----+-----  &lt;- Close back inside
+        |
+        v
+     Reversal</div>
+
+            <h3 class="docs-h3">How to Trade</h3>
+            <ol class="docs-list">
+                <li>Identify obvious swing highs/lows where stops cluster</li>
+                <li>Wait for a sweep (wick beyond, close inside)</li>
+                <li><strong>Entry</strong>: After the sweep candle closes</li>
+                <li><strong>Stop Loss</strong>: Beyond the sweep wick</li>
+                <li><strong>Take Profit</strong>: Opposite side of the range</li>
+            </ol>
+
+            <!-- Pattern Expiry -->
+            <h2 class="docs-h2">Pattern Expiry Rules</h2>
+            <p class="docs-p">Patterns automatically expire based on their timeframe significance:</p>
+
+            <table class="docs-table">
+                <tr><th>Timeframe</th><th>Expiry Time</th><th>Candles Loaded</th></tr>
+                <tr><td>1m</td><td>4 hours</td><td>500</td></tr>
+                <tr><td>5m</td><td>12 hours</td><td>400</td></tr>
+                <tr><td>15m</td><td>24 hours</td><td>300</td></tr>
+                <tr><td>1h</td><td>3 days</td><td>250</td></tr>
+                <tr><td>4h</td><td>7 days</td><td>200</td></tr>
+                <tr><td>1d</td><td>14 days</td><td>150</td></tr>
+            </table>
+        </section>
+
+        <!-- ==================== SIGNALS ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'signals' }">
+            <h1 class="docs-h1">Signals & Confluence</h1>
+
+            <h2 class="docs-h2">What is Confluence?</h2>
+            <p class="docs-p">
+                <strong>Confluence</strong> occurs when multiple timeframes show patterns in the same direction.
+                Higher confluence scores indicate more reliable trade setups.
+            </p>
+
+            <h2 class="docs-h2">Confluence Scoring</h2>
+            <table class="docs-table">
+                <tr><th>Score</th><th>Meaning</th><th>Reliability</th></tr>
+                <tr><td>2 TFs</td><td>Moderate signal</td><td>Standard</td></tr>
+                <tr><td>3 TFs</td><td>Strong signal</td><td>High</td></tr>
+                <tr><td>4+ TFs</td><td>Very strong signal</td><td>Very High</td></tr>
+                <tr><td>HTF + LTF</td><td>Multi-timeframe alignment</td><td>Highest</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Signal Generation</h2>
+            <p class="docs-p">Signals are generated when:</p>
+            <ol class="docs-list">
+                <li>At least 2 timeframes show patterns in the same direction</li>
+                <li>Patterns are from the same symbol</li>
+                <li>Confluence score meets the user's minimum threshold</li>
+            </ol>
+
+            <h2 class="docs-h2">Signal Contents</h2>
+            <p class="docs-p">Each signal includes:</p>
+            <ul class="docs-list">
+                <li><strong>Symbol</strong> - Trading pair (e.g., BTC/USDT)</li>
+                <li><strong>Direction</strong> - LONG or SHORT</li>
+                <li><strong>Entry Price</strong> - Suggested entry level</li>
+                <li><strong>Stop Loss</strong> - Risk management level</li>
+                <li><strong>Take Profit 1 & 2</strong> - Profit targets</li>
+                <li><strong>Confluence Score</strong> - Number of aligned timeframes</li>
+                <li><strong>Timeframes</strong> - Which TFs are aligned</li>
+            </ul>
+
+            <div class="docs-alert docs-alert-warning">
+                <strong>Important:</strong> Signals are for informational purposes only. Always do your own analysis and manage risk appropriately.
+            </div>
+        </section>
+
+        <!-- ==================== BACKTEST ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'backtest' }">
+            <h1 class="docs-h1">Backtesting</h1>
+
+            <p class="docs-p">
+                The backtesting module allows you to test pattern-based strategies on historical data.
+                This helps evaluate strategy performance before trading with real capital.
+            </p>
+
+            <h2 class="docs-h2">Backtest Parameters</h2>
+            <table class="docs-table">
+                <tr><th>Parameter</th><th>Description</th></tr>
+                <tr><td>Symbol</td><td>Trading pair to test</td></tr>
+                <tr><td>Timeframe</td><td>Chart timeframe</td></tr>
+                <tr><td>Start Date</td><td>Backtest start date</td></tr>
+                <tr><td>End Date</td><td>Backtest end date</td></tr>
+                <tr><td>Pattern Type</td><td>FVG, Order Block, or Liquidity Sweep</td></tr>
+                <tr><td>R:R Target</td><td>Risk-to-reward ratio (e.g., 2.0 = 1:2)</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Backtest Results</h2>
+            <ul class="docs-list">
+                <li><strong>Total Trades</strong> - Number of trades taken</li>
+                <li><strong>Win Rate</strong> - Percentage of winning trades</li>
+                <li><strong>Average R:R</strong> - Average risk-reward achieved</li>
+                <li><strong>Total Profit %</strong> - Cumulative profit percentage</li>
+                <li><strong>Max Drawdown</strong> - Largest peak-to-trough decline</li>
+                <li><strong>Trade List</strong> - Individual trade details</li>
+            </ul>
+
+            <h2 class="docs-h2">Trade Simulation Logic</h2>
+            <ol class="docs-list">
+                <li>Pattern detected at candle N</li>
+                <li>Wait for price to enter the zone (entry trigger)</li>
+                <li>If entry triggered, monitor for SL or TP hit</li>
+                <li>Record result: Win (TP hit), Loss (SL hit), or No Fill</li>
+            </ol>
+
+            <div class="docs-alert docs-alert-info">
+                <strong>Note:</strong> Backtesting is available for Premium tier users only.
+            </div>
+        </section>
+
+        <!-- ==================== DASHBOARD ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'dashboard' }">
+            <h1 class="docs-h1">Dashboard</h1>
+
+            <h2 class="docs-h2">Navigation Structure</h2>
+            <p class="docs-p">
+                The main navigation bar provides quick access to all features:
+            </p>
+            <div class="docs-codeblock">Dashboard | Patterns | Portfolio | Analytics | Backtest | API | Admin | [👤]</div>
+            <ul class="docs-list">
+                <li><strong>Dashboard</strong> - Pattern Matrix overview</li>
+                <li><strong>Patterns</strong> - Active Patterns + Signals (tabbed view)</li>
+                <li><strong>Portfolio</strong> - Trade tracking and journaling</li>
+                <li><strong>Analytics</strong> - Performance metrics</li>
+                <li><strong>Backtest</strong> - Strategy testing (Premium)</li>
+                <li><strong>API</strong> - Interactive API documentation</li>
+                <li><strong>Admin</strong> - Admin panel (admin-only, yellow text)</li>
+                <li><strong>[👤]</strong> - Profile page (click avatar)</li>
+            </ul>
+
+            <h2 class="docs-h2">Pattern Matrix</h2>
+            <p class="docs-p">
+                The Pattern Matrix shows all active patterns across symbols and timeframes in a grid format.
+            </p>
+
+            <h3 class="docs-h3">Matrix Legend</h3>
+            <table class="docs-table">
+                <tr><th>Indicator</th><th>Meaning</th></tr>
+                <tr><td><span class="docs-badge docs-badge-green">F</span></td><td>Fair Value Gap (bullish)</td></tr>
+                <tr><td><span class="docs-badge docs-badge-red">F</span></td><td>Fair Value Gap (bearish)</td></tr>
+                <tr><td><span class="docs-badge docs-badge-green">O</span></td><td>Order Block (bullish)</td></tr>
+                <tr><td><span class="docs-badge docs-badge-red">O</span></td><td>Order Block (bearish)</td></tr>
+                <tr><td><span class="docs-badge docs-badge-green">S</span></td><td>Liquidity Sweep (bullish)</td></tr>
+                <tr><td><span class="docs-badge docs-badge-red">S</span></td><td>Liquidity Sweep (bearish)</td></tr>
+                <tr><td>Yellow border</td><td>Multiple patterns in cell</td></tr>
+            </table>
+
+            <h3 class="docs-h3">Pattern Tabs</h3>
+            <ul class="docs-list">
+                <li><strong>All Patterns</strong> - Show all pattern types</li>
+                <li><strong>Fair Value Gap (F)</strong> - Filter to FVG only</li>
+                <li><strong>Order Block (O)</strong> - Filter to OB only</li>
+                <li><strong>Liquidity Sweep (S)</strong> - Filter to Sweep only</li>
+            </ul>
+
+            <h2 class="docs-h2">Patterns Page</h2>
+            <p class="docs-p">The Patterns page combines patterns and signals in a tabbed interface:</p>
+            <ul class="docs-list">
+                <li><strong>Active Patterns tab</strong> - TradingView charts with pattern zones, timeframe selector</li>
+                <li><strong>Signals tab</strong> - Trade signals with entry/SL/TP, direction filter, confluence scores</li>
+            </ul>
+        </section>
+
+        <!-- ==================== PORTFOLIO ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'portfolio' }">
+            <h1 class="docs-h1">Portfolio & Trading</h1>
+
+            <h2 class="docs-h2">Portfolios</h2>
+            <p class="docs-p">
+                Create multiple portfolios to track different strategies or accounts.
+                Each portfolio has its own balance, trades, and statistics.
+            </p>
+
+            <h3 class="docs-h3">Portfolio Limits by Tier</h3>
+            <table class="docs-table">
+                <tr><th>Tier</th><th>Portfolios</th><th>Trades/Day</th></tr>
+                <tr><td>Free</td><td>-</td><td>-</td></tr>
+                <tr><td>Pro</td><td>1</td><td>5</td></tr>
+                <tr><td>Premium</td><td>Unlimited</td><td>Unlimited</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Trade Management</h2>
+            <p class="docs-p">Track trades from entry to exit with full journaling support.</p>
+
+            <h3 class="docs-h3">Trade Status Flow</h3>
+            <div class="docs-diagram">Pending --&gt; Open --&gt; Closed
+    |
+    +------&gt; Cancelled</div>
+
+            <h3 class="docs-h3">Trade Fields</h3>
+            <ul class="docs-list">
+                <li><strong>Symbol</strong> - Trading pair</li>
+                <li><strong>Direction</strong> - Long or Short</li>
+                <li><strong>Entry Price/Quantity</strong> - Position entry</li>
+                <li><strong>Stop Loss / Take Profit</strong> - Risk management levels</li>
+                <li><strong>Risk %</strong> - Percentage of portfolio risked</li>
+                <li><strong>Setup Notes</strong> - Pre-trade analysis</li>
+                <li><strong>Lessons Learned</strong> - Post-trade review</li>
+            </ul>
+
+            <h2 class="docs-h2">Journal Entries</h2>
+            <p class="docs-p">Add journal entries to track your thinking and emotions during trades:</p>
+            <ul class="docs-list">
+                <li><strong>Pre-Trade</strong> - Analysis and setup reasoning</li>
+                <li><strong>During Trade</strong> - Real-time thoughts and adjustments</li>
+                <li><strong>Post-Trade</strong> - Review and lessons learned</li>
+                <li><strong>Mood Tracking</strong> - Confident, Neutral, Fearful, Greedy, FOMO, Revenge</li>
+            </ul>
+        </section>
+
+        <!-- ==================== PROFILE ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'profile' }">
+            <h1 class="docs-h1">Profile Settings</h1>
+
+            <p class="docs-p">
+                Access your profile by clicking on the avatar icon in the top-right corner of the navigation bar.
+                The Profile page is organized into tabs for easy navigation.
+            </p>
+
+            <h2 class="docs-h2">Profile Tabs</h2>
+
+            <h3 class="docs-h3">Account</h3>
+            <ul class="docs-list">
+                <li><strong>Username</strong> - Display name (read-only)</li>
+                <li><strong>Email</strong> - Account email address</li>
+                <li><strong>Timezone</strong> - Select your preferred timezone for displaying times</li>
+                <li><strong>Member Since</strong> - Account creation date</li>
+            </ul>
+
+            <h3 class="docs-h3">Security</h3>
+            <ul class="docs-list">
+                <li><strong>Change Password</strong> - Update your account password</li>
+                <li><strong>Two-Factor Authentication</strong> - Enable/disable TOTP-based 2FA</li>
+                <li><strong>Backup Codes</strong> - Generate recovery codes for 2FA</li>
+            </ul>
+
+            <h3 class="docs-h3">Notifications</h3>
+            <ul class="docs-list">
+                <li><strong>NTFY Topic</strong> - Your unique notification topic</li>
+                <li><strong>Direction Filter</strong> - Bullish only, Bearish only, or Both</li>
+                <li><strong>Min Confluence</strong> - Minimum timeframes required</li>
+                <li><strong>Quiet Hours</strong> - Suppress notifications during sleep</li>
+                <li><strong>Test Button</strong> - Send a test notification</li>
+            </ul>
+
+            <h3 class="docs-h3">Trading</h3>
+            <ul class="docs-list">
+                <li><strong>Default Risk %</strong> - Default position sizing</li>
+                <li><strong>Risk:Reward Ratio</strong> - Default R:R for calculations</li>
+                <li><strong>Default Symbol</strong> - Preferred trading pair</li>
+            </ul>
+
+            <h3 class="docs-h3">Subscription</h3>
+            <ul class="docs-list">
+                <li><strong>Current Plan</strong> - Your subscription tier</li>
+                <li><strong>Plan Comparison</strong> - Feature comparison table</li>
+                <li><strong>Upgrade Options</strong> - Links to upgrade to Pro or Premium</li>
+            </ul>
+
+            <div class="docs-alert docs-alert-info">
+                <strong>Logout:</strong> The logout button is located in the top-right corner of the Profile page.
+            </div>
+        </section>
+
+        <!-- ==================== NOTIFICATIONS ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'notifications' }">
+            <h1 class="docs-h1">Notifications</h1>
+
+            <h2 class="docs-h2">NTFY.sh Integration</h2>
+            <p class="docs-p">
+                CryptoLens uses <a href="https://ntfy.sh" target="_blank" class="text-blue-400">NTFY.sh</a> for push notifications.
+                Each user gets a unique topic for private notifications.
+            </p>
+
+            <h3 class="docs-h3">Setup Steps</h3>
+            <ol class="docs-list">
+                <li>Register and verify your email</li>
+                <li>Install the NTFY app on your phone (iOS/Android)</li>
+                <li>Go to Profile > Notifications tab to see your unique topic</li>
+                <li>Subscribe to your topic in the NTFY app</li>
+                <li>Test notifications from the Notifications tab</li>
+            </ol>
+
+            <h2 class="docs-h2">Notification Limits by Tier</h2>
+            <table class="docs-table">
+                <tr><th>Tier</th><th>Daily Limit</th><th>Delay</th></tr>
+                <tr><td>Free</td><td>1/day</td><td>10 min delay</td></tr>
+                <tr><td>Pro</td><td>20/day</td><td>Real-time</td></tr>
+                <tr><td>Premium</td><td>Unlimited</td><td>Real-time</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Notification Preferences</h2>
+            <ul class="docs-list">
+                <li><strong>Direction Filter</strong> - Bullish only, Bearish only, or Both</li>
+                <li><strong>Min Confluence</strong> - Minimum timeframes aligned</li>
+                <li><strong>Quiet Hours</strong> - Suppress notifications during sleep</li>
+                <li><strong>Symbol Mute</strong> - Mute specific symbols (Premium only)</li>
+            </ul>
+
+            <h2 class="docs-h2">Admin Broadcasts</h2>
+            <p class="docs-p">Admins can send broadcast notifications to users:</p>
+            <ul class="docs-list">
+                <li><strong>Target Audience</strong> - All users, specific tier, or verified only</li>
+                <li><strong>Templates</strong> - Save and reuse notification templates</li>
+                <li><strong>Scheduling</strong> - Schedule notifications for future delivery</li>
+            </ul>
+        </section>
+
+        <!-- ==================== TIERS ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'tiers' }">
+            <h1 class="docs-h1">Subscription Tiers</h1>
+
+            <h2 class="docs-h2">Feature Comparison</h2>
+            <table class="docs-table">
+                <tr><th>Feature</th><th>Free</th><th>Pro</th><th>Premium</th></tr>
+                <tr><td>Symbols</td><td>BTC/USDT only</td><td>5 symbols</td><td>Unlimited</td></tr>
+                <tr><td>Pattern Types</td><td>FVG only</td><td>All 3</td><td>All 3</td></tr>
+                <tr><td>Patterns Page</td><td>-</td><td>Last 100</td><td>Full history</td></tr>
+                <tr><td>Signals Page</td><td>-</td><td>Last 50</td><td>Full history</td></tr>
+                <tr><td>Portfolio</td><td>-</td><td>1 portfolio, 5tx/day</td><td>Unlimited</td></tr>
+                <tr><td>Backtest</td><td>-</td><td>-</td><td>Full access</td></tr>
+                <tr><td>Analytics</td><td>-</td><td>Full</td><td>Full</td></tr>
+                <tr><td>Notifications</td><td>1/day, 10min delay</td><td>20/day</td><td>Unlimited</td></tr>
+                <tr><td>API Access</td><td>-</td><td>-</td><td>Full</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Pattern Access by Tier</h2>
+            <table class="docs-table">
+                <tr><th>Pattern</th><th>Free</th><th>Pro</th><th>Premium</th></tr>
+                <tr><td>Fair Value Gap (F)</td><td>&#10004;</td><td>&#10004;</td><td>&#10004;</td></tr>
+                <tr><td>Order Block (O)</td><td>-</td><td>&#10004;</td><td>&#10004;</td></tr>
+                <tr><td>Liquidity Sweep (S)</td><td>-</td><td>&#10004;</td><td>&#10004;</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Payment Methods</h2>
+            <ul class="docs-list">
+                <li><strong>LemonSqueezy</strong> - Credit/debit cards</li>
+                <li><strong>NOWPayments</strong> - BTC, ETH, USDT, LTC, DOGE, SOL, BNB</li>
+            </ul>
+
+            <div class="docs-alert docs-alert-warning">
+                <strong>Policy:</strong> All payments are non-refundable. Accounts are personal and non-transferable.
+            </div>
+        </section>
+
+        <!-- ==================== LOGS ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'logs' }">
+            <h1 class="docs-h1">Logging System</h1>
+
+            <p class="docs-p">
+                CryptoLens has a comprehensive logging system that tracks all significant events.
+                Logs are stored in the database and viewable in the admin panel.
+            </p>
+
+            <h2 class="docs-h2">Log Categories</h2>
+            <table class="docs-table">
+                <tr><th>Category</th><th>Color</th><th>Description</th><th>Example Events</th></tr>
+                <tr><td><span class="docs-badge docs-badge-green">fetch</span></td><td>Green</td><td>Data fetching</td><td>Candles fetched from exchange</td></tr>
+                <tr><td><span class="docs-badge docs-badge-blue">aggregate</span></td><td>Blue</td><td>Aggregation</td><td>1m candles aggregated to higher TFs</td></tr>
+                <tr><td><span class="docs-badge docs-badge-purple">scan</span></td><td>Purple</td><td>Pattern scanning</td><td>Patterns detected, expired</td></tr>
+                <tr><td><span class="docs-badge docs-badge-yellow">signal</span></td><td>Yellow</td><td>Signal generation</td><td>Trade signals generated</td></tr>
+                <tr><td><span class="docs-badge docs-badge-cyan">notify</span></td><td>Cyan</td><td>Notifications</td><td>Push notifications sent</td></tr>
+                <tr><td><span class="docs-badge docs-badge-gray">system</span></td><td>Gray</td><td>System events</td><td>Server start, config changes</td></tr>
+                <tr><td><span class="docs-badge docs-badge-red">error</span></td><td>Red</td><td>Errors</td><td>Exceptions, failures</td></tr>
+                <tr><td><span class="docs-badge docs-badge-pink">auth</span></td><td>Pink</td><td>Authentication</td><td>Login, logout, register, password changes</td></tr>
+                <tr><td><span class="docs-badge docs-badge-violet">user</span></td><td>Violet</td><td>User actions</td><td>Settings changes, profile updates</td></tr>
+                <tr><td><span class="docs-badge docs-badge-emerald">trade</span></td><td>Emerald</td><td>Trading</td><td>Portfolio created, trade opened/closed</td></tr>
+                <tr><td><span class="docs-badge docs-badge-orange">payment</span></td><td>Orange</td><td>Payments</td><td>Checkout created, subscription activated</td></tr>
+                <tr><td><span class="docs-badge docs-badge-teal">backtest</span></td><td>Teal</td><td>Backtesting</td><td>Backtest started, completed, results</td></tr>
+                <tr><td><span class="docs-badge docs-badge-indigo">api</span></td><td>Indigo</td><td>API access</td><td>API requests, rate limits</td></tr>
+                <tr><td><span class="docs-badge docs-badge-darkred">admin</span></td><td>Dark Red</td><td>Admin actions</td><td>User management, subscription changes</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Log Levels</h2>
+            <table class="docs-table">
+                <tr><th>Level</th><th>Usage</th></tr>
+                <tr><td>DEBUG</td><td>Detailed debugging information</td></tr>
+                <tr><td>INFO</td><td>Normal operation events</td></tr>
+                <tr><td>WARNING</td><td>Unexpected but handled situations</td></tr>
+                <tr><td>ERROR</td><td>Errors requiring attention</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Log Entry Structure</h2>
+            <div class="docs-codeblock">
+{
+    "timestamp": "2025-12-08T17:30:00Z",
+    "category": "auth",
+    "level": "INFO",
+    "message": "User logged in: admin",
+    "symbol": null,
+    "timeframe": null,
+    "details": {
+        "user_id": 1,
+        "email": "admin@example.com",
+        "tier": "premium"
+    }
+}
+            </div>
+
+            <h2 class="docs-h2">Request ID Tracing</h2>
+            <p class="docs-p">
+                Each HTTP request is assigned a unique 8-character request ID (e.g., <code class="docs-code">a1b2c3d4</code>).
+                This ID is included in all logs during that request and returned in the <code class="docs-code">X-Request-ID</code> header.
+            </p>
+        </section>
+
+        <!-- ==================== API ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'api' }">
+            <h1 class="docs-h1">API Reference</h1>
+
+            <p class="docs-p">
+                The CryptoLens API provides programmatic access to patterns, signals, and data.
+                API access requires a Premium subscription.
+            </p>
+
+            <h2 class="docs-h2">Authentication</h2>
+            <p class="docs-p">Include your API key in the <code class="docs-code">X-API-Key</code> header:</p>
+            <div class="docs-codeblock">
+curl -H "X-API-Key: your_api_key" https://app.cryptolens.io/api/patterns
+            </div>
+
+            <h2 class="docs-h2">Public Endpoints</h2>
+            <table class="docs-table">
+                <tr><th>Endpoint</th><th>Method</th><th>Description</th></tr>
+                <tr><td>/api/health</td><td>GET</td><td>Health check (quick or full)</td></tr>
+                <tr><td>/api/health/live</td><td>GET</td><td>Kubernetes liveness probe</td></tr>
+                <tr><td>/api/health/ready</td><td>GET</td><td>Kubernetes readiness probe</td></tr>
+                <tr><td>/api/symbols</td><td>GET</td><td>List tracked symbols</td></tr>
+                <tr><td>/api/candles/{symbol}/{tf}</td><td>GET</td><td>Get candle data</td></tr>
+                <tr><td>/api/patterns</td><td>GET</td><td>Get detected patterns</td></tr>
+                <tr><td>/api/signals</td><td>GET</td><td>Get trade signals</td></tr>
+                <tr><td>/api/matrix</td><td>GET</td><td>Get pattern matrix data</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Protected Endpoints (API Key Required)</h2>
+            <table class="docs-table">
+                <tr><th>Endpoint</th><th>Method</th><th>Rate Limit</th><th>Description</th></tr>
+                <tr><td>/api/scan</td><td>POST</td><td>1/min</td><td>Trigger pattern scan</td></tr>
+                <tr><td>/api/fetch</td><td>POST</td><td>5/min</td><td>Trigger data fetch</td></tr>
+                <tr><td>/api/scan/run</td><td>POST</td><td>1/min</td><td>Run full scan cycle</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Interactive Documentation</h2>
+            <p class="docs-p">
+                Visit <a href="/api/docs" class="text-blue-400">/api/docs</a> for Swagger UI with full API documentation and testing.
+            </p>
+        </section>
+
+        <!-- ==================== CONFIG ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'config' }">
+            <h1 class="docs-h1">Configuration</h1>
+
+            <h2 class="docs-h2">Environment Variables</h2>
+            <table class="docs-table">
+                <tr><th>Variable</th><th>Required</th><th>Description</th></tr>
+                <tr><td>SECRET_KEY</td><td>Yes</td><td>Flask secret key for sessions</td></tr>
+                <tr><td>FLASK_ENV</td><td>Yes</td><td>development or production</td></tr>
+                <tr><td>DATABASE_URL</td><td>Prod</td><td>PostgreSQL connection string</td></tr>
+                <tr><td>MAIL_SERVER</td><td>Yes</td><td>SMTP server for email</td></tr>
+                <tr><td>MAIL_PORT</td><td>Yes</td><td>SMTP port (587 for TLS)</td></tr>
+                <tr><td>MAIL_USERNAME</td><td>Yes</td><td>SMTP username</td></tr>
+                <tr><td>MAIL_PASSWORD</td><td>Yes</td><td>SMTP password/app password</td></tr>
+                <tr><td>NTFY_URL</td><td>Yes</td><td>NTFY server URL</td></tr>
+                <tr><td>LEMONSQUEEZY_API_KEY</td><td>Opt</td><td>LemonSqueezy API key</td></tr>
+                <tr><td>NOWPAYMENTS_API_KEY</td><td>Opt</td><td>NOWPayments API key</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Pattern Detection Config</h2>
+            <p class="docs-p">Located in <code class="docs-code">app/config.py</code>:</p>
+            <div class="docs-codeblock">
+TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
+FVG_MIN_GAP_PERCENT = 0.001  # 0.1% minimum gap size
+ORDER_BLOCK_STRENGTH_MULTIPLIER = 1.5  # 1.5x avg body for OB
+LIQUIDITY_SWING_LOOKBACK = 5  # Candles to look for swings
+            </div>
+
+            <h2 class="docs-h2">Rate Limiting</h2>
+            <p class="docs-p">Default rate limits (can be customized):</p>
+            <ul class="docs-list">
+                <li>Login: 5 attempts per minute</li>
+                <li>Registration: 3 per hour</li>
+                <li>API (protected): varies by endpoint</li>
+            </ul>
+
+            <div class="docs-alert docs-alert-info">
+                <strong>Production Tip:</strong> Use Redis for rate limiting in production:
+                <code class="docs-code">RATELIMIT_STORAGE_URL=redis://localhost:6379/0</code>
+            </div>
+        </section>
+
+        <!-- ==================== DEPLOYMENT ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'deployment' }">
+            <h1 class="docs-h1">Deployment</h1>
+
+            <h2 class="docs-h2">Production Checklist</h2>
+            <ol class="docs-list">
+                <li>Set <code class="docs-code">FLASK_ENV=production</code></li>
+                <li>Use PostgreSQL instead of SQLite</li>
+                <li>Configure HTTPS with valid SSL certificate</li>
+                <li>Set up Redis for rate limiting and caching</li>
+                <li>Configure reverse proxy (nginx)</li>
+                <li>Set up cron jobs for background tasks</li>
+                <li>Configure log aggregation</li>
+                <li>Set up monitoring (Prometheus + Grafana)</li>
+            </ol>
+
+            <h2 class="docs-h2">Gunicorn Configuration</h2>
+            <div class="docs-codeblock">
+# gunicorn.conf.py
+bind = "0.0.0.0:8000"
+workers = 4
+worker_class = "sync"
+timeout = 120
+accesslog = "-"
+errorlog = "-"
+            </div>
+
+            <h2 class="docs-h2">Crontab Setup</h2>
+            <div class="docs-codeblock">
+# Install crontab
+crontab crontab.txt
+
+# crontab.txt contents:
+* * * * * /path/to/venv/bin/python /path/to/scripts/fetch.py
+*/5 * * * * /path/to/venv/bin/python /path/to/scripts/compute_stats.py
+0 3 * * * /path/to/venv/bin/python /path/to/scripts/db_health.py
+            </div>
+
+            <h2 class="docs-h2">Nginx Configuration</h2>
+            <div class="docs-codeblock">
+server {
+    listen 443 ssl http2;
+    server_name app.cryptolens.io;
+
+    ssl_certificate /etc/letsencrypt/live/.../fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/.../privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Request-ID $request_id;
+    }
+}
+            </div>
+        </section>
+
+        <!-- ==================== ADMIN ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'admin' }">
+            <h1 class="docs-h1">Admin Panel</h1>
+
+            <h2 class="docs-h2">Quick Actions</h2>
+            <p class="docs-p">The Admin panel features a Quick Actions bar at the top for common operations:</p>
+            <table class="docs-table">
+                <tr><th>Action</th><th>Color</th><th>Description</th></tr>
+                <tr><td><strong>Scan Now</strong></td><td><span class="docs-badge docs-badge-green">Green</span></td><td>Trigger a manual pattern scan across all symbols</td></tr>
+                <tr><td><strong>Refresh Stats</strong></td><td><span class="docs-badge docs-badge-blue">Blue</span></td><td>Recompute cached statistics for fast page loads</td></tr>
+                <tr><td><strong>Cleanup</strong></td><td><span class="docs-badge docs-badge-orange">Orange</span></td><td>Run database health check and fix data issues</td></tr>
+            </table>
+
+            <h2 class="docs-h2">Navigation Groups</h2>
+            <p class="docs-p">The Admin panel organizes links into logical groups:</p>
+
+            <h3 class="docs-h3">Users</h3>
+            <ul class="docs-list">
+                <li><strong>Users</strong> - View and manage all users</li>
+                <li><strong>Create User</strong> - Create new user accounts</li>
+                <li><strong>Subscriptions</strong> - Manage subscription status</li>
+            </ul>
+
+            <h3 class="docs-h3">System</h3>
+            <ul class="docs-list">
+                <li><strong>Cron Jobs</strong> - Monitor background job status and history</li>
+                <li><strong>Error Logs</strong> - View and manage application errors</li>
+                <li><strong>Settings</strong> - System-wide configuration</li>
+            </ul>
+
+            <h3 class="docs-h3">Communications</h3>
+            <ul class="docs-list">
+                <li><strong>Notifications</strong> - View notification history and test</li>
+                <li><strong>Templates</strong> - Manage notification templates</li>
+                <li><strong>Schedule Broadcast</strong> - Schedule notifications for future delivery</li>
+            </ul>
+
+            <h3 class="docs-h3">Reference</h3>
+            <ul class="docs-list">
+                <li><strong>Documentation</strong> - This documentation page</li>
+                <li><strong>API Docs</strong> - Swagger UI for API reference</li>
+            </ul>
+
+            <h2 class="docs-h2">User Management Actions</h2>
+            <table class="docs-table">
+                <tr><th>Action</th><th>Description</th></tr>
+                <tr><td>Verify Email</td><td>Manually verify user's email</td></tr>
+                <tr><td>Deactivate</td><td>Disable user account (soft delete)</td></tr>
+                <tr><td>Activate</td><td>Re-enable deactivated account</td></tr>
+                <tr><td>Grant Admin</td><td>Give admin privileges</td></tr>
+                <tr><td>Revoke Admin</td><td>Remove admin privileges</td></tr>
+                <tr><td>Extend Subscription</td><td>Add days to subscription</td></tr>
+                <tr><td>Change Tier</td><td>Upgrade/downgrade subscription plan</td></tr>
+            </table>
+
+            <h2 class="docs-h2">"View As" Mode</h2>
+            <p class="docs-p">
+                Temporarily view the application as a specific user tier to test feature restrictions.
+                This does not affect your actual admin privileges. Available tiers: Admin (Full Access), Premium, Pro, Free.
+            </p>
+        </section>
+
+        <!-- ==================== SECURITY ==================== -->
+        <section class="docs-section" :class="{ active: activeSection === 'security' }">
+            <h1 class="docs-h1">Security</h1>
+
+            <h2 class="docs-h2">Authentication Security</h2>
+            <ul class="docs-list">
+                <li><strong>Password Hashing</strong> - Werkzeug PBKDF2-SHA256</li>
+                <li><strong>2FA Support</strong> - TOTP-based two-factor authentication</li>
+                <li><strong>Rate Limiting</strong> - Prevents brute force attacks</li>
+                <li><strong>Account Lockout</strong> - After 5 failed login attempts</li>
+                <li><strong>Session Security</strong> - Secure, HTTP-only cookies</li>
+            </ul>
+
+            <h2 class="docs-h2">CSRF Protection</h2>
+            <p class="docs-p">
+                All forms include CSRF tokens via Flask-WTF. API endpoints are exempt but require API key authentication.
+            </p>
+
+            <h2 class="docs-h2">API Security</h2>
+            <ul class="docs-list">
+                <li><strong>API Keys</strong> - SHA-256 hashed, timing-safe comparison</li>
+                <li><strong>Rate Limiting</strong> - Per-endpoint limits</li>
+                <li><strong>Tier Restrictions</strong> - Premium-only API access</li>
+            </ul>
+
+            <h2 class="docs-h2">Payment Security</h2>
+            <ul class="docs-list">
+                <li><strong>Webhook Verification</strong> - HMAC signature validation</li>
+                <li><strong>No Card Storage</strong> - All payment data handled by providers</li>
+                <li><strong>PCI Compliant</strong> - Via LemonSqueezy integration</li>
+            </ul>
+
+            <div class="docs-alert docs-alert-warning">
+                <strong>Security Reminder:</strong> Change default admin password immediately after setup.
+                Never commit .env files or API keys to version control.
+            </div>
+        </section>
+
+    </main>
+</div>
+{% endblock %}

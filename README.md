@@ -239,22 +239,35 @@ Patterns auto-expire based on timeframe significance:
 
 ## Web Interface
 
+### Navigation Structure
+
+**Header**: Dashboard | Patterns | Portfolio | Analytics | Backtest | API | Admin (admin-only) | [Profile Avatar]
+
 | Page | Features | Free | Pro | Premium |
 |------|----------|------|-----|---------|
 | **Landing** | Public marketing page with pricing | ✓ | ✓ | ✓ |
-| **Dashboard** | Pattern matrix, data freshness, quick scan | BTC/USDT only | 5 symbols | ✓ |
-| **Patterns** | TradingView charts, pattern zones, timeframe selector | ✗ | Last 100 | Full |
-| **Signals** | Symbol search, direction filter, confluence scores | ✗ | Last 50 | Full |
-| **Notifications** | Push alerts via NTFY | 1/day, 10min delay | 20/day | Unlimited |
+| **Dashboard** | Pattern matrix, data freshness | BTC/USDT only | 5 symbols | ✓ |
+| **Patterns** | Tabbed view: Active Patterns + Signals, TradingView charts | ✗ | Last 100/50 | Full |
 | **Portfolio** | Multi-portfolio, trade logging, PnL tracking, journal | ✗ | 1 portfolio, 5tx/day | Unlimited |
-| **Backtest** | Strategy backtesting with historical data | ✗ | ✗ | ✓ |
-| **Stats** | Database stats, candle counts, verification status | BTC/USDT only | 5 symbols | ✓ |
 | **Analytics** | Performance metrics and analysis | ✗ | ✓ | ✓ |
-| **Logs** | Application logs viewer | ✗ | ✗ | Admin |
-| **Settings** | Symbols, notifications, risk parameters | NTFY only | ✓ | ✓ |
-| **Profile** | Account info, 2FA, notification preferences | ✓ | ✓ | ✓ |
-| **Upgrade** | Payment page (card & crypto) | ✓ | ✓ | ✓ |
-| **Admin** | User management, system settings | ✗ | ✗ | Admin |
+| **Backtest** | Strategy backtesting with historical data | ✗ | ✗ | ✓ |
+| **API** | Interactive API documentation (Swagger UI) | ✗ | ✗ | ✓ |
+| **Profile** | Tabbed settings: Account, Security, Notifications, Trading, Subscription | ✓ | ✓ | ✓ |
+| **Admin** | Quick Actions + grouped navigation (Users, System, Communications, Reference) | ✗ | ✗ | Admin |
+
+### Profile Page Tabs
+- **Account**: Username, email, timezone preferences
+- **Security**: Password change, 2FA (TOTP) setup
+- **Notifications**: NTFY setup, direction filter, confluence threshold, quiet hours
+- **Trading**: Risk parameters, default settings
+- **Subscription**: Current plan, upgrade options, payment history
+
+### Admin Panel Features
+- **Quick Actions**: Scan Now, Refresh Stats, Cleanup (DB health check)
+- **Users**: User management, create user, subscriptions
+- **System**: Cron jobs, error logs, settings
+- **Communications**: Notifications, templates, scheduled broadcasts
+- **Reference**: Documentation, API docs
 
 ### Pattern Access by Tier
 
