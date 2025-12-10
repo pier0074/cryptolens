@@ -182,21 +182,78 @@ SUBSCRIPTION_TIERS = {
     },
 }
 
+# Cron job categories
+CRON_CATEGORIES = {
+    'data': {
+        'name': 'Data Collection',
+        'description': 'Jobs that fetch and collect market data',
+        'order': 1,
+    },
+    'analysis': {
+        'name': 'Analysis',
+        'description': 'Jobs that analyze data and detect patterns',
+        'order': 2,
+    },
+    'maintenance': {
+        'name': 'Maintenance',
+        'description': 'Jobs that maintain data quality and cleanup',
+        'order': 3,
+    },
+    'workflow': {
+        'name': 'Workflows',
+        'description': 'Combined jobs that run multiple operations',
+        'order': 4,
+    },
+}
+
 # Cron job types
 CRON_JOB_TYPES = {
     'fetch': {
         'name': 'Data Fetch',
         'description': 'Fetch 1-minute candles from exchange',
         'schedule': '* * * * *',  # Every minute
+        'category': 'data',
     },
     'gaps': {
         'name': 'Gap Fill',
         'description': 'Fill gaps in historical data',
         'schedule': '0 * * * *',  # Every hour
+        'category': 'data',
+    },
+    'historical_fetch': {
+        'name': 'Historical Fetch',
+        'description': 'Fetch historical candle data from target date',
+        'schedule': 'manual',
+        'category': 'data',
+    },
+    'pattern_scan': {
+        'name': 'Pattern Scan',
+        'description': 'Scan candle data for chart patterns (FVG, Order Blocks, Liquidity)',
+        'schedule': 'manual',
+        'category': 'analysis',
+    },
+    'stats': {
+        'name': 'Stats Refresh',
+        'description': 'Recompute database statistics cache',
+        'schedule': 'manual',
+        'category': 'analysis',
     },
     'cleanup': {
         'name': 'Cleanup',
         'description': 'Clean up old logs and expired data',
         'schedule': '0 0 * * *',  # Daily at midnight
+        'category': 'maintenance',
+    },
+    'sanitize': {
+        'name': 'Sanitize',
+        'description': 'Verify candle data integrity (OHLCV, gaps, alignment)',
+        'schedule': '0 3 * * *',  # Daily at 3 AM
+        'category': 'maintenance',
+    },
+    'full_cycle': {
+        'name': 'Full Cycle',
+        'description': 'Complete cycle: fetch → pattern scan → stats refresh',
+        'schedule': 'manual',
+        'category': 'workflow',
     },
 }

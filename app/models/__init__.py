@@ -20,6 +20,7 @@ from app.models.base import (
     SUBSCRIPTION_PLANS,
     SUBSCRIPTION_TIERS,
     CRON_JOB_TYPES,
+    CRON_CATEGORIES,
 )
 
 # System models
@@ -86,6 +87,7 @@ __all__ = [
     'SUBSCRIPTION_PLANS',
     'SUBSCRIPTION_TIERS',
     'CRON_JOB_TYPES',
+    'CRON_CATEGORIES',
     # System models
     'Log',
     'Setting',

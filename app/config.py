@@ -89,18 +89,20 @@ class Config:
     ]
 
     # Timeframes
-    # UI displays these 6 timeframes
-    TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
+    # UI displays these 8 timeframes
+    TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']
     # Pattern detection excludes 1m (too noisy)
-    PATTERN_TIMEFRAMES = ['5m', '15m', '1h', '4h', '1d']
-    # Note: scripts/fetch.py aggregates additional timeframes (30m, 2h) for data completeness
+    PATTERN_TIMEFRAMES = ['5m', '15m', '30m', '1h', '2h', '4h', '1d']
 
     # Exchange (binance has better rate limits and 1000 candles/request)
     EXCHANGE = 'binance'
 
     # Data fetching
     BATCH_SIZE = 1000  # Binance allows 1000 candles per request
-    RATE_LIMIT_DELAY = 0.1  # Minimum delay between API calls (seconds)
+    RATE_LIMIT_DELAY = 0.2  # Minimum delay between API calls (seconds)
+    MAX_CONCURRENT_REQUESTS = 5  # Max parallel API requests (prevents rate limiting)
+    RATE_LIMIT_RETRY_DELAY = 2.0  # Delay before retrying after rate limit error (seconds)
+    MAX_RETRIES = 3  # Max retries for rate-limited requests
 
     # Pattern detection
     MIN_ZONE_PERCENT = 0.15  # Minimum zone size as % of price

@@ -11,6 +11,9 @@ from datetime import datetime, timedelta, timezone
 def get_allowed_pattern_types(user):
     """Get pattern types allowed for user's tier."""
     tier = get_effective_tier(user)
+    # None means full admin access - all patterns allowed
+    if tier is None:
+        return None
     tier_config = SUBSCRIPTION_TIERS.get(tier, SUBSCRIPTION_TIERS['free'])
     allowed = tier_config.get('pattern_types')
     if allowed is None:

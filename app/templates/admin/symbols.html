@@ -1,0 +1,554 @@
+{% extends "base.html" %}
+
+{% block title %}Symbols Management - CryptoLens{% endblock %}
+
+{% block content %}
+<div x-data="symbolsApp()" x-init="init()" class="max-w-7xl mx-auto">
+    <!-- Header -->
+    <div class="flex justify-between items-center mb-6">
+        <div>
+            <h1 class="text-2xl font-bold">Symbols Management</h1>
+            <p class="text-gray-400 text-sm mt-1">Manage which symbols are fetched and tracked</p>
+        </div>
+        <a href="{{ url_for('admin.index') }}" class="text-gray-400 hover:text-white">
+            &larr; Back to Admin
+        </a>
+    </div>
+
+    <!-- Stats Bar -->
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+        <div class="bg-card rounded-lg p-4">
+            <p class="text-gray-400 text-xs uppercase">Total Symbols</p>
+            <p class="text-2xl font-bold" x-text="symbols.length">{{ symbols|length }}</p>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <p class="text-gray-400 text-xs uppercase">Active</p>
+            <p class="text-2xl font-bold text-green-400" x-text="symbols.filter(s => s.is_active).length">{{ symbols|selectattr('is_active')|list|length }}</p>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <p class="text-gray-400 text-xs uppercase">Mandatory</p>
+            <p class="text-2xl font-bold text-blue-400">{{ mandatory_symbols|length }}</p>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <p class="text-gray-400 text-xs uppercase">Inactive</p>
+            <p class="text-2xl font-bold text-gray-500" x-text="symbols.filter(s => !s.is_active).length">{{ symbols|rejectattr('is_active')|list|length }}</p>
+        </div>
+    </div>
+
+    <!-- Data Coverage Row -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div class="bg-card rounded-lg p-4 flex items-center justify-between">
+            <div>
+                <p class="text-gray-400 text-xs uppercase">Earliest Data</p>
+                <p class="text-lg font-bold" x-text="getEarliestDate()">Loading...</p>
+            </div>
+        </div>
+        <div class="bg-card rounded-lg p-4 flex items-center justify-between">
+            <div>
+                <p class="text-gray-400 text-xs uppercase">Target Start Date</p>
+                <p class="text-lg font-bold text-green-400">{{ fetch_start_date or '2024-01-01' }}</p>
+            </div>
+        </div>
+        <div class="bg-card rounded-lg p-4">
+            <form action="{{ url_for('admin.save_fetch_settings') }}" method="POST" class="flex items-center gap-3">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <label class="text-gray-400 text-xs uppercase whitespace-nowrap">Set Target</label>
+                <input type="date" name="fetch_start_date" value="{{ fetch_start_date or '2024-01-01' }}"
+                       class="flex-1 bg-darker border border-gray-600 rounded px-3 py-2 text-sm text-white">
+                <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-medium">
+                    Save
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="bg-card rounded-lg p-4 mb-6">
+        <div class="flex flex-wrap gap-4 items-center">
+            <!-- Search -->
+            <div class="flex-1 min-w-[200px]">
+                <input type="text" x-model="searchQuery" placeholder="Search symbols..."
+                       class="w-full bg-darker border border-gray-700 rounded px-3 py-2 text-sm focus:border-blue-500 focus:outline-none">
+            </div>
+
+            <!-- Filter -->
+            <div class="flex gap-2">
+                <button @click="filter = 'all'"
+                        :class="filter === 'all' ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'"
+                        class="px-3 py-2 rounded text-sm transition">All</button>
+                <button @click="filter = 'active'"
+                        :class="filter === 'active' ? 'bg-green-600' : 'bg-gray-700 hover:bg-gray-600'"
+                        class="px-3 py-2 rounded text-sm transition">Active</button>
+                <button @click="filter = 'inactive'"
+                        :class="filter === 'inactive' ? 'bg-gray-600' : 'bg-gray-700 hover:bg-gray-600'"
+                        class="px-3 py-2 rounded text-sm transition">Inactive</button>
+                <button @click="filter = 'mandatory'"
+                        :class="filter === 'mandatory' ? 'bg-purple-600' : 'bg-gray-700 hover:bg-gray-600'"
+                        class="px-3 py-2 rounded text-sm transition">Mandatory</button>
+            </div>
+
+            <!-- Actions -->
+            <div class="flex gap-2">
+                <button @click="showAddModal = true"
+                        class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded text-sm font-medium transition flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"></path>
+                    </svg>
+                    Add Symbol
+                </button>
+                <button @click="fetchExchangeSymbols()" :disabled="loadingExchange"
+                        class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm font-medium transition flex items-center gap-2 disabled:opacity-50">
+                    <svg class="w-4 h-4" :class="loadingExchange && 'animate-spin'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                    </svg>
+                    <span x-text="loadingExchange ? 'Loading...' : 'Refresh from Exchange'"></span>
+                </button>
+            </div>
+        </div>
+
+        <!-- Bulk Actions -->
+        <div x-show="selectedIds.length > 0" x-cloak class="mt-4 pt-4 border-t border-gray-700 flex items-center gap-4">
+            <span class="text-sm text-gray-400">
+                <span x-text="selectedIds.length"></span> selected
+            </span>
+            <button @click="bulkAction('enable')" class="bg-green-600 hover:bg-green-700 px-3 py-1 rounded text-sm">
+                Enable All
+            </button>
+            <button @click="bulkAction('disable')" class="bg-red-600 hover:bg-red-700 px-3 py-1 rounded text-sm">
+                Disable All
+            </button>
+            <button @click="selectedIds = []" class="text-gray-400 hover:text-white text-sm">
+                Clear Selection
+            </button>
+        </div>
+    </div>
+
+    <!-- Symbols Grid -->
+    <div class="bg-card rounded-lg overflow-hidden">
+        <!-- Header -->
+        <div class="bg-darker px-4 py-3 border-b border-gray-700 flex items-center">
+            <label class="flex items-center mr-4">
+                <input type="checkbox" @change="toggleSelectAll($event)"
+                       :checked="selectedIds.length === filteredSymbols.length && filteredSymbols.length > 0"
+                       class="mr-2">
+                <span class="text-sm text-gray-400">Select All</span>
+            </label>
+            <span class="text-sm text-gray-400">
+                Showing <span x-text="filteredSymbols.length"></span> symbols
+            </span>
+        </div>
+
+        <!-- Symbol List -->
+        <div class="divide-y divide-gray-800 max-h-[600px] overflow-y-auto">
+            <template x-for="symbol in filteredSymbols" :key="symbol.id">
+                <div class="flex items-center px-4 py-3 hover:bg-darker/50 transition"
+                     :class="{'opacity-50': !symbol.is_active}">
+                    <!-- Checkbox -->
+                    <input type="checkbox"
+                           :value="symbol.id"
+                           :checked="selectedIds.includes(symbol.id)"
+                           @change="toggleSelect(symbol.id)"
+                           class="mr-4">
+
+                    <!-- Symbol Name -->
+                    <div class="flex-1 min-w-[150px]">
+                        <div class="flex items-center gap-2">
+                            <span class="font-mono font-medium" x-text="symbol.symbol"></span>
+                            <template x-if="symbol.is_mandatory">
+                                <span class="px-1.5 py-0.5 bg-purple-900/50 text-purple-300 text-xs rounded">mandatory</span>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Data Range -->
+                    <div class="flex-1 text-sm text-gray-400 hidden md:block">
+                        <template x-if="symbol.earliest_ts">
+                            <span>
+                                <span x-text="formatDate(symbol.earliest_ts)"></span>
+                                <span class="text-gray-600 mx-1">&rarr;</span>
+                                <span x-text="formatDate(symbol.latest_ts)"></span>
+                            </span>
+                        </template>
+                        <template x-if="!symbol.earliest_ts">
+                            <span class="text-gray-600">No data</span>
+                        </template>
+                    </div>
+
+                    <!-- Candle Count -->
+                    <div class="w-24 text-right text-sm text-gray-400 hidden lg:block">
+                        <span x-text="symbol.candle_count ? symbol.candle_count.toLocaleString() : '0'"></span>
+                        <span class="text-gray-600 text-xs">candles</span>
+                    </div>
+
+                    <!-- Fetch Historical Button (only for active symbols) -->
+                    <div class="w-10 flex justify-center">
+                        <template x-if="symbol.is_active">
+                            <button @click="fetchHistorical(symbol)"
+                                    :disabled="symbol.fetching"
+                                    class="p-1.5 rounded transition disabled:opacity-50 text-gray-400 hover:text-white hover:bg-gray-700"
+                                    title="Fetch historical data from target start date">
+                                <svg class="w-4 h-4" :class="symbol.fetching && 'animate-spin'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                </svg>
+                            </button>
+                        </template>
+                    </div>
+
+                    <!-- Status Toggle -->
+                    <div class="w-16 flex justify-end">
+                        <button @click="toggleSymbol(symbol)"
+                                :disabled="symbol.is_mandatory && symbol.is_active"
+                                :class="symbol.is_active ? 'bg-green-600 hover:bg-green-700' : 'bg-gray-700 hover:bg-gray-600'"
+                                class="px-3 py-1 rounded text-sm transition disabled:opacity-50 disabled:cursor-not-allowed">
+                            <span x-text="symbol.is_active ? 'Active' : 'Off'"></span>
+                        </button>
+                    </div>
+                </div>
+            </template>
+
+            <!-- Empty State -->
+            <template x-if="filteredSymbols.length === 0">
+                <div class="px-4 py-12 text-center text-gray-500">
+                    <svg class="w-12 h-12 mx-auto mb-4 opacity-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.172 16.172a4 4 0 015.656 0M9 10h.01M15 10h.01M12 12h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                    </svg>
+                    <p>No symbols match your search</p>
+                </div>
+            </template>
+        </div>
+    </div>
+
+    <!-- Add Symbol Modal -->
+    <div x-show="showAddModal" x-cloak
+         class="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
+         @click.self="showAddModal = false">
+        <div class="bg-card rounded-lg p-6 w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h2 class="text-xl font-bold">Add Symbol</h2>
+                <button @click="showAddModal = false" class="text-gray-400 hover:text-white">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+                    </svg>
+                </button>
+            </div>
+
+            <!-- Manual Entry -->
+            <div class="mb-4">
+                <label class="block text-sm text-gray-400 mb-1">Enter symbol manually</label>
+                <div class="flex gap-2">
+                    <input type="text" x-model="newSymbol" placeholder="e.g., DOGE/USDT"
+                           @keyup.enter="addSymbol()"
+                           class="flex-1 bg-darker border border-gray-700 rounded px-3 py-2 uppercase">
+                    <button @click="addSymbol()" :disabled="!newSymbol"
+                            class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded disabled:opacity-50">
+                        Add
+                    </button>
+                </div>
+                <p x-show="addError" x-text="addError" class="text-red-400 text-sm mt-1"></p>
+            </div>
+
+            <!-- Exchange Symbols -->
+            <div class="flex-1 overflow-hidden flex flex-col">
+                <div class="flex justify-between items-center mb-2">
+                    <label class="text-sm text-gray-400">Or select from exchange</label>
+                    <span class="text-xs text-gray-500" x-text="exchangeSymbols.length + ' available'"></span>
+                </div>
+
+                <!-- Search Exchange -->
+                <input type="text" x-model="exchangeSearch" placeholder="Search exchange symbols..."
+                       class="w-full bg-darker border border-gray-700 rounded px-3 py-2 text-sm mb-2">
+
+                <!-- Exchange Symbol List -->
+                <div class="flex-1 overflow-y-auto bg-darker rounded border border-gray-700">
+                    <template x-if="loadingExchange">
+                        <div class="p-4 text-center text-gray-500">
+                            <svg class="w-6 h-6 animate-spin mx-auto mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                            </svg>
+                            Loading symbols from Binance...
+                        </div>
+                    </template>
+                    <template x-if="!loadingExchange && filteredExchangeSymbols.length === 0">
+                        <div class="p-4 text-center text-gray-500">
+                            <p x-show="exchangeSymbols.length === 0">Click "Refresh from Exchange" to load available symbols</p>
+                            <p x-show="exchangeSymbols.length > 0">No matching symbols</p>
+                        </div>
+                    </template>
+                    <div class="divide-y divide-gray-800">
+                        <template x-for="sym in filteredExchangeSymbols.slice(0, 100)" :key="sym">
+                            <div class="flex items-center justify-between px-3 py-2 hover:bg-gray-800/50">
+                                <span class="font-mono text-sm" x-text="sym"></span>
+                                <template x-if="isAlreadyAdded(sym)">
+                                    <span class="text-xs text-gray-500">Added</span>
+                                </template>
+                                <template x-if="!isAlreadyAdded(sym)">
+                                    <button @click="addSymbolFromExchange(sym)"
+                                            class="text-xs bg-green-600 hover:bg-green-700 px-2 py-1 rounded">
+                                        Add
+                                    </button>
+                                </template>
+                            </div>
+                        </template>
+                    </div>
+                    <template x-if="filteredExchangeSymbols.length > 100">
+                        <div class="px-3 py-2 text-center text-gray-500 text-sm border-t border-gray-800">
+                            Showing first 100 of <span x-text="filteredExchangeSymbols.length"></span> results
+                        </div>
+                    </template>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div x-show="toast.show" x-cloak
+         x-transition:enter="transition ease-out duration-300"
+         x-transition:enter-start="opacity-0 translate-y-2"
+         x-transition:enter-end="opacity-100 translate-y-0"
+         x-transition:leave="transition ease-in duration-200"
+         x-transition:leave-start="opacity-100 translate-y-0"
+         x-transition:leave-end="opacity-0 translate-y-2"
+         :class="toast.type === 'success' ? 'bg-green-600' : toast.type === 'error' ? 'bg-red-600' : 'bg-blue-600'"
+         class="fixed bottom-4 right-4 px-4 py-3 rounded-lg shadow-lg text-white z-50">
+        <span x-text="toast.message"></span>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function symbolsApp() {
+    return {
+        symbols: [],
+        exchangeSymbols: [],
+        selectedIds: [],
+        searchQuery: '',
+        exchangeSearch: '',
+        filter: 'all',
+        showAddModal: false,
+        newSymbol: '',
+        addError: '',
+        loadingExchange: false,
+        toast: { show: false, message: '', type: 'success' },
+        mandatorySymbols: {{ mandatory_symbols|tojson }},
+
+        init() {
+            this.loadSymbols();
+        },
+
+        async loadSymbols() {
+            try {
+                const response = await fetch('/admin/api/symbols');
+                const data = await response.json();
+                this.symbols = data.map(s => ({
+                    ...s,
+                    is_mandatory: this.mandatorySymbols.includes(s.symbol),
+                    fetching: false
+                }));
+            } catch (e) {
+                this.showToast('Failed to load symbols', 'error');
+            }
+        },
+
+        get filteredSymbols() {
+            return this.symbols.filter(s => {
+                // Search filter
+                if (this.searchQuery && !s.symbol.toLowerCase().includes(this.searchQuery.toLowerCase())) {
+                    return false;
+                }
+                // Status filter
+                if (this.filter === 'active' && !s.is_active) return false;
+                if (this.filter === 'inactive' && s.is_active) return false;
+                if (this.filter === 'mandatory' && !s.is_mandatory) return false;
+                return true;
+            });
+        },
+
+        get filteredExchangeSymbols() {
+            if (!this.exchangeSearch) return this.exchangeSymbols;
+            const query = this.exchangeSearch.toUpperCase();
+            return this.exchangeSymbols.filter(s => s.includes(query));
+        },
+
+        formatDate(ts) {
+            if (!ts) return '-';
+            const d = new Date(ts);
+            return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+        },
+
+        getEarliestDate() {
+            const withData = this.symbols.filter(s => s.earliest_ts);
+            if (withData.length === 0) return 'No data';
+            const earliest = Math.min(...withData.map(s => s.earliest_ts));
+            return this.formatDate(earliest);
+        },
+
+        isAlreadyAdded(symbol) {
+            return this.symbols.some(s => s.symbol === symbol);
+        },
+
+        toggleSelect(id) {
+            const idx = this.selectedIds.indexOf(id);
+            if (idx === -1) {
+                this.selectedIds.push(id);
+            } else {
+                this.selectedIds.splice(idx, 1);
+            }
+        },
+
+        toggleSelectAll(event) {
+            if (event.target.checked) {
+                this.selectedIds = this.filteredSymbols.map(s => s.id);
+            } else {
+                this.selectedIds = [];
+            }
+        },
+
+        async toggleSymbol(symbol) {
+            if (symbol.is_mandatory && symbol.is_active) {
+                this.showToast(`${symbol.symbol} is mandatory and cannot be disabled`, 'error');
+                return;
+            }
+
+            try {
+                const response = await fetch('/admin/api/symbols/toggle', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    },
+                    body: JSON.stringify({ id: symbol.id, action: 'toggle' })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    symbol.is_active = data.symbol.is_active;
+                    this.showToast(`${symbol.symbol} ${symbol.is_active ? 'enabled' : 'disabled'}`, 'success');
+                } else {
+                    this.showToast(data.error, 'error');
+                }
+            } catch (e) {
+                this.showToast('Failed to toggle symbol', 'error');
+            }
+        },
+
+        async bulkAction(action) {
+            try {
+                const response = await fetch('/admin/api/symbols/bulk', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    },
+                    body: JSON.stringify({ ids: this.selectedIds, action })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    await this.loadSymbols();
+                    this.selectedIds = [];
+                    let msg = `${data.updated} symbols ${action}d`;
+                    if (data.skipped > 0) {
+                        msg += ` (${data.skipped} mandatory skipped)`;
+                    }
+                    this.showToast(msg, 'success');
+                } else {
+                    this.showToast(data.error, 'error');
+                }
+            } catch (e) {
+                this.showToast('Bulk action failed', 'error');
+            }
+        },
+
+        async fetchExchangeSymbols() {
+            this.loadingExchange = true;
+            try {
+                const response = await fetch('/admin/api/symbols/exchange');
+                const data = await response.json();
+                if (data.success) {
+                    this.exchangeSymbols = data.symbols;
+                    // Reload symbols list to show newly added ones
+                    if (data.added > 0) {
+                        await this.loadSymbols();
+                        this.showToast(`Loaded ${data.count} symbols from Binance, added ${data.added} new to DB`, 'success');
+                    } else {
+                        this.showToast(`Loaded ${data.count} symbols from Binance (all already in DB)`, 'success');
+                    }
+                } else {
+                    this.showToast(data.error || 'Failed to fetch symbols', 'error');
+                }
+            } catch (e) {
+                this.showToast('Failed to connect to exchange', 'error');
+            } finally {
+                this.loadingExchange = false;
+            }
+        },
+
+        async addSymbol() {
+            if (!this.newSymbol) return;
+            this.addError = '';
+
+            try {
+                const response = await fetch('/admin/api/symbols/add', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    },
+                    body: JSON.stringify({ symbol: this.newSymbol })
+                });
+                const data = await response.json();
+                if (data.success) {
+                    await this.loadSymbols();
+                    this.newSymbol = '';
+                    this.showAddModal = false;
+                    this.showToast(`${data.symbol.symbol} added`, 'success');
+                } else {
+                    this.addError = data.error;
+                }
+            } catch (e) {
+                this.addError = 'Failed to add symbol';
+            }
+        },
+
+        async addSymbolFromExchange(symbol) {
+            this.newSymbol = symbol;
+            await this.addSymbol();
+        },
+
+        async fetchHistorical(symbol) {
+            if (symbol.fetching) return;
+
+            symbol.fetching = true;
+            try {
+                const response = await fetch(`/admin/api/symbols/${symbol.id}/fetch-historical`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    }
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.showToast(`Historical fetch started for ${symbol.symbol}. Check Cron Jobs for progress.`, 'success');
+                } else {
+                    this.showToast(data.error || 'Failed to start fetch', 'error');
+                }
+            } catch (e) {
+                this.showToast('Failed to start historical fetch', 'error');
+            } finally {
+                // Keep showing as fetching for a moment, then reset
+                setTimeout(() => {
+                    symbol.fetching = false;
+                }, 2000);
+            }
+        },
+
+        showToast(message, type = 'success') {
+            this.toast = { show: true, message, type };
+            setTimeout(() => {
+                this.toast.show = false;
+            }, 3000);
+        }
+    };
+}
+</script>
+{% endblock %}

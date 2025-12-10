@@ -206,7 +206,7 @@ async function loadStats() {
         // Update timeframe counts
         const tfContainer = document.getElementById('tf-counts');
         tfContainer.innerHTML = '';
-        const timeframes = ['1m', '5m', '15m', '1h', '4h', '1d'];
+        const timeframes = ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '1d'];
         for (const tf of timeframes) {
             const count = data.overall_tf_counts[tf] || 0;
             tfContainer.innerHTML += `

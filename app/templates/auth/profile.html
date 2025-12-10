@@ -692,12 +692,13 @@
                 <!-- Admin: Test subscription change -->
                 <div class="mt-6 pt-4 border-t border-gray-700">
                     <h3 class="font-semibold text-yellow-400 mb-2">Admin: Test Subscription</h3>
+                    <p class="text-xs text-gray-500 mb-2">Tip: Use Admin Panel > "View As" to test tiers without changing your subscription.</p>
                     <form method="POST" action="{{ url_for('auth.change_subscription') }}" class="space-y-2">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                         <select name="plan" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
-                            <option value="free">Free</option>
-                            <option value="pro">Pro</option>
-                            <option value="premium">Premium</option>
+                            <option value="free" {% if user.subscription_tier == 'free' %}selected{% endif %}>Free</option>
+                            <option value="pro" {% if user.subscription_tier == 'pro' %}selected{% endif %}>Pro</option>
+                            <option value="premium" {% if user.subscription_tier == 'premium' %}selected{% endif %}>Premium</option>
                         </select>
                         <button type="submit" class="w-full bg-yellow-600 hover:bg-yellow-700 py-2 rounded text-sm font-medium">
                             Change Plan (Test)

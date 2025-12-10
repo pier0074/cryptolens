@@ -13,7 +13,7 @@ from app.services.subscription import (
     reactivate_subscription, get_subscription_stats, get_expiring_soon,
     SubscriptionError
 )
-from app.models import User, Subscription, SUBSCRIPTION_PLANS, CronJob, CronRun, CRON_JOB_TYPES
+from app.models import User, Subscription, SUBSCRIPTION_PLANS, CronJob, CronRun, CRON_JOB_TYPES, CRON_CATEGORIES
 from app import db
 from datetime import datetime, timezone, timedelta
 
@@ -428,7 +428,32 @@ def set_view_as():
 # =============================================================================
 
 def ensure_cron_jobs():
-    """Ensure all cron jobs exist in database"""
+    """Ensure all cron jobs exist in database and clean up old ones"""
+    # Clean up old/renamed jobs
+    old_jobs = ['scan']  # Old job names to remove
+    for old_name in old_jobs:
+        old_job = CronJob.query.filter_by(name=old_name).first()
+        if old_job:
+            # Delete associated runs first
+            CronRun.query.filter_by(job_id=old_job.id).delete()
+            db.session.delete(old_job)
+
+    # Clean up stuck "running" entries (older than 1 hour without ended_at)
+    one_hour_ago = datetime.now(timezone.utc) - timedelta(hours=1)
+    stuck_runs = CronRun.query.filter(
+        CronRun.ended_at.is_(None),
+        CronRun.started_at < one_hour_ago
+    ).all()
+    for run in stuck_runs:
+        run.ended_at = datetime.now(timezone.utc)
+        started_at = run.started_at
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
+        run.duration_ms = int((run.ended_at - started_at).total_seconds() * 1000)
+        run.success = False
+        run.error_message = 'Marked as failed: exceeded 1 hour timeout'
+
+    # Ensure all current job types exist
     for key, config in CRON_JOB_TYPES.items():
         job = CronJob.query.filter_by(name=key).first()
         if not job:
@@ -449,6 +474,21 @@ def crons():
     ensure_cron_jobs()
     jobs = CronJob.query.order_by(CronJob.name).all()
 
+    # Group jobs by category
+    jobs_by_category = {}
+    for job in jobs:
+        job_config = CRON_JOB_TYPES.get(job.name, {})
+        category = job_config.get('category', 'other')
+        if category not in jobs_by_category:
+            jobs_by_category[category] = []
+        jobs_by_category[category].append(job)
+
+    # Sort categories by order
+    sorted_categories = sorted(
+        CRON_CATEGORIES.keys(),
+        key=lambda c: CRON_CATEGORIES[c].get('order', 99)
+    )
+
     # Get recent runs for history
     recent_runs = CronRun.query.order_by(CronRun.started_at.desc()).limit(50).all()
 
@@ -462,10 +502,13 @@ def crons():
 
     return render_template('admin/crons.html',
                            jobs=jobs,
+                           jobs_by_category=jobs_by_category,
+                           sorted_categories=sorted_categories,
                            recent_runs=recent_runs,
                            total_runs_24h=total_runs_24h,
                            failed_runs_24h=failed_runs_24h,
-                           cron_types=CRON_JOB_TYPES)
+                           cron_types=CRON_JOB_TYPES,
+                           cron_categories=CRON_CATEGORIES)
 
 
 @admin_bp.route('/crons/<int:job_id>/toggle', methods=['POST'])
@@ -971,6 +1014,339 @@ def api_audience_count():
     return jsonify({'count': count, 'target': target})
 
 
+# ----- SYMBOLS MANAGEMENT -----
+
+# Mandatory symbols that cannot be disabled
+MANDATORY_SYMBOLS = ['BTC/USDT', 'ETH/USDT', 'BNB/USDT', 'SOL/USDT', 'XRP/USDT']
+
+
+@admin_bp.route('/symbols')
+@admin_required
+def symbols():
+    """Symbols management page"""
+    from app.models import Symbol, Candle, Setting
+    from sqlalchemy import func
+
+    symbols_list = Symbol.query.order_by(Symbol.symbol).all()
+
+    # Get earliest candle date for each symbol
+    symbol_stats = {}
+    for sym in symbols_list:
+        earliest = db.session.query(func.min(Candle.timestamp)).filter(
+            Candle.symbol_id == sym.id,
+            Candle.timeframe == '1m'
+        ).scalar()
+        latest = db.session.query(func.max(Candle.timestamp)).filter(
+            Candle.symbol_id == sym.id,
+            Candle.timeframe == '1m'
+        ).scalar()
+        candle_count = Candle.query.filter_by(symbol_id=sym.id, timeframe='1m').count()
+
+        symbol_stats[sym.id] = {
+            'earliest': earliest,
+            'latest': latest,
+            'count': candle_count
+        }
+
+    # Get fetch start date setting
+    fetch_start_setting = Setting.query.filter_by(key='fetch_start_date').first()
+    fetch_start_date = fetch_start_setting.value if fetch_start_setting else '2024-01-01'
+
+    return render_template('admin/symbols.html',
+                           symbols=symbols_list,
+                           symbol_stats=symbol_stats,
+                           mandatory_symbols=MANDATORY_SYMBOLS,
+                           fetch_start_date=fetch_start_date)
+
+
+@admin_bp.route('/api/symbols', methods=['GET'])
+@admin_required
+def api_symbols():
+    """Get all symbols with stats"""
+    from app.models import Symbol, Candle
+    from sqlalchemy import func
+
+    symbols_list = Symbol.query.order_by(Symbol.symbol).all()
+    result = []
+
+    for sym in symbols_list:
+        earliest = db.session.query(func.min(Candle.timestamp)).filter(
+            Candle.symbol_id == sym.id,
+            Candle.timeframe == '1m'
+        ).scalar()
+        latest = db.session.query(func.max(Candle.timestamp)).filter(
+            Candle.symbol_id == sym.id,
+            Candle.timeframe == '1m'
+        ).scalar()
+        candle_count = Candle.query.filter_by(symbol_id=sym.id, timeframe='1m').count()
+
+        result.append({
+            **sym.to_dict(),
+            'earliest_ts': earliest,
+            'latest_ts': latest,
+            'candle_count': candle_count,
+            'is_mandatory': sym.symbol in MANDATORY_SYMBOLS
+        })
+
+    return jsonify(result)
+
+
+@admin_bp.route('/api/symbols/exchange', methods=['GET'])
+@admin_required
+def api_exchange_symbols():
+    """Fetch available symbols from exchange and save to DB"""
+    import ccxt
+    from app.models import Symbol
+    from app.services.logger import log_admin
+
+    log_admin("Symbols: Fetching available symbols from Binance exchange...")
+
+    try:
+        exchange = ccxt.binance({'enableRateLimit': True})
+        markets = exchange.load_markets()
+
+        # Filter USDT pairs only, sorted alphabetically
+        usdt_pairs = sorted([
+            symbol for symbol in markets.keys()
+            if symbol.endswith('/USDT') and markets[symbol].get('active', True)
+        ])
+
+        log_admin(f"Symbols: Found {len(usdt_pairs)} USDT pairs on Binance")
+
+        # Save all to database (inactive by default, except mandatory)
+        existing = {s.symbol for s in Symbol.query.all()}
+        added = 0
+
+        for symbol_name in usdt_pairs:
+            if symbol_name not in existing:
+                is_mandatory = symbol_name in MANDATORY_SYMBOLS
+                new_symbol = Symbol(
+                    symbol=symbol_name,
+                    exchange='binance',
+                    is_active=is_mandatory,  # Only mandatory symbols active by default
+                    notify_enabled=is_mandatory
+                )
+                db.session.add(new_symbol)
+                added += 1
+
+        if added > 0:
+            db.session.commit()
+            log_admin(f"Symbols: Added {added} new symbols to database (inactive by default)")
+        else:
+            log_admin("Symbols: No new symbols to add (all already in database)")
+
+        return jsonify({
+            'success': True,
+            'symbols': usdt_pairs,
+            'count': len(usdt_pairs),
+            'added': added,
+            'existing': len(existing)
+        })
+    except Exception as e:
+        db.session.rollback()
+        log_admin(f"Symbols: ERROR fetching from exchange - {str(e)}")
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+
+@admin_bp.route('/api/symbols/toggle', methods=['POST'])
+@admin_required
+def api_toggle_symbol():
+    """Toggle symbol active status"""
+    from app.models import Symbol
+    from app.services.logger import log_admin
+
+    data = request.get_json()
+    symbol_id = data.get('id')
+    action = data.get('action', 'toggle')  # toggle, enable, disable
+
+    symbol = db.session.get(Symbol, symbol_id)
+    if not symbol:
+        return jsonify({'success': False, 'error': 'Symbol not found'}), 404
+
+    # Prevent disabling mandatory symbols
+    if symbol.symbol in MANDATORY_SYMBOLS and action in ['toggle', 'disable']:
+        if symbol.is_active and action == 'toggle':
+            log_admin(f"Symbols: Blocked attempt to disable mandatory symbol {symbol.symbol}")
+            return jsonify({
+                'success': False,
+                'error': f'{symbol.symbol} is mandatory and cannot be disabled'
+            }), 400
+        if action == 'disable':
+            log_admin(f"Symbols: Blocked attempt to disable mandatory symbol {symbol.symbol}")
+            return jsonify({
+                'success': False,
+                'error': f'{symbol.symbol} is mandatory and cannot be disabled'
+            }), 400
+
+    old_state = symbol.is_active
+    if action == 'toggle':
+        symbol.is_active = not symbol.is_active
+    elif action == 'enable':
+        symbol.is_active = True
+    elif action == 'disable':
+        symbol.is_active = False
+
+    db.session.commit()
+
+    new_state = "enabled" if symbol.is_active else "disabled"
+    log_admin(f"Symbols: {symbol.symbol} {new_state}")
+
+    return jsonify({
+        'success': True,
+        'symbol': symbol.to_dict()
+    })
+
+
+@admin_bp.route('/api/symbols/bulk', methods=['POST'])
+@admin_required
+def api_bulk_symbols():
+    """Bulk enable/disable symbols"""
+    from app.models import Symbol
+    from app.services.logger import log_admin
+
+    data = request.get_json()
+    symbol_ids = data.get('ids', [])
+    action = data.get('action')  # enable, disable
+
+    if not symbol_ids or action not in ['enable', 'disable']:
+        return jsonify({'success': False, 'error': 'Invalid request'}), 400
+
+    log_admin(f"Symbols: Bulk {action} requested for {len(symbol_ids)} symbols")
+
+    updated = 0
+    skipped = 0
+
+    for sid in symbol_ids:
+        symbol = db.session.get(Symbol, sid)
+        if not symbol:
+            continue
+
+        # Skip mandatory symbols for disable action
+        if action == 'disable' and symbol.symbol in MANDATORY_SYMBOLS:
+            skipped += 1
+            continue
+
+        symbol.is_active = (action == 'enable')
+        updated += 1
+
+    db.session.commit()
+
+    log_admin(f"Symbols: Bulk {action} complete - {updated} updated, {skipped} mandatory skipped")
+
+    return jsonify({
+        'success': True,
+        'updated': updated,
+        'skipped': skipped
+    })
+
+
+@admin_bp.route('/api/symbols/add', methods=['POST'])
+@admin_required
+def api_add_symbol():
+    """Add a new symbol"""
+    from app.models import Symbol
+    from app.services.logger import log_admin
+
+    data = request.get_json()
+    symbol_name = data.get('symbol', '').upper().strip()
+
+    if not symbol_name or '/' not in symbol_name:
+        log_admin(f"Symbols: Invalid symbol format attempted: {symbol_name}")
+        return jsonify({
+            'success': False,
+            'error': 'Invalid symbol format. Use BASE/QUOTE (e.g., BTC/USDT)'
+        }), 400
+
+    # Check if exists
+    existing = Symbol.query.filter_by(symbol=symbol_name).first()
+    if existing:
+        # Just enable it if it was disabled
+        if not existing.is_active:
+            existing.is_active = True
+            db.session.commit()
+            log_admin(f"Symbols: Re-enabled existing symbol {symbol_name}")
+            return jsonify({
+                'success': True,
+                'symbol': existing.to_dict(),
+                'message': 'Symbol re-enabled'
+            })
+        return jsonify({
+            'success': False,
+            'error': 'Symbol already exists'
+        }), 400
+
+    new_symbol = Symbol(
+        symbol=symbol_name,
+        exchange='binance',
+        is_active=True,
+        notify_enabled=True
+    )
+    db.session.add(new_symbol)
+    db.session.commit()
+
+    log_admin(f"Symbols: Added new symbol {symbol_name} (active)")
+
+    return jsonify({
+        'success': True,
+        'symbol': new_symbol.to_dict()
+    })
+
+
+@admin_bp.route('/api/symbols/toggle-notify', methods=['POST'])
+@admin_required
+def api_toggle_notify():
+    """Toggle symbol notification status"""
+    from app.models import Symbol
+
+    data = request.get_json()
+    symbol_id = data.get('id')
+
+    symbol = db.session.get(Symbol, symbol_id)
+    if not symbol:
+        return jsonify({'success': False, 'error': 'Symbol not found'}), 404
+
+    symbol.notify_enabled = not symbol.notify_enabled
+    db.session.commit()
+
+    return jsonify({
+        'success': True,
+        'notify_enabled': symbol.notify_enabled
+    })
+
+
+@admin_bp.route('/save-fetch-settings', methods=['POST'])
+@admin_required
+def save_fetch_settings():
+    """Save fetch settings (start date)"""
+    from app.models import Setting
+    from app.services.logger import log_admin
+
+    fetch_start_date = request.form.get('fetch_start_date', '2024-01-01')
+
+    # Get or create setting
+    setting = Setting.query.filter_by(key='fetch_start_date').first()
+    old_value = setting.value if setting else None
+
+    if setting:
+        setting.value = fetch_start_date
+    else:
+        setting = Setting(key='fetch_start_date', value=fetch_start_date)
+        db.session.add(setting)
+
+    db.session.commit()
+
+    if old_value != fetch_start_date:
+        log_admin(f"Settings: Fetch start date changed from {old_value or 'not set'} to {fetch_start_date}")
+    else:
+        log_admin(f"Settings: Fetch start date confirmed as {fetch_start_date}")
+
+    flash(f'Fetch start date set to {fetch_start_date}', 'success')
+    return redirect(url_for('admin.symbols'))
+
+
 # ----- DOCUMENTATION -----
 
 @admin_bp.route('/documentation')
@@ -983,20 +1359,93 @@ def documentation():
 
 # ----- QUICK ACTIONS -----
 
+def _start_cron_run(job_name):
+    """Start tracking a cron run for quick actions."""
+    from app.models import CronJob, CronRun
+
+    job = CronJob.query.filter_by(name=job_name).first()
+    if not job:
+        from app.models import CRON_JOB_TYPES
+        config = CRON_JOB_TYPES.get(job_name, {})
+        job = CronJob(
+            name=job_name,
+            description=config.get('description', f'Quick action: {job_name}'),
+            schedule='manual',
+            is_enabled=True
+        )
+        db.session.add(job)
+        db.session.commit()
+
+    run = CronRun(job_id=job.id)
+    db.session.add(run)
+    db.session.commit()
+    return run.id
+
+
+def _complete_cron_run(run_id, success=True, error_message=None, **kwargs):
+    """Complete a cron run with results."""
+    from app.models import CronRun
+    from datetime import datetime, timezone
+
+    if not run_id:
+        return
+
+    run = db.session.get(CronRun, run_id)
+    if run:
+        run.ended_at = datetime.now(timezone.utc)
+        started_at = run.started_at
+        if started_at.tzinfo is None:
+            started_at = started_at.replace(tzinfo=timezone.utc)
+        run.duration_ms = int((run.ended_at - started_at).total_seconds() * 1000)
+        run.success = success
+        run.error_message = error_message
+        run.patterns_found = kwargs.get('patterns_found', 0)
+        run.symbols_processed = kwargs.get('symbols_processed', 0)
+        run.candles_fetched = kwargs.get('candles_fetched', 0)
+        db.session.commit()
+
+
 @admin_bp.route('/quick/scan', methods=['POST'])
 @admin_required
 def quick_scan():
-    """Trigger a manual pattern scan"""
-    from app.services.patterns import scan_all_patterns
+    """Trigger a manual pattern scan (runs in background)"""
+    import threading
     from app.services.logger import log_admin
 
-    try:
-        result = scan_all_patterns()
-        log_admin(f"Quick Action: Pattern scan triggered by admin")
-        flash(f'Scan complete! Found {result.get("patterns_found", 0)} patterns.', 'success')
-    except Exception as e:
-        log_admin(f"Quick Action: Pattern scan failed - {str(e)}")
-        flash(f'Scan failed: {str(e)}', 'error')
+    def run_scan_in_background():
+        """Run scan in a separate thread with its own app context"""
+        from app import create_app
+        from app.services.patterns import scan_all_patterns
+        from app.models import Symbol
+
+        app = create_app()
+        with app.app_context():
+            run_id = _start_cron_run('pattern_scan')
+            try:
+                # Count active symbols
+                symbols_count = Symbol.query.filter_by(is_active=True).count()
+                log_admin(f"Pattern scan: Starting scan on {symbols_count} symbols...")
+
+                result = scan_all_patterns()
+                patterns_found = result.get('patterns_found', 0)
+
+                log_admin(f"Pattern scan: Complete! Found {patterns_found} patterns across {symbols_count} symbols")
+                _complete_cron_run(
+                    run_id,
+                    success=True,
+                    patterns_found=patterns_found,
+                    symbols_processed=symbols_count
+                )
+            except Exception as e:
+                log_admin(f"Pattern scan: FAILED - {str(e)}")
+                _complete_cron_run(run_id, success=False, error_message=str(e))
+
+    # Start background thread
+    thread = threading.Thread(target=run_scan_in_background, daemon=True)
+    thread.start()
+
+    log_admin("Quick Action: Pattern scan started in background")
+    flash('Pattern scan started in background. Check Cron Jobs for progress.', 'info')
 
     return redirect(url_for('admin.index'))
 
@@ -1004,18 +1453,32 @@ def quick_scan():
 @admin_bp.route('/quick/refresh-stats', methods=['POST'])
 @admin_required
 def quick_refresh_stats():
-    """Trigger stats computation"""
+    """Trigger stats computation (runs in background)"""
+    import threading
     from app.services.logger import log_admin
 
-    try:
-        # Import and run compute_stats directly
+    def run_stats_in_background():
+        from app import create_app
         from scripts.compute_stats import compute_stats
-        result = compute_stats()
-        log_admin(f"Quick Action: Stats refresh triggered by admin")
-        flash(f'Stats refreshed! {result.get("symbols_count", 0)} symbols, {result.get("total_candles", 0):,} candles.', 'success')
-    except Exception as e:
-        log_admin(f"Quick Action: Stats refresh failed - {str(e)}")
-        flash(f'Stats refresh failed: {str(e)}', 'error')
+
+        app = create_app()
+        with app.app_context():
+            run_id = _start_cron_run('stats')
+            try:
+                result = compute_stats()
+                symbols = result.get('symbols_count', 0)
+                candles = result.get('total_candles', 0)
+                log_admin(f"Background stats complete: {symbols} symbols, {candles:,} candles")
+                _complete_cron_run(run_id, success=True, symbols_processed=symbols)
+            except Exception as e:
+                log_admin(f"Background stats failed: {str(e)}")
+                _complete_cron_run(run_id, success=False, error_message=str(e))
+
+    thread = threading.Thread(target=run_stats_in_background, daemon=True)
+    thread.start()
+
+    log_admin("Quick Action: Stats refresh started in background")
+    flash('Stats refresh started in background. Check Cron Jobs for progress.', 'info')
 
     return redirect(url_for('admin.index'))
 
@@ -1023,25 +1486,398 @@ def quick_refresh_stats():
 @admin_bp.route('/quick/cleanup', methods=['POST'])
 @admin_required
 def quick_cleanup():
-    """Trigger database health check and cleanup"""
+    """Trigger database health check and cleanup (runs in background)"""
+    import threading
     from app.services.logger import log_admin
 
-    try:
-        # Import and run db_health check
+    def run_cleanup_in_background():
+        from app import create_app
         from scripts.db_health import run_health_check
-        result = run_health_check(fix=True, verbose=False)
-        verified = result.get('verified', 0) if result else 0
-        errors = result.get('errors', {}) if result else {}
-        error_count = sum(errors.values()) if errors else 0
 
-        log_admin(f"Quick Action: DB cleanup triggered by admin - verified {verified}, errors {error_count}")
+        app = create_app()
+        with app.app_context():
+            run_id = _start_cron_run('cleanup')
+            try:
+                result = run_health_check(fix=True, verbose=False)
+                verified = result.get('verified', 0) if result else 0
+                errors = result.get('errors', {}) if result else {}
+                error_count = sum(errors.values()) if errors else 0
+                log_admin(f"Background cleanup complete: verified {verified}, fixed {error_count} issues")
+                _complete_cron_run(run_id, success=True, symbols_processed=verified)
+            except Exception as e:
+                log_admin(f"Background cleanup failed: {str(e)}")
+                _complete_cron_run(run_id, success=False, error_message=str(e))
 
-        if error_count > 0:
-            flash(f'Cleanup complete. Verified {verified} candles, fixed {error_count} issues.', 'warning')
-        else:
-            flash(f'Cleanup complete. Verified {verified} candles, no issues found.', 'success')
-    except Exception as e:
-        log_admin(f"Quick Action: DB cleanup failed - {str(e)}")
-        flash(f'Cleanup failed: {str(e)}', 'error')
+    thread = threading.Thread(target=run_cleanup_in_background, daemon=True)
+    thread.start()
+
+    log_admin("Quick Action: DB cleanup started in background")
+    flash('DB cleanup started in background. Check Cron Jobs for progress.', 'info')
 
     return redirect(url_for('admin.index'))
+
+
+@admin_bp.route('/quick/sanitize', methods=['POST'])
+@admin_required
+def quick_sanitize():
+    """Verify and fix candle data integrity (runs in background)"""
+    import threading
+    from app.services.logger import log_admin
+
+    def run_sanitize_in_background():
+        from app import create_app
+        from scripts.db_health import run_health_check
+
+        app = create_app()
+        with app.app_context():
+            run_id = _start_cron_run('sanitize')
+            try:
+                log_admin("Sanitize: Starting candle data integrity check...")
+                result = run_health_check(fix=True, verbose=False)
+                verified = result.get('verified', 0) if result else 0
+                errors = result.get('errors', {}) if result else {}
+                error_count = sum(errors.values()) if errors else 0
+                log_admin(f"Sanitize: Complete! Verified {verified:,} candles, fixed {error_count} issues")
+                _complete_cron_run(run_id, success=True, symbols_processed=verified)
+            except Exception as e:
+                log_admin(f"Sanitize: FAILED - {str(e)}")
+                _complete_cron_run(run_id, success=False, error_message=str(e))
+
+    thread = threading.Thread(target=run_sanitize_in_background, daemon=True)
+    thread.start()
+
+    log_admin("Quick Action: Data sanitization started in background")
+    flash('Data sanitization started in background. Check Cron Jobs for progress.', 'info')
+
+    return redirect(url_for('admin.index'))
+
+
+@admin_bp.route('/quick/fetch', methods=['POST'])
+@admin_required
+def quick_fetch():
+    """Trigger manual candle fetch for all active symbols (runs in background)"""
+    import threading
+    from app.services.logger import log_admin
+
+    def run_fetch_in_background():
+        """Run fetch in a separate thread with its own app context"""
+        import asyncio
+        from app import create_app
+        from app.models import Symbol
+
+        app = create_app()
+        with app.app_context():
+            run_id = _start_cron_run('fetch')
+            try:
+                # Import fetch functions
+                from scripts.fetch import run_fetch_cycle, generate_signals_batch, expire_old_patterns
+                from scripts.compute_stats import compute_stats
+
+                symbols = [s.symbol for s in Symbol.query.filter_by(is_active=True).all()]
+                symbols_count = len(symbols)
+
+                log_admin(f"Data fetch: Starting fetch for {symbols_count} symbols...")
+
+                # Run the async fetch cycle
+                results = asyncio.run(run_fetch_cycle(symbols, app, verbose=False))
+
+                # Generate signals
+                signal_result = generate_signals_batch(app, verbose=False)
+
+                # Expire old patterns
+                expire_old_patterns(app, verbose=False)
+
+                # Calculate totals
+                total_candles = sum(r.get('new', 0) for r in results)
+                total_patterns = sum(r.get('patterns', 0) for r in results)
+                total_signals = signal_result.get('signals_generated', 0)
+
+                # Refresh stats
+                log_admin("Data fetch: Refreshing statistics...")
+                compute_stats()
+
+                log_admin(f"Data fetch: Complete! {total_candles:,} candles, {total_patterns} patterns, {total_signals} signals")
+                _complete_cron_run(
+                    run_id,
+                    success=True,
+                    symbols_processed=symbols_count,
+                    candles_fetched=total_candles,
+                    patterns_found=total_patterns
+                )
+            except Exception as e:
+                log_admin(f"Data fetch: FAILED - {str(e)}")
+                _complete_cron_run(run_id, success=False, error_message=str(e))
+
+    # Start background thread
+    thread = threading.Thread(target=run_fetch_in_background, daemon=True)
+    thread.start()
+
+    log_admin("Quick Action: Data fetch started in background")
+    flash('Data fetch started in background. Check Cron Jobs for progress.', 'info')
+
+    return redirect(url_for('admin.index'))
+
+
+@admin_bp.route('/quick/full-cycle', methods=['POST'])
+@admin_required
+def quick_full_cycle():
+    """Run full cycle: fetch → pattern scan → stats refresh (sequential, in background)"""
+    import threading
+    from app.services.logger import log_admin
+
+    def run_full_cycle_in_background():
+        """Run full cycle sequentially in a separate thread"""
+        import asyncio
+        from app import create_app
+        from app.models import Symbol
+
+        app = create_app()
+        with app.app_context():
+            run_id = _start_cron_run('full_cycle')
+            total_candles = 0
+            total_patterns = 0
+            symbols_count = 0
+
+            try:
+                # === STEP 1: FETCH ===
+                log_admin("Full cycle: Step 1/3 - Fetching candle data...")
+                from scripts.fetch import run_fetch_cycle, generate_signals_batch, expire_old_patterns
+
+                symbols = [s.symbol for s in Symbol.query.filter_by(is_active=True).all()]
+                symbols_count = len(symbols)
+
+                results = asyncio.run(run_fetch_cycle(symbols, app, verbose=False))
+                total_candles = sum(r.get('new', 0) for r in results)
+
+                # Generate signals and expire patterns
+                generate_signals_batch(app, verbose=False)
+                expire_old_patterns(app, verbose=False)
+
+                log_admin(f"Full cycle: Fetch complete - {total_candles:,} new candles")
+
+                # === STEP 2: PATTERN SCAN ===
+                log_admin("Full cycle: Step 2/3 - Scanning for patterns...")
+                from app.services.patterns import scan_all_patterns
+
+                scan_result = scan_all_patterns()
+                total_patterns = scan_result.get('patterns_found', 0)
+
+                log_admin(f"Full cycle: Scan complete - {total_patterns} patterns found")
+
+                # === STEP 3: STATS REFRESH ===
+                log_admin("Full cycle: Step 3/3 - Refreshing statistics...")
+                from scripts.compute_stats import compute_stats
+
+                compute_stats()
+
+                log_admin(f"Full cycle: Complete! {symbols_count} symbols, {total_candles:,} candles, {total_patterns} patterns")
+                _complete_cron_run(
+                    run_id,
+                    success=True,
+                    symbols_processed=symbols_count,
+                    candles_fetched=total_candles,
+                    patterns_found=total_patterns
+                )
+
+            except Exception as e:
+                log_admin(f"Full cycle: FAILED - {str(e)}")
+                _complete_cron_run(
+                    run_id,
+                    success=False,
+                    error_message=str(e),
+                    symbols_processed=symbols_count,
+                    candles_fetched=total_candles,
+                    patterns_found=total_patterns
+                )
+
+    # Start background thread
+    thread = threading.Thread(target=run_full_cycle_in_background, daemon=True)
+    thread.start()
+
+    log_admin("Quick Action: Full cycle (fetch→scan→stats) started in background")
+    flash('Full cycle started in background. Check Cron Jobs for progress.', 'info')
+
+    return redirect(url_for('admin.index'))
+
+
+@admin_bp.route('/api/symbols/<int:symbol_id>/fetch-historical', methods=['POST'])
+@admin_required
+def api_fetch_historical(symbol_id):
+    """Fetch historical data for a single symbol from target start date"""
+    import threading
+    from app.models import Symbol, Setting
+    from app.services.logger import log_admin
+
+    symbol = db.session.get(Symbol, symbol_id)
+    if not symbol:
+        return jsonify({'success': False, 'error': 'Symbol not found'}), 404
+
+    if not symbol.is_active:
+        return jsonify({'success': False, 'error': 'Symbol is not active'}), 400
+
+    # Get target start date
+    fetch_start_setting = Setting.query.filter_by(key='fetch_start_date').first()
+    fetch_start_date = fetch_start_setting.value if fetch_start_setting else '2024-01-01'
+
+    symbol_name = symbol.symbol
+    log_admin(f"Historical fetch: Starting background fetch for {symbol_name} from {fetch_start_date}")
+
+    def run_fetch_in_background(sym_name, start_date):
+        """Run historical fetch in a separate thread with its own app context"""
+        import ccxt
+        import time
+        import traceback
+        from datetime import datetime, timezone
+        from app import create_app, db as app_db
+        from app.models import Symbol, Candle, CronJob, CronRun
+        from app.services.aggregator import aggregate_candles_realtime
+        from app.services.logger import log_admin
+
+        app = create_app()
+        with app.app_context():
+            # Create cron run entry directly (not using helper to avoid import issues)
+            job = CronJob.query.filter_by(name='historical_fetch').first()
+            if not job:
+                job = CronJob(name='historical_fetch', description='Fetch historical candle data', schedule='manual', is_enabled=True)
+                app_db.session.add(job)
+                app_db.session.commit()
+            run = CronRun(job_id=job.id)
+            app_db.session.add(run)
+            app_db.session.commit()
+            run_id = run.id
+
+            total_candles = 0
+            success = False
+            error_msg = None
+
+            try:
+                # Get symbol
+                sym = Symbol.query.filter_by(symbol=sym_name).first()
+                if not sym:
+                    error_msg = f'Symbol {sym_name} not found'
+                    log_admin(f"Historical fetch: {error_msg}")
+                    return
+
+                # Parse start date to timestamp
+                start_dt = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+                start_ts = int(start_dt.timestamp() * 1000)
+                now_ts = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+                log_admin(f"Historical fetch: {sym_name} - fetching from {start_date} to now...")
+
+                # Initialize exchange
+                exchange = ccxt.binance({
+                    'enableRateLimit': True,
+                    'options': {'defaultType': 'spot'}
+                })
+
+                # Fetch in batches of 1000 candles
+                since = start_ts
+                batch_count = 0
+                while since < now_ts:
+                    try:
+                        ohlcv = exchange.fetch_ohlcv(sym_name, '1m', since=since, limit=1000)
+                        if not ohlcv:
+                            break
+
+                        # Get existing timestamps to avoid duplicates
+                        timestamps = [c[0] for c in ohlcv]
+                        existing = set(
+                            c.timestamp for c in Candle.query.filter(
+                                Candle.symbol_id == sym.id,
+                                Candle.timeframe == '1m',
+                                Candle.timestamp.in_(timestamps)
+                            ).all()
+                        )
+
+                        # Insert new candles
+                        new_count = 0
+                        for candle in ohlcv:
+                            ts, o, h, l, c, v = candle
+                            if ts not in existing:
+                                app_db.session.add(Candle(
+                                    symbol_id=sym.id,
+                                    timeframe='1m',
+                                    timestamp=ts,
+                                    open=o, high=h, low=l, close=c,
+                                    volume=v or 0
+                                ))
+                                new_count += 1
+
+                        if new_count > 0:
+                            app_db.session.commit()
+                            total_candles += new_count
+
+                        # Move to next batch
+                        since = ohlcv[-1][0] + 60000
+                        batch_count += 1
+
+                        # Log progress every 10 batches
+                        if batch_count % 10 == 0:
+                            progress_date = datetime.fromtimestamp(since / 1000, tz=timezone.utc).strftime('%Y-%m-%d')
+                            log_admin(f"Historical fetch: {sym_name} - progress: {progress_date}, {total_candles:,} candles so far")
+
+                        # Rate limit delay
+                        time.sleep(0.3)
+
+                        # Break if we got less than 1000 candles (reached end)
+                        if len(ohlcv) < 1000:
+                            break
+
+                    except Exception as e:
+                        error_str = str(e).lower()
+                        if 'rate' in error_str or '429' in error_str:
+                            log_admin(f"Historical fetch: {sym_name} - rate limited, waiting 5s...")
+                            time.sleep(5)
+                            continue
+                        raise
+
+                # Aggregate all higher timeframes
+                log_admin(f"Historical fetch: {sym_name} - aggregating higher timeframes...")
+                timeframes = ['5m', '15m', '30m', '1h', '2h', '4h', '1d']
+                for tf in timeframes:
+                    try:
+                        aggregate_candles_realtime(sym_name, '1m', tf)
+                    except Exception as e:
+                        log_admin(f"Historical fetch: {sym_name} - aggregation error for {tf}: {str(e)}")
+
+                log_admin(f"Historical fetch: {sym_name} - complete! {total_candles:,} candles fetched and aggregated")
+                success = True
+
+            except Exception as e:
+                error_msg = f"{type(e).__name__}: {str(e)}"
+                log_admin(f"Historical fetch: {sym_name} - ERROR: {error_msg}")
+                traceback.print_exc()
+
+            finally:
+                # Always mark run as complete
+                try:
+                    run = app_db.session.get(CronRun, run_id)
+                    if run:
+                        run.ended_at = datetime.now(timezone.utc)
+                        started_at = run.started_at
+                        if started_at.tzinfo is None:
+                            started_at = started_at.replace(tzinfo=timezone.utc)
+                        run.duration_ms = int((run.ended_at - started_at).total_seconds() * 1000)
+                        run.success = success
+                        run.error_message = error_msg
+                        run.candles_fetched = total_candles
+                        run.symbols_processed = 1 if success else 0
+                        app_db.session.commit()
+                except Exception as e:
+                    log_admin(f"Historical fetch: Failed to update cron run: {str(e)}")
+
+    # Start background thread
+    thread = threading.Thread(
+        target=run_fetch_in_background,
+        args=(symbol_name, fetch_start_date),
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({
+        'success': True,
+        'message': f'Historical fetch started for {symbol_name} from {fetch_start_date}',
+        'symbol': symbol_name,
+        'start_date': fetch_start_date
+    })

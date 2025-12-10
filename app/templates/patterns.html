@@ -265,7 +265,7 @@
         <div x-show="!signalsLoading" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             <template x-for="signal in signals" :key="signal.id">
                 <div class="bg-card rounded-lg p-4 border-l-4"
-                     :class="signal.direction === 'bullish' ? 'border-green-500' : 'border-red-500'">
+                     :class="signal.direction === 'long' ? 'border-green-500' : 'border-red-500'">
                     <div class="flex items-center justify-between mb-3">
                         <div>
                             <span class="font-bold text-lg" x-text="signal.symbol"></span>
@@ -273,8 +273,8 @@
                                   x-text="signal.pattern_type"></span>
                         </div>
                         <span class="font-bold text-lg"
-                              :class="signal.direction === 'bullish' ? 'text-green-500' : 'text-red-500'"
-                              x-text="signal.direction === 'bullish' ? 'LONG' : 'SHORT'"></span>
+                              :class="signal.direction === 'long' ? 'text-green-500' : 'text-red-500'"
+                              x-text="signal.direction === 'long' ? 'LONG' : 'SHORT'"></span>
                     </div>
 
                     <div class="space-y-2 text-sm">
@@ -347,7 +347,8 @@ function patternsPage() {
                 }
                 const response = await fetch(url);
                 const data = await response.json();
-                this.signals = data.signals || [];
+                // API returns array directly, not {signals: [...]}
+                this.signals = Array.isArray(data) ? data : (data.signals || []);
             } catch (e) {
                 console.error('Failed to load signals:', e);
                 this.signals = [];

@@ -172,33 +172,62 @@ def save_candles_batch(symbol_id: int, candles: List, verbose: bool = False) -> 
 
 
 async def fill_gaps_for_symbol(exchange, symbol_name: str, symbol_id: int,
-                               days: int, verbose: bool = False) -> dict:
-    """Find and fill gaps for a single symbol."""
-    from app import create_app
+                               days: int, verbose: bool = False,
+                               full_scan: bool = False) -> dict:
+    """Find and fill gaps for a single symbol.
+
+    Args:
+        full_scan: If True, scan from beginning of database to now (ignores days parameter)
+    """
+    from app import create_app, db
+    from app.models import Candle
+    from sqlalchemy import func
 
     now = datetime.now(timezone.utc)
-    start_ts = int((now - timedelta(days=days)).timestamp() * 1000)
     end_ts = int(now.timestamp() * 1000) - (5 * 60 * 1000)  # 5 min buffer
 
     app = create_app()
     with app.app_context():
+        if full_scan:
+            # Get earliest candle timestamp from database
+            earliest = db.session.query(func.min(Candle.timestamp)).filter(
+                Candle.symbol_id == symbol_id,
+                Candle.timeframe == '1m'
+            ).scalar()
+
+            if earliest:
+                start_ts = earliest
+                if verbose:
+                    start_date = datetime.fromtimestamp(earliest / 1000, tz=timezone.utc).strftime('%Y-%m-%d')
+                    print(f"    {symbol_name}: Scanning from {start_date} to now")
+            else:
+                # No data, use days parameter
+                start_ts = int((now - timedelta(days=days)).timestamp() * 1000)
+        else:
+            start_ts = int((now - timedelta(days=days)).timestamp() * 1000)
+
         gaps = find_gaps(symbol_id, start_ts, end_ts)
 
     if not gaps:
         return {'symbol': symbol_name, 'gaps': 0, 'filled': 0}
 
     total_filled = 0
-    for gap_start, gap_end in gaps:
+    for i, (gap_start, gap_end) in enumerate(gaps):
+        gap_duration = (gap_end - gap_start) / (60 * 1000)
         if verbose:
-            gap_duration = (gap_end - gap_start) / (60 * 1000)
-            print(f"    Gap: {gap_duration:.0f} minutes")
+            gap_start_dt = datetime.fromtimestamp(gap_start / 1000, tz=timezone.utc).strftime('%m-%d %H:%M')
+            print(f"    Gap {i+1}/{len(gaps)}: {gap_duration:.0f} min starting {gap_start_dt}", end='', flush=True)
 
-        candles = await fetch_range_async(exchange, symbol_name, gap_start, gap_end, verbose)
+        candles = await fetch_range_async(exchange, symbol_name, gap_start, gap_end, False)  # Quiet fetch
 
         if candles:
             with app.app_context():
-                filled = save_candles_batch(symbol_id, candles, verbose)
+                filled = save_candles_batch(symbol_id, candles, False)
                 total_filled += filled
+                if verbose:
+                    print(f" → fetched {len(candles)}, saved {filled} new")
+        elif verbose:
+            print(f" → no candles returned")
 
     return {'symbol': symbol_name, 'gaps': len(gaps), 'filled': total_filled}
 
@@ -237,18 +266,44 @@ async def fetch_symbol_full(exchange, symbol_name: str, symbol_id: int,
     return {'symbol': symbol_name, 'fetched': len(candles), 'new': new_count}
 
 
-async def run_gap_fill(symbols: List[Tuple[str, int]], days: int, verbose: bool = False):
-    """Fill gaps for all symbols in parallel."""
+async def run_gap_fill(symbols: List[Tuple[str, int]], days: int, verbose: bool = False,
+                       full_scan: bool = False):
+    """Fill gaps for all symbols with rate-limited parallel fetching.
+
+    Args:
+        full_scan: If True, scan from beginning of database (not just last X days)
+    """
+    from app.config import Config
+
     exchange = ccxt_async.binance({
         'enableRateLimit': True,
         'options': {'defaultType': 'spot'}
     })
 
+    # Semaphore to limit concurrent requests
+    semaphore = asyncio.Semaphore(Config.MAX_CONCURRENT_REQUESTS)
+
+    async def limited_fill(name, sid):
+        async with semaphore:
+            return await fill_gaps_for_symbol(exchange, name, sid, days, verbose, full_scan)
+
+    scan_type = "entire database" if full_scan else f"last {days} days"
+    if verbose:
+        print(f"  Filling gaps for {len(symbols)} symbols ({scan_type}, max {Config.MAX_CONCURRENT_REQUESTS} concurrent)...")
+
     try:
-        tasks = [fill_gaps_for_symbol(exchange, name, sid, days, verbose)
-                 for name, sid in symbols]
-        results = await asyncio.gather(*tasks)
-        return results
+        tasks = [limited_fill(name, sid) for name, sid in symbols]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        # Filter out exceptions and log them
+        clean_results = []
+        for r in results:
+            if isinstance(r, Exception):
+                if verbose:
+                    print(f"  Gap fill error: {r}")
+                clean_results.append({'symbol': 'unknown', 'gaps': 0, 'filled': 0, 'error': str(r)})
+            else:
+                clean_results.append(r)
+        return clean_results
     finally:
         await exchange.close()
 
@@ -370,6 +425,7 @@ def main():
     parser = argparse.ArgumentParser(description='Historical data fetcher')
     parser.add_argument('--days', type=int, default=365, help='Days of history (default: 365)')
     parser.add_argument('--gaps', action='store_true', help='Only fill gaps (for hourly cron)')
+    parser.add_argument('--full', action='store_true', help='With --gaps: scan entire database, not just last X days')
     parser.add_argument('--status', action='store_true', help='Show database status')
     parser.add_argument('--delete', action='store_true', help='Delete all data')
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
@@ -413,14 +469,16 @@ def main():
 
     start_time = time.time()
 
-    print(f"  Mode: {'Gap fill' if args.gaps else 'Full fetch'}")
+    mode_desc = 'Gap fill (full DB)' if args.gaps and args.full else 'Gap fill' if args.gaps else 'Full fetch'
+    print(f"  Mode: {mode_desc}")
     print(f"  Symbols: {len(symbol_list)}")
-    print(f"  Days: {args.days}")
+    if not (args.gaps and args.full):
+        print(f"  Days: {args.days}")
     print(f"{'═'*60}", flush=True)
 
     if args.gaps:
-        # Gap fill mode (for hourly cron)
-        results = asyncio.run(run_gap_fill(symbol_list, args.days, args.verbose))
+        # Gap fill mode
+        results = asyncio.run(run_gap_fill(symbol_list, args.days, args.verbose, args.full))
 
         total_gaps = sum(r['gaps'] for r in results)
         total_filled = sum(r['filled'] for r in results)

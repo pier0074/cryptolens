@@ -210,7 +210,7 @@ A ready-to-use `crontab.txt` is included. Install with:
 crontab crontab.txt
 ```
 
-### Scripts
+### Scripts Overview
 
 | Script | Purpose | Frequency |
 |--------|---------|-----------|
@@ -219,6 +219,207 @@ crontab crontab.txt
 | `db_health.py` | Verify data integrity, fix issues | Daily (3 AM) |
 | `fetch_historical.py` | Initial data load / backfill gaps | Manual |
 | `migrate_all.py` | Database migrations (idempotent) | Manual |
+
+---
+
+### Script Details
+
+#### `fetch.py` - Real-time Candle Fetcher
+
+Fetches new 1m candles from Binance, aggregates to higher timeframes (5m, 15m, 30m, 1h, 2h, 4h, 1d), detects patterns, generates signals, expires old patterns, and logs the run to the database.
+
+| Parameter | Description |
+|-----------|-------------|
+| `--verbose`, `-v` | Verbose output - shows per-symbol progress and timing |
+| `--gaps` | Gap fill mode (marks as "gaps" job in cron logs) |
+
+```bash
+# Standard run (cron)
+python scripts/fetch.py
+
+# Verbose with per-symbol details
+python scripts/fetch.py -v
+```
+
+**Auto-catchup**: If you haven't run fetch for several days, it automatically fetches all missing candles in batches of 1000 until caught up.
+
+**Rate Limiting**: Uses semaphore to limit concurrent API requests (default: 5) with exponential backoff retry on rate limit errors.
+
+---
+
+#### `compute_stats.py` - Stats Cache Builder
+
+Pre-computes database statistics (candle counts, pattern stats, price changes, data freshness) and caches them for fast dashboard page loads.
+
+| Parameter | Description |
+|-----------|-------------|
+| *(none)* | No parameters - runs full stats computation |
+
+```bash
+python scripts/compute_stats.py
+```
+
+---
+
+#### `db_health.py` - Data Integrity Checker
+
+Performs incremental verification of candle data. Checks for gaps, OHLCV validity (high >= low, etc.), and timestamp alignment for higher timeframes.
+
+| Parameter | Description |
+|-----------|-------------|
+| `--fix` | Auto-fix issues (deletes invalid candles) |
+| `--symbol`, `-s` | Check specific symbol (e.g., `BTC/USDT`) |
+| `--quiet`, `-q` | Only show summary (suppresses per-symbol output) |
+| `--reset` | Reset all verification flags (start fresh) |
+
+```bash
+# Report only (no changes)
+python scripts/db_health.py
+
+# Auto-fix bad data
+python scripts/db_health.py --fix
+
+# Check single symbol
+python scripts/db_health.py -s BTC/USDT
+
+# Clear verification status and start fresh
+python scripts/db_health.py --reset
+
+# Fix silently (for cron)
+python scripts/db_health.py -q --fix
+```
+
+**Checks performed**:
+1. **Gap detection** - Missing candles in sequence (> 5 min gap)
+2. **Timestamp alignment** - Higher TFs at correct boundaries (e.g., 15m at :00, :15, :30, :45)
+3. **OHLCV sanity** - high >= low, high >= open/close, volume >= 0, prices > 0
+4. **Continuity** - Open should approximately equal previous candle's close
+
+---
+
+#### `fetch_historical.py` - Historical Data Loader
+
+Fetches historical candle data for initial setup or backfilling gaps. Supports parallel async fetching for speed.
+
+| Parameter | Description |
+|-----------|-------------|
+| `--days` | Days of history to fetch (default: **365**) |
+| `--gaps` | Only fill gaps (skip full fetch) |
+| `--full` | With `--gaps`: scan entire database, not just last X days |
+| `--status` | Show database status (candle counts, date ranges) |
+| `--delete` | Delete ALL data (requires typing 'DELETE' to confirm) |
+| `--verbose`, `-v` | Verbose output with detailed progress |
+| `--no-aggregate` | Skip aggregation to higher timeframes after fetch |
+
+```bash
+# Full fetch - 1 year of history (default)
+python scripts/fetch_historical.py
+
+# Fetch specific number of days
+python scripts/fetch_historical.py --days=30
+
+# Fill gaps in last 7 days
+python scripts/fetch_historical.py --gaps --days=7
+
+# Fill ALL gaps in entire database (from beginning to now)
+python scripts/fetch_historical.py --gaps --full -v
+
+# Show database status
+python scripts/fetch_historical.py --status
+
+# Delete all data and refetch
+python scripts/fetch_historical.py --delete
+
+# Fetch without aggregating to higher timeframes
+python scripts/fetch_historical.py --days=7 --no-aggregate
+```
+
+**Gap fill mode** (`--gaps`):
+1. Scans existing data for the specified day range
+2. Detects missing candle sequences (gaps > 5 minutes)
+3. Fetches only the missing ranges from Binance
+4. Aggregates to higher timeframes automatically
+
+---
+
+#### `migrate_all.py` - Database Migrations
+
+Applies schema changes to existing databases. Fully idempotent - safe to run multiple times.
+
+| Parameter | Description |
+|-----------|-------------|
+| *(none)* | No parameters - runs all pending migrations |
+
+```bash
+python scripts/migrate_all.py
+```
+
+**Note**: For new installations, this is NOT needed - `db.create_all()` includes everything. Only needed when upgrading existing databases.
+
+---
+
+### Common Scenarios
+
+#### Catching Up After Downtime
+
+If you haven't fetched candles for several days:
+
+```bash
+# Option 1: Gap detection (recommended - only fetches what's missing)
+python scripts/fetch_historical.py --gaps --days=7
+
+# Option 2: Just run fetch.py - it auto-catches up
+python scripts/fetch.py -v
+```
+
+`fetch.py` automatically detects the last candle timestamp and fetches all missing data in batches.
+
+#### Initial Setup
+
+```bash
+# 1. Run migrations
+python scripts/migrate_all.py
+
+# 2. Fetch 1 year of history
+python scripts/fetch_historical.py -v
+
+# 3. Compute initial stats
+python scripts/compute_stats.py
+
+# 4. Verify data integrity
+python scripts/db_health.py
+```
+
+#### Daily Maintenance
+
+The crontab handles this automatically, but manually:
+
+```bash
+# Health check with auto-fix
+python scripts/db_health.py --fix -q
+```
+
+---
+
+### API Rate Limiting
+
+Binance has strict rate limits. The scripts are configured to prevent rate limit errors:
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `MAX_CONCURRENT_REQUESTS` | 5 | Max parallel API requests |
+| `RATE_LIMIT_DELAY` | 0.2s | Delay between batch requests |
+| `RATE_LIMIT_RETRY_DELAY` | 2.0s | Initial retry delay (exponential backoff) |
+| `MAX_RETRIES` | 3 | Max retries for rate-limited requests |
+
+To adjust these settings, edit `app/config.py`:
+
+```python
+MAX_CONCURRENT_REQUESTS = 3  # Lower for stricter rate limiting
+RATE_LIMIT_DELAY = 0.5       # Higher delay between requests
+```
+
+If you frequently see rate limit errors, reduce `MAX_CONCURRENT_REQUESTS` to 3 or lower.
 
 ---
 

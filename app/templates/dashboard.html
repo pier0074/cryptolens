@@ -129,7 +129,7 @@
                     </td>
                     {% endfor %}
                     <td class="text-center p-3">
-                        {# All patterns: X/18 (3 types × 6 TF) #}
+                        {# All patterns: X/24 (3 types × 8 TF) #}
                         <span x-show="selectedPattern === 'all'" x-cloak>
                             {% if all_bullish.value > all_bearish.value and all_bullish.value >= 2 %}
                                 <span class="bullish font-bold">🟢 {{ all_bullish.value }}/{{ timeframes|length * 3 }}</span>
@@ -139,7 +139,7 @@
                                 <span class="neutral">-</span>
                             {% endif %}
                         </span>
-                        {# FVG only: X/6 #}
+                        {# FVG only: X/8 #}
                         <span x-show="selectedPattern === 'imbalance'" x-cloak>
                             {% if fvg_bullish.value > fvg_bearish.value and fvg_bullish.value >= 2 %}
                                 <span class="bullish font-bold">🟢 {{ fvg_bullish.value }}/{{ timeframes|length }}</span>
@@ -149,7 +149,7 @@
                                 <span class="neutral">-</span>
                             {% endif %}
                         </span>
-                        {# Order Block only: X/6 #}
+                        {# Order Block only: X/8 #}
                         <span x-show="selectedPattern === 'order_block'" x-cloak>
                             {% if ob_bullish.value > ob_bearish.value and ob_bullish.value >= 2 %}
                                 <span class="bullish font-bold">🟢 {{ ob_bullish.value }}/{{ timeframes|length }}</span>
@@ -159,7 +159,7 @@
                                 <span class="neutral">-</span>
                             {% endif %}
                         </span>
-                        {# Liquidity Sweep only: X/6 #}
+                        {# Liquidity Sweep only: X/8 #}
                         <span x-show="selectedPattern === 'liquidity_sweep'" x-cloak>
                             {% if sweep_bullish.value > sweep_bearish.value and sweep_bullish.value >= 2 %}
                                 <span class="bullish font-bold">🟢 {{ sweep_bullish.value }}/{{ timeframes|length }}</span>

@@ -10,25 +10,41 @@
     <div class="bg-card rounded-lg p-4 mb-8">
         <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Quick Actions</h2>
         <div class="flex flex-wrap gap-3">
-            <form action="{{ url_for('admin.quick_scan') }}" method="POST" class="inline">
+            <!-- Full Cycle - Primary action -->
+            <form action="{{ url_for('admin.quick_full_cycle') }}" method="POST" class="inline" title="Run complete cycle: fetch candles → scan patterns → refresh stats">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded-lg text-sm font-medium transition flex items-center space-x-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path></svg>
-                    <span>Scan Now</span>
-                </button>
-            </form>
-            <form action="{{ url_for('admin.quick_refresh_stats') }}" method="POST" class="inline">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm font-medium transition flex items-center space-x-2">
+                <button type="submit" class="px-4 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg text-sm font-medium transition flex items-center space-x-2">
                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                    <span>Refresh Stats</span>
+                    <span>Full Cycle</span>
                 </button>
             </form>
-            <form action="{{ url_for('admin.quick_cleanup') }}" method="POST" class="inline">
+            <!-- Individual actions -->
+            <form action="{{ url_for('admin.quick_fetch') }}" method="POST" class="inline" title="Fetch latest candle data from exchange">
                 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                <button type="submit" class="px-4 py-2 bg-orange-600 hover:bg-orange-700 rounded-lg text-sm font-medium transition flex items-center space-x-2">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"></path></svg>
-                    <span>Cleanup</span>
+                <button type="submit" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition flex items-center space-x-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
+                    <span>Fetch</span>
+                </button>
+            </form>
+            <form action="{{ url_for('admin.quick_scan') }}" method="POST" class="inline" title="Scan candle data for chart patterns (FVG, Order Blocks, Liquidity)">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition flex items-center space-x-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path></svg>
+                    <span>Scan</span>
+                </button>
+            </form>
+            <form action="{{ url_for('admin.quick_refresh_stats') }}" method="POST" class="inline" title="Recompute database statistics">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition flex items-center space-x-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 7h6m0 10v-3m-3 3h.01M9 17h.01M9 14h.01M12 14h.01M15 11h.01M12 11h.01M9 11h.01M7 21h10a2 2 0 002-2V5a2 2 0 00-2-2H7a2 2 0 00-2 2v14a2 2 0 002 2z"></path></svg>
+                    <span>Stats</span>
+                </button>
+            </form>
+            <form action="{{ url_for('admin.quick_sanitize') }}" method="POST" class="inline" title="Verify candle data integrity (OHLCV, gaps, alignment)">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-sm font-medium transition flex items-center space-x-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <span>Sanitize</span>
                 </button>
             </form>
         </div>
@@ -56,14 +72,20 @@
         <div class="bg-card rounded-lg p-4">
             <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">System</h3>
             <div class="space-y-2">
+                <a href="{{ url_for('stats.index') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
+                    Database Statistics
+                </a>
                 <a href="{{ url_for('admin.crons') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
                     Cron Jobs
+                </a>
+                <a href="{{ url_for('admin.symbols') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
+                    Symbols
                 </a>
                 <a href="{{ url_for('admin.errors') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
                     Error Logs
                 </a>
-                <a href="{{ url_for('settings.index') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
-                    Settings
+                <a href="{{ url_for('logs.index') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
+                    Request Logs
                 </a>
             </div>
         </div>
@@ -72,7 +94,7 @@
         <div class="bg-card rounded-lg p-4">
             <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Communications</h3>
             <div class="space-y-2">
-                <a href="{{ url_for('admin.notifications') }}" class="block px-3 py-2 bg-blue-900/30 border border-blue-700/50 rounded hover:bg-blue-900/50 transition text-sm text-blue-400">
+                <a href="{{ url_for('admin.notifications') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
                     Notifications
                 </a>
                 <a href="{{ url_for('admin.notification_templates') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
@@ -88,74 +110,12 @@
         <div class="bg-card rounded-lg p-4">
             <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Reference</h3>
             <div class="space-y-2">
-                <a href="{{ url_for('admin.documentation') }}" class="block px-3 py-2 bg-indigo-900/30 border border-indigo-700/50 rounded hover:bg-indigo-900/50 transition text-sm text-indigo-400">
+                <a href="{{ url_for('admin.documentation') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
                     Documentation
                 </a>
                 <a href="{{ url_for('docs.swagger_ui') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
                     API Docs
                 </a>
-            </div>
-        </div>
-    </div>
-
-    <!-- Stats Grid -->
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-        <div class="bg-card rounded-lg p-6">
-            <p class="text-gray-400 text-sm">Total Users</p>
-            <p class="text-3xl font-bold">{{ stats.total }}</p>
-        </div>
-
-        <div class="bg-card rounded-lg p-6">
-            <p class="text-gray-400 text-sm">Active Subscriptions</p>
-            <p class="text-3xl font-bold text-green-400">{{ stats.active }}</p>
-        </div>
-
-        <div class="bg-card rounded-lg p-6">
-            <p class="text-gray-400 text-sm">Expiring Soon (7d)</p>
-            <p class="text-3xl font-bold text-yellow-400">{{ stats.expiring_soon }}</p>
-        </div>
-
-        <div class="bg-card rounded-lg p-6">
-            <p class="text-gray-400 text-sm">In Grace Period</p>
-            <p class="text-3xl font-bold text-orange-400">{{ stats.in_grace_period }}</p>
-        </div>
-    </div>
-
-    <!-- Subscription Breakdown -->
-    <div class="bg-card rounded-lg p-6 mb-8">
-        <h2 class="text-xl font-semibold mb-4">Subscription Breakdown</h2>
-
-        <div class="grid grid-cols-3 gap-4">
-            <div>
-                <p class="text-gray-400 text-sm">Free</p>
-                <p class="text-2xl font-bold">{{ stats.by_plan.free }}</p>
-            </div>
-            <div>
-                <p class="text-gray-400 text-sm">Pro</p>
-                <p class="text-2xl font-bold text-blue-400">{{ stats.by_plan.pro }}</p>
-            </div>
-            <div>
-                <p class="text-gray-400 text-sm">Premium</p>
-                <p class="text-2xl font-bold text-purple-400">{{ stats.by_plan.premium }}</p>
-            </div>
-        </div>
-
-        <div class="mt-4 grid grid-cols-4 gap-4">
-            <div>
-                <p class="text-gray-400 text-sm">Lifetime</p>
-                <p class="text-xl font-bold text-green-400">{{ stats.lifetime }}</p>
-            </div>
-            <div>
-                <p class="text-gray-400 text-sm">Expired</p>
-                <p class="text-xl font-bold text-red-400">{{ stats.expired }}</p>
-            </div>
-            <div>
-                <p class="text-gray-400 text-sm">Cancelled</p>
-                <p class="text-xl font-bold text-gray-400">{{ stats.cancelled }}</p>
-            </div>
-            <div>
-                <p class="text-gray-400 text-sm">Suspended</p>
-                <p class="text-xl font-bold text-red-400">{{ stats.suspended }}</p>
             </div>
         </div>
     </div>

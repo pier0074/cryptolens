@@ -16,7 +16,7 @@
 </div>
 
 <!-- Stats Overview -->
-<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
     <div class="bg-card rounded-lg p-4">
         <p class="text-gray-400 text-sm">Total Jobs</p>
         <p class="text-2xl font-bold">{{ jobs|length }}</p>
@@ -43,9 +43,17 @@
     </div>
 </div>
 
-<!-- Cron Jobs List -->
-<div class="bg-card rounded-lg p-6 mb-8">
-    <h2 class="text-xl font-semibold mb-4">Scheduled Jobs</h2>
+<!-- Cron Jobs by Category -->
+{% for category in sorted_categories %}
+{% if category in jobs_by_category %}
+<div class="bg-card rounded-lg p-6 mb-6">
+    <div class="flex items-center justify-between mb-4">
+        <div>
+            <h2 class="text-xl font-semibold">{{ cron_categories[category].name }}</h2>
+            <p class="text-gray-400 text-sm">{{ cron_categories[category].description }}</p>
+        </div>
+        <span class="text-xs text-gray-500 bg-gray-800 px-2 py-1 rounded">{{ jobs_by_category[category]|length }} jobs</span>
+    </div>
 
     <div class="overflow-x-auto">
         <table class="w-full text-sm">
@@ -61,7 +69,7 @@
                 </tr>
             </thead>
             <tbody>
-                {% for job in jobs %}
+                {% for job in jobs_by_category[category] %}
                 <tr class="border-b border-gray-800 hover:bg-gray-800/50">
                     <td class="py-3 px-4">
                         <div class="font-medium">{{ cron_types.get(job.name, {}).get('name', job.name) }}</div>
@@ -134,6 +142,8 @@
         </table>
     </div>
 </div>
+{% endif %}
+{% endfor %}
 
 <!-- Recent Execution History -->
 <div class="bg-card rounded-lg p-6">
@@ -161,24 +171,28 @@
                         {{ run.started_at.strftime('%Y-%m-%d %H:%M:%S') }}
                     </td>
                     <td class="py-3 px-4">
-                        {% if run.duration_ms %}
+                        {% if run.ended_at %}
                             {{ (run.duration_ms / 1000)|round(2) }}s
                         {% else %}
-                            <span class="text-yellow-400">Running...</span>
+                            <span class="text-yellow-400 animate-pulse">Running...</span>
                         {% endif %}
                     </td>
                     <td class="py-3 px-4">
-                        {% if run.success %}
-                            <span class="text-green-400">Success</span>
+                        {% if run.ended_at %}
+                            {% if run.success %}
+                                <span class="text-green-400">Success</span>
+                            {% else %}
+                                <span class="text-red-400" title="{{ run.error_message }}">Failed</span>
+                            {% endif %}
                         {% else %}
-                            <span class="text-red-400" title="{{ run.error_message }}">Failed</span>
+                            <span class="text-yellow-400">In Progress</span>
                         {% endif %}
                     </td>
                     <td class="py-3 px-4 text-gray-400 text-xs">
-                        {% if run.symbols_processed or run.candles_fetched or run.patterns_found %}
-                            <span class="mr-2" title="Symbols">S: {{ run.symbols_processed }}</span>
-                            <span class="mr-2" title="Candles">C: {{ run.candles_fetched }}</span>
-                            <span class="mr-2" title="Patterns">P: {{ run.patterns_found }}</span>
+                        {% if run.ended_at %}
+                            <span class="mr-2" title="Symbols">S: {{ run.symbols_processed or 0 }}</span>
+                            <span class="mr-2" title="Candles">C: {{ run.candles_fetched or 0 }}</span>
+                            <span class="mr-2" title="Patterns">P: {{ run.patterns_found or 0 }}</span>
                             {% if run.signals_generated %}
                                 <span class="mr-2" title="Signals">Sig: {{ run.signals_generated }}</span>
                             {% endif %}
@@ -186,7 +200,7 @@
                                 <span title="Notifications">N: {{ run.notifications_sent }}</span>
                             {% endif %}
                         {% else %}
-                            -
+                            <span class="text-yellow-400">...</span>
                         {% endif %}
                     </td>
                 </tr>
@@ -205,15 +219,68 @@
     <p class="text-gray-400 mb-4">
         CryptoLens uses system cron for reliable scheduling. Add these entries to your crontab:
     </p>
-    <pre class="bg-gray-900 p-4 rounded-lg overflow-x-auto text-sm">
-# CryptoLens - Fetch candles every minute
-* * * * * cd {{ request.host_url.rstrip('/').replace('http://', '/path/to/').replace('https://', '/path/to/') }} && venv/bin/python scripts/fetch.py >> logs/cron.log 2>&1
 
-# CryptoLens - Fill data gaps every hour
-0 * * * * cd {{ request.host_url.rstrip('/').replace('http://', '/path/to/').replace('https://', '/path/to/') }} && venv/bin/python scripts/fetch.py --gaps >> logs/cron.log 2>&1
-    </pre>
+    <!-- Data Collection -->
+    <div class="mb-6">
+        <h3 class="text-sm font-semibold text-blue-400 uppercase tracking-wide mb-2">Data Collection</h3>
+        <pre class="bg-gray-900 p-4 rounded-lg overflow-x-auto text-sm text-gray-300">
+<span class="text-gray-500"># Fetch latest candles every minute (required)</span>
+* * * * * cd /path/to/cryptolens && venv/bin/python scripts/fetch.py >> logs/cron.log 2>&1
+
+<span class="text-gray-500"># Fill data gaps every hour (recommended)</span>
+0 * * * * cd /path/to/cryptolens && venv/bin/python scripts/fetch.py --gaps >> logs/cron.log 2>&1</pre>
+    </div>
+
+    <!-- Analysis -->
+    <div class="mb-6">
+        <h3 class="text-sm font-semibold text-purple-400 uppercase tracking-wide mb-2">Analysis</h3>
+        <pre class="bg-gray-900 p-4 rounded-lg overflow-x-auto text-sm text-gray-300">
+<span class="text-gray-500"># Scan for patterns every 5 minutes (optional - or use Quick Actions)</span>
+*/5 * * * * cd /path/to/cryptolens && venv/bin/python scripts/scan_patterns.py >> logs/cron.log 2>&1
+
+<span class="text-gray-500"># Refresh statistics every 15 minutes (optional - or use Quick Actions)</span>
+*/15 * * * * cd /path/to/cryptolens && venv/bin/python scripts/compute_stats.py >> logs/cron.log 2>&1</pre>
+    </div>
+
+    <!-- Maintenance -->
+    <div class="mb-6">
+        <h3 class="text-sm font-semibold text-green-400 uppercase tracking-wide mb-2">Maintenance</h3>
+        <pre class="bg-gray-900 p-4 rounded-lg overflow-x-auto text-sm text-gray-300">
+<span class="text-gray-500"># Clean old logs daily at midnight</span>
+0 0 * * * cd /path/to/cryptolens && venv/bin/python scripts/cleanup.py >> logs/cron.log 2>&1
+
+<span class="text-gray-500"># Verify data integrity daily at 3 AM</span>
+0 3 * * * cd /path/to/cryptolens && venv/bin/python scripts/db_health.py --fix >> logs/cron.log 2>&1</pre>
+    </div>
+
+    <!-- Quick Reference -->
+    <div class="mt-6 p-4 bg-gray-800/50 rounded-lg">
+        <h3 class="text-sm font-semibold text-gray-300 mb-3">Quick Reference</h3>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+            <div>
+                <p class="text-gray-400 mb-2"><strong class="text-white">Cron Format:</strong></p>
+                <code class="text-xs text-gray-300">minute hour day month weekday command</code>
+                <ul class="text-gray-400 text-xs mt-2 space-y-1">
+                    <li><code class="text-green-400">*</code> = every unit</li>
+                    <li><code class="text-green-400">*/5</code> = every 5 units</li>
+                    <li><code class="text-green-400">0</code> = at unit 0</li>
+                </ul>
+            </div>
+            <div>
+                <p class="text-gray-400 mb-2"><strong class="text-white">Common Schedules:</strong></p>
+                <ul class="text-gray-400 text-xs space-y-1">
+                    <li><code class="text-blue-400">* * * * *</code> = Every minute</li>
+                    <li><code class="text-blue-400">*/5 * * * *</code> = Every 5 minutes</li>
+                    <li><code class="text-blue-400">0 * * * *</code> = Every hour</li>
+                    <li><code class="text-blue-400">0 0 * * *</code> = Daily at midnight</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
     <p class="text-gray-500 text-sm mt-4">
         Edit your crontab with: <code class="bg-gray-800 px-2 py-1 rounded">crontab -e</code>
+        &nbsp;|&nbsp; View logs: <code class="bg-gray-800 px-2 py-1 rounded">tail -f logs/cron.log</code>
     </p>
 </div>
 {% endblock %}

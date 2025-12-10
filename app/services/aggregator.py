@@ -1,6 +1,6 @@
 """
 Timeframe Aggregator Service
-Aggregates 1m candles into higher timeframes (5m, 15m, 1h, 4h, 1d)
+Aggregates 1m candles into higher timeframes (5m, 15m, 30m, 1h, 2h, 4h, 1d)
 """
 import sys
 import pandas as pd
@@ -8,12 +8,29 @@ from app import db
 from app.models import Symbol, Candle
 
 
+# Single source of truth for timeframe configuration
+# Timeframes to aggregate from 1m (excludes 1m itself)
+AGGREGATION_TIMEFRAMES = ['5m', '15m', '30m', '1h', '2h', '4h', '1d']
+
+# Pandas resample rules for each timeframe
+RESAMPLE_RULES = {
+    '5m': '5min',
+    '15m': '15min',
+    '30m': '30min',
+    '1h': '1h',
+    '2h': '2h',
+    '4h': '4h',
+    '1d': '1D'
+}
+
 # Timeframe multipliers (in minutes)
 TIMEFRAME_MINUTES = {
     '1m': 1,
     '5m': 5,
     '15m': 15,
+    '30m': 30,
     '1h': 60,
+    '2h': 120,
     '4h': 240,
     '1d': 1440
 }
@@ -59,10 +76,8 @@ def aggregate_candles_realtime(symbol: str, from_tf: str = '1m', to_tf: str = '5
     df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
     df.set_index('datetime', inplace=True)
 
-    # Resample rules
-    resample_rules = {'5m': '5min', '15m': '15min', '30m': '30min',
-                      '1h': '1h', '2h': '2h', '4h': '4h', '1d': '1D'}
-    rule = resample_rules.get(to_tf)
+    # Use centralized resample rules
+    rule = RESAMPLE_RULES.get(to_tf)
     if not rule:
         return 0
 
@@ -168,16 +183,8 @@ def aggregate_candles(symbol: str, from_tf: str = '1m', to_tf: str = '5m',
     df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
     df.set_index('datetime', inplace=True)
 
-    # Resample rule mapping
-    resample_rules = {
-        '5m': '5min',
-        '15m': '15min',
-        '1h': '1h',
-        '4h': '4h',
-        '1d': '1D'
-    }
-
-    rule = resample_rules.get(to_tf)
+    # Use centralized resample rules
+    rule = RESAMPLE_RULES.get(to_tf)
     if not rule:
         return 0
 
@@ -266,9 +273,8 @@ def aggregate_all_timeframes(symbol: str, progress_callback=None) -> dict:
         Dict with timeframe -> candles_created count
     """
     results = {}
-    higher_tfs = ['5m', '15m', '1h', '4h', '1d']
 
-    for i, tf in enumerate(higher_tfs):
+    for i, tf in enumerate(AGGREGATION_TIMEFRAMES):
         def tf_callback(stage, current, total, tf=tf):
             if progress_callback:
                 progress_callback(tf, stage, current, total)

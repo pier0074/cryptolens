@@ -148,59 +148,103 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
         }
 
 
-async def fetch_and_process(exchange, symbol, app, verbose=False):
+async def fetch_with_retry(exchange, symbol, timeframe, since=None, limit=None, max_retries=3, retry_delay=2.0, verbose=False):
+    """Fetch OHLCV with retry logic for rate limit errors."""
+    for attempt in range(max_retries):
+        try:
+            if since:
+                return await exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
+            else:
+                return await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        except Exception as e:
+            error_str = str(e).lower()
+            is_rate_limit = 'rate' in error_str or '429' in error_str or 'ban' in error_str
+
+            if is_rate_limit and attempt < max_retries - 1:
+                wait_time = retry_delay * (2 ** attempt)  # Exponential backoff
+                if verbose:
+                    print(f"  {symbol}: Rate limited, waiting {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
+                await asyncio.sleep(wait_time)
+            else:
+                raise
+    return None
+
+
+async def fetch_and_process(exchange, symbol, app, semaphore, verbose=False):
     """Fetch candles from last timestamp to now, then process."""
-    try:
-        # Get last candle timestamp
-        last_ts = get_last_candle_timestamp(app, symbol)
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    from app.config import Config
 
-        if last_ts:
-            gap_minutes = (now_ms - last_ts) // 60000
-            if verbose and gap_minutes > 10:
-                print(f"  {symbol}: Fetching {gap_minutes} min gap...")
+    async with semaphore:  # Limit concurrent requests
+        try:
+            # Get last candle timestamp
+            last_ts = get_last_candle_timestamp(app, symbol)
+            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
-            # Fetch in batches of 1000 (Binance max) until caught up
-            all_ohlcv = []
-            since = last_ts + 60000  # Start from next minute
+            if last_ts:
+                gap_minutes = (now_ms - last_ts) // 60000
+                if verbose and gap_minutes > 10:
+                    print(f"  {symbol}: Fetching {gap_minutes} min gap...")
 
-            while since < now_ms:
-                batch = await exchange.fetch_ohlcv(symbol, '1m', since=since, limit=1000)
-                if not batch:
-                    break
-                all_ohlcv.extend(batch)
-                # Move to next batch (last candle timestamp + 1 min)
-                since = batch[-1][0] + 60000
-                # Small delay to respect rate limits on large gaps
-                if len(batch) == 1000:
-                    await asyncio.sleep(0.1)
+                # Fetch in batches of 1000 (Binance max) until caught up
+                all_ohlcv = []
+                since = last_ts + 60000  # Start from next minute
 
-            ohlcv = all_ohlcv
-        else:
-            # No data yet - fetch initial history
-            ohlcv = await exchange.fetch_ohlcv(symbol, '1m', limit=500)
+                while since < now_ms:
+                    batch = await fetch_with_retry(
+                        exchange, symbol, '1m',
+                        since=since, limit=1000,
+                        max_retries=Config.MAX_RETRIES,
+                        retry_delay=Config.RATE_LIMIT_RETRY_DELAY,
+                        verbose=verbose
+                    )
+                    if not batch:
+                        break
+                    all_ohlcv.extend(batch)
+                    # Move to next batch (last candle timestamp + 1 min)
+                    since = batch[-1][0] + 60000
+                    # Delay between batches to respect rate limits
+                    if len(batch) == 1000:
+                        await asyncio.sleep(Config.RATE_LIMIT_DELAY)
+
+                ohlcv = all_ohlcv
+            else:
+                # No data yet - fetch initial history
+                ohlcv = await fetch_with_retry(
+                    exchange, symbol, '1m', limit=500,
+                    max_retries=Config.MAX_RETRIES,
+                    retry_delay=Config.RATE_LIMIT_RETRY_DELAY,
+                    verbose=verbose
+                )
+                if verbose:
+                    print(f"  {symbol}: Initial fetch (500 candles)...")
+
+            if ohlcv:
+                return process_symbol(symbol, ohlcv, app, verbose)
+            return {'symbol': symbol, 'new': 0, 'patterns': 0}
+
+        except Exception as e:
             if verbose:
-                print(f"  {symbol}: Initial fetch (500 candles)...")
-
-        if ohlcv:
-            return process_symbol(symbol, ohlcv, app, verbose)
-        return {'symbol': symbol, 'new': 0, 'patterns': 0}
-
-    except Exception as e:
-        if verbose:
-            print(f"  {symbol}: ERROR - {e}")
-        return {'symbol': symbol, 'new': 0, 'patterns': 0, 'error': str(e)}
+                print(f"  {symbol}: ERROR - {e}")
+            return {'symbol': symbol, 'new': 0, 'patterns': 0, 'error': str(e)}
 
 
 async def run_fetch_cycle(symbols, app, verbose=False):
-    """Run a complete fetch cycle with parallel fetching."""
+    """Run a complete fetch cycle with rate-limited parallel fetching."""
+    from app.config import Config
+
     exchange = ccxt_async.binance({
         'enableRateLimit': True,
         'options': {'defaultType': 'spot'}
     })
 
+    # Semaphore to limit concurrent requests (prevents rate limiting)
+    semaphore = asyncio.Semaphore(Config.MAX_CONCURRENT_REQUESTS)
+
+    if verbose:
+        print(f"  Fetching {len(symbols)} symbols (max {Config.MAX_CONCURRENT_REQUESTS} concurrent)...")
+
     try:
-        tasks = [fetch_and_process(exchange, s, app, verbose) for s in symbols]
+        tasks = [fetch_and_process(exchange, s, app, semaphore, verbose) for s in symbols]
         results = []
         for coro in asyncio.as_completed(tasks):
             result = await coro
@@ -299,10 +343,14 @@ def complete_cron_run(app, run_id, success=True, error_message=None,
         return
 
     with app.app_context():
-        run = CronRun.query.get(run_id)
+        run = db.session.get(CronRun, run_id)
         if run:
             run.ended_at = datetime.now(timezone.utc)
-            run.duration_ms = int((run.ended_at - run.started_at).total_seconds() * 1000)
+            # Handle timezone-naive started_at from database
+            started_at = run.started_at
+            if started_at.tzinfo is None:
+                started_at = started_at.replace(tzinfo=timezone.utc)
+            run.duration_ms = int((run.ended_at - started_at).total_seconds() * 1000)
             run.success = success
             run.error_message = error_message
             run.symbols_processed = symbols_processed

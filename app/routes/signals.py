@@ -36,9 +36,8 @@ def index():
             query = query.filter(Signal.symbol_id == -1)  # No matches
 
     if direction_filter:
-        # Convert 'long' to 'bullish', 'short' to 'bearish'
-        db_direction = 'bullish' if direction_filter == 'long' else 'bearish'
-        query = query.filter_by(direction=db_direction)
+        # Signals use 'long'/'short' directly
+        query = query.filter_by(direction=direction_filter)
 
     # Apply tier-based limit (Pro: 50, Premium: unlimited)
     query = query.order_by(Signal.created_at.desc())

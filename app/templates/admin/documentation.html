@@ -952,7 +952,7 @@ curl -H "X-API-Key: your_api_key" https://app.cryptolens.io/api/patterns
             <h2 class="docs-h2">Pattern Detection Config</h2>
             <p class="docs-p">Located in <code class="docs-code">app/config.py</code>:</p>
             <div class="docs-codeblock">
-TIMEFRAMES = ['1m', '5m', '15m', '1h', '4h', '1d']
+TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']
 FVG_MIN_GAP_PERCENT = 0.001  # 0.1% minimum gap size
 ORDER_BLOCK_STRENGTH_MULTIPLIER = 1.5  # 1.5x avg body for OB
 LIQUIDITY_SWING_LOOKBACK = 5  # Candles to look for swings
@@ -1040,113 +1040,269 @@ server {
 
             <h2 class="docs-h2">Scripts Overview</h2>
             <table class="docs-table">
-                <tr><th>Script</th><th>Location</th><th>Purpose</th></tr>
-                <tr><td><code class="docs-code">fetch.py</code></td><td>scripts/</td><td>Main data pipeline - fetch, aggregate, detect, notify</td></tr>
-                <tr><td><code class="docs-code">compute_stats.py</code></td><td>scripts/</td><td>Cache statistics for fast page loads</td></tr>
-                <tr><td><code class="docs-code">db_health.py</code></td><td>scripts/</td><td>Data integrity verification and repair</td></tr>
-                <tr><td><code class="docs-code">fetch_historical.py</code></td><td>scripts/</td><td>Initial data load and gap backfill</td></tr>
-                <tr><td><code class="docs-code">migrate_all.py</code></td><td>scripts/</td><td>Database schema migrations</td></tr>
-                <tr><td><code class="docs-code">create_admin.py</code></td><td>scripts/</td><td>Create admin and test accounts</td></tr>
+                <tr><th>Script</th><th>Purpose</th><th>Cron Schedule</th></tr>
+                <tr><td><code class="docs-code">fetch.py</code></td><td>Real-time data pipeline - fetch, aggregate, detect, signal, notify</td><td>Every minute</td></tr>
+                <tr><td><code class="docs-code">fetch_historical.py</code></td><td>Historical data load and gap filling</td><td>Manual / Hourly (gaps)</td></tr>
+                <tr><td><code class="docs-code">compute_stats.py</code></td><td>Pre-compute statistics cache for fast page loads</td><td>Every 5 minutes</td></tr>
+                <tr><td><code class="docs-code">db_health.py</code></td><td>Data integrity verification and repair</td><td>Daily at 3 AM</td></tr>
+                <tr><td><code class="docs-code">migrate_all.py</code></td><td>Database schema migrations (upgrades)</td><td>Manual (on deploy)</td></tr>
+                <tr><td><code class="docs-code">create_admin.py</code></td><td>Create admin and test accounts</td><td>Manual (initial setup)</td></tr>
             </table>
 
-            <h2 class="docs-h2">fetch.py - Main Data Pipeline</h2>
-            <p class="docs-p">The core script that runs every minute. Executes the full data pipeline:</p>
+            <!-- ==================== FETCH.PY ==================== -->
+            <h2 class="docs-h2">fetch.py - Real-time Data Pipeline</h2>
+            <p class="docs-p">
+                The core script that runs every minute. Fetches latest candles from Binance, aggregates to higher timeframes,
+                detects patterns, generates signals, and sends notifications.
+            </p>
 
-            <div class="docs-diagram">1. Fetch 1m Candles    -> CCXT fetches latest candles from Binance
-       |
-2. Aggregate           -> 1m candles -> 5m, 15m, 1h, 4h, 1d
-       |
-3. Detect Patterns     -> FVG, OB, Sweep detection on all TFs
-       |
-4. Expire Patterns     -> Mark old patterns as 'expired'
-       |
-5. Generate Signals    -> Calculate confluence, create signals
-       |
-6. Send Notifications  -> Push to NTFY for matching users</div>
+            <h3 class="docs-h3">Data Flow</h3>
+            <div class="docs-diagram">1. Check last candle timestamp in DB
+2. Fetch all 1m candles from there to now (via CCXT/Binance)
+3. Save new candles to database
+4. Aggregate to higher timeframes (5m, 15m, 30m, 1h, 2h, 4h, 1d)
+5. Detect patterns on all fetched candles (FVG, OB, Sweep)
+6. Update pattern status with current price
+7. Generate signals (when 2+ timeframes align)
+8. Expire old patterns (based on timeframe expiry rules)
+9. Send notifications (to matching users)
+10. Log run to database (CronRun entry)</div>
 
             <h3 class="docs-h3">Command Line Options</h3>
-            <div class="docs-codeblock">python scripts/fetch.py                    # Normal run
-python scripts/fetch.py -v                 # Verbose output
-python scripts/fetch.py --symbol BTC/USDT  # Single symbol only
-python scripts/fetch.py --skip-notify      # Skip notifications</div>
+            <table class="docs-table">
+                <tr><th>Option</th><th>Description</th><th>Example</th></tr>
+                <tr><td><code class="docs-code">--verbose, -v</code></td><td>Enable verbose output with detailed progress</td><td><code class="docs-code">python scripts/fetch.py -v</code></td></tr>
+                <tr><td><code class="docs-code">--gaps</code></td><td>Fill data gaps mode (runs as 'gaps' job)</td><td><code class="docs-code">python scripts/fetch.py --gaps</code></td></tr>
+            </table>
 
-            <h3 class="docs-h3">What It Does Step by Step</h3>
-            <ol class="docs-list">
-                <li><strong>Fetch Candles</strong> - Gets latest 1m candles from Binance via CCXT for each active symbol</li>
-                <li><strong>Aggregate</strong> - Combines 1m candles into higher timeframes (5m needs 5 candles, etc.)</li>
-                <li><strong>Pattern Detection</strong> - Runs FVG, Order Block, and Sweep detectors on all timeframes</li>
-                <li><strong>Expire Patterns</strong> - Marks patterns as 'expired' based on timeframe rules (1m=4h, 1d=14d)</li>
-                <li><strong>Signal Generation</strong> - When 2+ timeframes align, creates a trade signal</li>
-                <li><strong>Notifications</strong> - Sends push notifications to users matching their preferences</li>
-            </ol>
+            <h3 class="docs-h3">Usage Examples</h3>
+            <div class="docs-codeblock"># Standard run (every minute via cron)
+python scripts/fetch.py
 
+# Verbose output for debugging
+python scripts/fetch.py -v
+
+# Gap filling mode (hourly cron)
+python scripts/fetch.py --gaps</div>
+
+            <h3 class="docs-h3">Output</h3>
+            <div class="docs-codeblock">[21:30:45] Fetching... done. 156 candles, 12 patterns, 2 signals (8.3s)</div>
+
+            <!-- ==================== FETCH_HISTORICAL.PY ==================== -->
+            <h2 class="docs-h2">fetch_historical.py - Historical Data &amp; Gap Fill</h2>
+            <p class="docs-p">
+                Fetches historical candle data for initial setup, backfilling, or gap detection. Uses async parallel fetching for speed.
+            </p>
+
+            <h3 class="docs-h3">Command Line Options</h3>
+            <table class="docs-table">
+                <tr><th>Option</th><th>Description</th><th>Default</th></tr>
+                <tr><td><code class="docs-code">--days N</code></td><td>Number of days of history to fetch</td><td>365</td></tr>
+                <tr><td><code class="docs-code">--gaps</code></td><td>Only find and fill gaps (for hourly cron)</td><td>Off</td></tr>
+                <tr><td><code class="docs-code">--full</code></td><td>With --gaps: scan entire database, not just last X days</td><td>Off</td></tr>
+                <tr><td><code class="docs-code">--status</code></td><td>Show database status (candle counts, date ranges)</td><td>-</td></tr>
+                <tr><td><code class="docs-code">--delete</code></td><td>Delete ALL data (requires typing 'DELETE' to confirm)</td><td>-</td></tr>
+                <tr><td><code class="docs-code">--verbose, -v</code></td><td>Verbose output</td><td>Off</td></tr>
+                <tr><td><code class="docs-code">--no-aggregate</code></td><td>Skip aggregation after fetching</td><td>Off</td></tr>
+            </table>
+
+            <h3 class="docs-h3">Usage Examples</h3>
+            <div class="docs-codeblock"># Initial load - fetch 1 year of history for all active symbols
+python scripts/fetch_historical.py
+
+# Fetch only last 30 days
+python scripts/fetch_historical.py --days 30
+
+# Gap fill mode (finds missing candles and fetches them)
+python scripts/fetch_historical.py --gaps
+
+# Gap fill scanning entire database (not just last X days)
+python scripts/fetch_historical.py --gaps --full
+
+# Check database status
+python scripts/fetch_historical.py --status
+
+# Delete all data (DANGEROUS - requires confirmation)
+python scripts/fetch_historical.py --delete
+
+# Verbose with 90 days
+python scripts/fetch_historical.py --days 90 -v</div>
+
+            <h3 class="docs-h3">Status Output Example</h3>
+            <div class="docs-codeblock">════════════════════════════════════════════════════════════
+  Database Status
+════════════════════════════════════════════════════════════
+  BTC/USDT     |    525,600 | 2024-01-01 → 2024-12-10 21:30
+  ETH/USDT     |    525,600 | 2024-01-01 → 2024-12-10 21:30
+  SOL/USDT     |    144,000 | 2024-09-01 → 2024-12-10 21:30
+────────────────────────────────────────────────────────────
+  Total: 1,195,200 candles (1m)
+════════════════════════════════════════════════════════════</div>
+
+            <div class="docs-alert docs-alert-warning">
+                <strong>Warning:</strong> The <code class="docs-code">--delete</code> flag will delete ALL candles, patterns, signals, and notifications. You must type 'DELETE' to confirm.
+            </div>
+
+            <!-- ==================== COMPUTE_STATS.PY ==================== -->
             <h2 class="docs-h2">compute_stats.py - Statistics Cache</h2>
-            <p class="docs-p">Pre-computes statistics to make page loads fast. Runs every 5 minutes.</p>
+            <p class="docs-p">
+                Pre-computes database statistics and caches them for fast page loads. Run every 5 minutes via cron.
+            </p>
 
             <h3 class="docs-h3">What It Caches</h3>
             <ul class="docs-list">
-                <li><strong>Global Stats</strong> - Total symbols, patterns, signals, users</li>
-                <li><strong>Per-Symbol Stats</strong> - Pattern counts, candle counts, last update time</li>
-                <li><strong>Candle Verification</strong> - Gap detection, data integrity status</li>
+                <li><strong>Global Stats</strong> - Total candles, patterns, signals, database size</li>
+                <li><strong>Per-Symbol Stats</strong> - Candle counts by timeframe, date ranges, pattern counts</li>
+                <li><strong>Price Data</strong> - Current price, 24h change for each symbol</li>
+                <li><strong>Freshness</strong> - Data age indicator (live, recent, stale, old)</li>
+                <li><strong>Verification</strong> - Last verified timestamp, verification percentage</li>
             </ul>
 
-            <div class="docs-codeblock">python scripts/compute_stats.py            # Normal run
-python scripts/compute_stats.py -v         # Verbose with details</div>
+            <h3 class="docs-h3">Usage</h3>
+            <div class="docs-codeblock"># Standard run
+python scripts/compute_stats.py</div>
 
+            <h3 class="docs-h3">Output</h3>
+            <div class="docs-codeblock">Stats computed and cached in 0.84s
+  Symbols: 22, Candles: 11,547,200, Patterns: 1,234, Signals: 456</div>
+
+            <!-- ==================== DB_HEALTH.PY ==================== -->
             <h2 class="docs-h2">db_health.py - Data Integrity</h2>
-            <p class="docs-p">Verifies candle data integrity and optionally fixes issues. Runs daily at 3 AM.</p>
+            <p class="docs-p">
+                Incrementally verifies candle data integrity. Checks from first unverified candle,
+                marks as verified on success, stops on error. Run daily at 3 AM.
+            </p>
 
             <h3 class="docs-h3">Checks Performed</h3>
             <table class="docs-table">
                 <tr><th>Check</th><th>Description</th><th>Fix Action</th></tr>
-                <tr><td>OHLCV Validity</td><td>High >= Low, prices > 0, volume >= 0</td><td>Delete invalid candle</td></tr>
-                <tr><td>Timestamp Alignment</td><td>Timestamps align to timeframe boundaries</td><td>Delete misaligned candle</td></tr>
-                <tr><td>Duplicate Detection</td><td>No duplicate timestamps per symbol/TF</td><td>Keep newest, delete old</td></tr>
-                <tr><td>Gap Detection</td><td>Identifies missing candles</td><td>Report only (refetch manually)</td></tr>
+                <tr><td>OHLCV Validity</td><td>high &gt;= low, high &gt;= open/close, prices &gt; 0, volume &gt;= 0</td><td>Delete invalid candle</td></tr>
+                <tr><td>Timestamp Alignment</td><td>Timestamps align to timeframe boundaries (5m at :00/:05, etc.)</td><td>Delete misaligned candle</td></tr>
+                <tr><td>Gap Detection</td><td>Missing candles in sequence (gaps &gt; 5 minutes)</td><td>Report only (use fetch_historical --gaps)</td></tr>
+                <tr><td>Continuity</td><td>Open should equal previous close (informational only)</td><td>None (crypto can gap)</td></tr>
             </table>
 
-            <div class="docs-codeblock">python scripts/db_health.py                # Check only (no changes)
-python scripts/db_health.py --fix          # Check and fix issues
-python scripts/db_health.py -v             # Verbose output
-python scripts/db_health.py --symbol BTC/USDT  # Single symbol</div>
+            <h3 class="docs-h3">Command Line Options</h3>
+            <table class="docs-table">
+                <tr><th>Option</th><th>Description</th><th>Example</th></tr>
+                <tr><td><code class="docs-code">--fix</code></td><td>Auto-fix issues (delete invalid candles)</td><td><code class="docs-code">--fix</code></td></tr>
+                <tr><td><code class="docs-code">--symbol NAME</code></td><td>Check specific symbol only</td><td><code class="docs-code">--symbol BTC/USDT</code></td></tr>
+                <tr><td><code class="docs-code">--reset</code></td><td>Reset all verification flags (re-check everything)</td><td><code class="docs-code">--reset</code></td></tr>
+                <tr><td><code class="docs-code">--verbose, -v</code></td><td>Verbose output</td><td><code class="docs-code">-v</code></td></tr>
+            </table>
 
-            <h2 class="docs-h2">fetch_historical.py - Initial Data Load</h2>
-            <p class="docs-p">Fetches historical candle data for new symbols or to fill gaps.</p>
+            <h3 class="docs-h3">Usage Examples</h3>
+            <div class="docs-codeblock"># Check only (report issues, no changes)
+python scripts/db_health.py
 
-            <div class="docs-codeblock">python scripts/fetch_historical.py         # Fetch all symbols
-python scripts/fetch_historical.py -v      # Verbose
-python scripts/fetch_historical.py --symbol ETH/USDT  # Single symbol
-python scripts/fetch_historical.py --days 30          # Last 30 days only
-python scripts/fetch_historical.py --delete           # DELETE ALL DATA (requires confirmation)</div>
+# Check and auto-fix issues
+python scripts/db_health.py --fix
+
+# Check specific symbol only
+python scripts/db_health.py --symbol BTC/USDT
+
+# Reset verification and re-check everything
+python scripts/db_health.py --reset
+
+# Verbose output
+python scripts/db_health.py --fix -v</div>
+
+            <!-- ==================== MIGRATE_ALL.PY ==================== -->
+            <h2 class="docs-h2">migrate_all.py - Database Migrations</h2>
+            <p class="docs-p">
+                Runs all database schema migrations for upgrading existing databases.
+                <strong>Not needed for new installations</strong> - db.create_all() includes everything.
+            </p>
+
+            <h3 class="docs-h3">What It Does</h3>
+            <ul class="docs-list">
+                <li>Adds new columns to existing tables</li>
+                <li>Creates new tables if missing</li>
+                <li>Creates missing indexes</li>
+                <li>Encrypts unencrypted TOTP secrets</li>
+                <li>Seeds default notification templates</li>
+            </ul>
+
+            <h3 class="docs-h3">Usage</h3>
+            <div class="docs-codeblock"># Run migrations
+python scripts/migrate_all.py</div>
+
+            <h3 class="docs-h3">Output Example</h3>
+            <div class="docs-codeblock">Migrations applied:
+  - Added candles.verified_at
+  - Created stats_cache table
+  - Added idx_pattern_list index
+  - Created 6 default notification templates</div>
+
+            <!-- ==================== CREATE_ADMIN.PY ==================== -->
+            <h2 class="docs-h2">create_admin.py - Test Accounts</h2>
+            <p class="docs-p">
+                Creates admin and test accounts for development/testing. Idempotent - safe to run multiple times.
+            </p>
+
+            <h3 class="docs-h3">Accounts Created</h3>
+            <table class="docs-table">
+                <tr><th>Email</th><th>Username</th><th>Password</th><th>Tier</th></tr>
+                <tr><td>admin@cryptolens.local</td><td>admin</td><td>Admin123</td><td>Admin + Premium</td></tr>
+                <tr><td>free@cryptolens.local</td><td>freeuser</td><td>Free123</td><td>Free</td></tr>
+                <tr><td>pro@cryptolens.local</td><td>prouser</td><td>Pro123</td><td>Pro</td></tr>
+                <tr><td>premium@cryptolens.local</td><td>premiumuser</td><td>Premium123</td><td>Premium</td></tr>
+            </table>
+
+            <h3 class="docs-h3">Usage</h3>
+            <div class="docs-codeblock"># Create test accounts
+python scripts/create_admin.py</div>
 
             <div class="docs-alert docs-alert-warning">
-                <strong>Warning:</strong> The <code class="docs-code">--delete</code> flag will delete ALL candles, patterns, signals, and notifications. Use with caution!
+                <strong>Important:</strong> Change passwords after testing! These are well-known test credentials.
             </div>
 
-            <h2 class="docs-h2">Cron Schedule</h2>
-            <p class="docs-p">Default crontab configuration:</p>
+            <!-- ==================== CRON SCHEDULE ==================== -->
+            <h2 class="docs-h2">Recommended Cron Schedule</h2>
+            <p class="docs-p">Production crontab configuration:</p>
 
-            <div class="docs-codeblock"># Install: crontab crontab.txt
+            <div class="docs-codeblock"># Real-time data pipeline (every minute)
+* * * * * cd /path/to/cryptolens && venv/bin/python scripts/fetch.py >> logs/fetch.log 2>&1
 
-# Real-time data pipeline (every minute)
-* * * * * cd /path/to/cryptolens && /path/to/venv/bin/python scripts/fetch.py >> logs/fetch.log 2>&1
+# Gap filling (hourly)
+0 * * * * cd /path/to/cryptolens && venv/bin/python scripts/fetch_historical.py --gaps >> logs/gaps.log 2>&1
 
 # Statistics cache (every 5 minutes)
-*/5 * * * * cd /path/to/cryptolens && /path/to/venv/bin/python scripts/compute_stats.py >> logs/stats.log 2>&1
+*/5 * * * * cd /path/to/cryptolens && venv/bin/python scripts/compute_stats.py >> logs/stats.log 2>&1
 
 # Data integrity check (daily at 3 AM)
-0 3 * * * cd /path/to/cryptolens && /path/to/venv/bin/python scripts/db_health.py --fix >> logs/health.log 2>&1</div>
+0 3 * * * cd /path/to/cryptolens && venv/bin/python scripts/db_health.py --fix >> logs/health.log 2>&1</div>
+
+            <!-- ==================== ADMIN QUICK ACTIONS ==================== -->
+            <h2 class="docs-h2">Admin Quick Actions</h2>
+            <p class="docs-p">
+                These actions can also be triggered from the Admin panel (Admin &gt; Quick Actions).
+                They run in the background and log to the Cron Jobs page.
+            </p>
+
+            <table class="docs-table">
+                <tr><th>Button</th><th>What It Does</th><th>Equivalent Script</th></tr>
+                <tr><td><strong>Full Cycle</strong></td><td>Fetch → Pattern Scan → Stats (sequential)</td><td>fetch.py + scan + compute_stats.py</td></tr>
+                <tr><td><strong>Fetch</strong></td><td>Fetch latest candle data from exchange</td><td>fetch.py</td></tr>
+                <tr><td><strong>Scan</strong></td><td>Scan existing candles for patterns</td><td>Pattern detection only</td></tr>
+                <tr><td><strong>Stats</strong></td><td>Refresh statistics cache</td><td>compute_stats.py</td></tr>
+                <tr><td><strong>Cleanup</strong></td><td>Database health check with auto-fix</td><td>db_health.py --fix</td></tr>
+            </table>
 
             <h3 class="docs-h3">Cron Job Monitoring</h3>
             <p class="docs-p">
-                View cron job status in Admin > Cron Jobs. Each run is logged with:
+                View cron job status in Admin &gt; Cron Jobs. Each run is logged with:
             </p>
             <ul class="docs-list">
-                <li>Start/end timestamps</li>
-                <li>Duration</li>
-                <li>Success/failure status</li>
-                <li>Records affected</li>
+                <li>Start/end timestamps and duration</li>
+                <li>Success/failure status with error messages</li>
+                <li>Statistics: Symbols processed, Candles fetched, Patterns found</li>
+                <li>Success rate and average duration</li>
             </ul>
+
+            <p class="docs-p">
+                Jobs stuck in "Running..." for more than 1 hour are automatically marked as failed.
+            </p>
         </section>
 
         <!-- ==================== SERVICES ==================== -->

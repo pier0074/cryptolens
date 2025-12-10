@@ -138,7 +138,7 @@ def create_app(config_name=None):
     # No external services required - uses PostgreSQL for storage
     app.config['ERROR_TRACKING_ENABLED'] = os.getenv('ERROR_TRACKING_ENABLED', 'true').lower() == 'true'
     if app.config['ERROR_TRACKING_ENABLED']:
-        logging.getLogger('cryptolens').info("Error tracking enabled (self-hosted)")
+        logging.getLogger('cryptolens').info("Logging system active")
 
     # Session security configuration
     # Secure cookies in production (HTTPS), always HttpOnly, SameSite=Lax
