@@ -180,8 +180,9 @@
                         <span class="text-gray-600 text-xs">candles</span>
                     </div>
 
-                    <!-- Fetch Historical Button (only for active symbols) -->
-                    <div class="w-10 flex justify-center">
+                    <!-- Action Buttons (only for active symbols with data) -->
+                    <div class="w-20 flex justify-center gap-1">
+                        <!-- Fetch Historical -->
                         <template x-if="symbol.is_active">
                             <button @click="fetchHistorical(symbol)"
                                     :disabled="symbol.fetching"
@@ -189,6 +190,22 @@
                                     title="Fetch historical data from target start date">
                                 <svg class="w-4 h-4" :class="symbol.fetching && 'animate-spin'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path>
+                                </svg>
+                            </button>
+                        </template>
+                        <!-- Fix/Sanitize (only for symbols with data) -->
+                        <template x-if="symbol.candle_count > 0">
+                            <button @click="fixSymbol(symbol)"
+                                    :disabled="symbol.fixing"
+                                    class="p-1.5 rounded transition disabled:opacity-50 text-gray-400 hover:text-green-400 hover:bg-gray-700"
+                                    title="Fix candle data integrity (OHLCV, gaps, alignment)">
+                                <svg class="w-4 h-4" :class="symbol.fixing && 'animate-spin'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <template x-if="!symbol.fixing">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path>
+                                    </template>
+                                    <template x-if="symbol.fixing">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                                    </template>
                                 </svg>
                             </button>
                         </template>
@@ -343,7 +360,8 @@ function symbolsApp() {
                 this.symbols = data.map(s => ({
                     ...s,
                     is_mandatory: this.mandatorySymbols.includes(s.symbol),
-                    fetching: false
+                    fetching: false,
+                    fixing: false
                 }));
             } catch (e) {
                 this.showToast('Failed to load symbols', 'error');
@@ -538,6 +556,34 @@ function symbolsApp() {
                 // Keep showing as fetching for a moment, then reset
                 setTimeout(() => {
                     symbol.fetching = false;
+                }, 2000);
+            }
+        },
+
+        async fixSymbol(symbol) {
+            if (symbol.fixing) return;
+
+            symbol.fixing = true;
+            try {
+                const response = await fetch(`/admin/api/symbols/${symbol.id}/fix`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': getCsrfToken()
+                    }
+                });
+                const data = await response.json();
+                if (data.success) {
+                    this.showToast(`Fix started for ${symbol.symbol}. Check Cron Jobs for progress.`, 'success');
+                } else {
+                    this.showToast(data.error || 'Failed to start fix', 'error');
+                }
+            } catch (e) {
+                this.showToast('Failed to start symbol fix', 'error');
+            } finally {
+                // Keep showing as fixing for a moment, then reset
+                setTimeout(() => {
+                    symbol.fixing = false;
                 }, 2000);
             }
         },

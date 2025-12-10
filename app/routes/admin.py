@@ -1881,3 +1881,99 @@ def api_fetch_historical(symbol_id):
         'symbol': symbol_name,
         'start_date': fetch_start_date
     })
+
+
+@admin_bp.route('/api/symbols/<int:symbol_id>/fix', methods=['POST'])
+@admin_required
+def api_fix_symbol(symbol_id):
+    """Fix candle data integrity for a single symbol (runs in background)"""
+    import threading
+    from app.models import Symbol
+    from app.services.logger import log_admin
+
+    symbol = db.session.get(Symbol, symbol_id)
+    if not symbol:
+        return jsonify({'success': False, 'error': 'Symbol not found'}), 404
+
+    symbol_name = symbol.symbol
+    log_admin(f"Symbol fix: Starting background fix for {symbol_name}")
+
+    def run_fix_in_background(sym_name):
+        """Run db_health fix in a separate thread with its own app context"""
+        import traceback
+        from datetime import datetime, timezone
+        from app import create_app, db as app_db
+        from app.models import CronJob, CronRun
+        from app.services.logger import log_admin
+        from scripts.db_health import run_health_check
+
+        app = create_app()
+        with app.app_context():
+            # Create cron run entry
+            job = CronJob.query.filter_by(name='symbol_fix').first()
+            if not job:
+                job = CronJob(name='symbol_fix', description=f'Fix candle data for symbol', schedule='manual', is_enabled=True)
+                app_db.session.add(job)
+                app_db.session.commit()
+
+            run = CronRun(job_id=job.id)
+            app_db.session.add(run)
+            app_db.session.commit()
+            run_id = run.id
+
+            success = False
+            error_msg = None
+            verified_count = 0
+            error_count = 0
+
+            try:
+                log_admin(f"Symbol fix: {sym_name} - starting candle data verification...")
+
+                # Run health check with fix=True for this specific symbol
+                result = run_health_check(symbol_filter=sym_name, fix=True, verbose=False)
+
+                if result:
+                    verified_count = result.get('verified', 0)
+                    errors = result.get('errors', {})
+                    error_count = sum(errors.values()) if errors else 0
+
+                log_admin(f"Symbol fix: {sym_name} - complete! Verified {verified_count:,} candles, fixed {error_count} issues")
+                success = True
+
+            except Exception as e:
+                error_msg = f"{type(e).__name__}: {str(e)}"
+                log_admin(f"Symbol fix: {sym_name} - ERROR: {error_msg}")
+                traceback.print_exc()
+
+            finally:
+                # Always mark run as complete
+                try:
+                    run = app_db.session.get(CronRun, run_id)
+                    if run:
+                        run.ended_at = datetime.now(timezone.utc)
+                        started_at = run.started_at
+                        if started_at.tzinfo is None:
+                            started_at = started_at.replace(tzinfo=timezone.utc)
+                        run.duration_ms = int((run.ended_at - started_at).total_seconds() * 1000)
+                        run.success = success
+                        run.error_message = error_msg
+                        run.candles_fetched = verified_count
+                        run.symbols_processed = 1 if success else 0
+                        run.patterns_found = error_count  # Reuse field for errors fixed
+                        app_db.session.commit()
+                except Exception as e:
+                    log_admin(f"Symbol fix: Failed to update cron run: {str(e)}")
+
+    # Start background thread
+    thread = threading.Thread(
+        target=run_fix_in_background,
+        args=(symbol_name,),
+        daemon=True
+    )
+    thread.start()
+
+    return jsonify({
+        'success': True,
+        'message': f'Fix started for {symbol_name}. Check Cron Jobs for progress.',
+        'symbol': symbol_name
+    })

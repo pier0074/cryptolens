@@ -256,4 +256,10 @@ CRON_JOB_TYPES = {
         'schedule': 'manual',
         'category': 'workflow',
     },
+    'symbol_fix': {
+        'name': 'Symbol Fix',
+        'description': 'Fix candle data integrity for a specific symbol',
+        'schedule': 'manual',
+        'category': 'maintenance',
+    },
 }
