@@ -138,7 +138,8 @@ class TestExpectedTimeframes:
 
     def test_expected_config_timeframes(self):
         """Document and verify expected Config.TIMEFRAMES."""
-        expected = ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']
+        # Note: 1m removed as it's too noisy for reliable pattern detection
+        expected = ['5m', '15m', '30m', '1h', '2h', '4h', '1d']
         assert Config.TIMEFRAMES == expected, (
             f"Config.TIMEFRAMES changed unexpectedly. "
             f"Expected: {expected}, Got: {Config.TIMEFRAMES}. "

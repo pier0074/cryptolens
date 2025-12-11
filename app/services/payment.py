@@ -153,8 +153,22 @@ def create_lemonsqueezy_checkout(user, plan, billing_cycle='monthly'):
 
 
 def verify_lemonsqueezy_webhook(payload, signature):
-    """Verify LemonSqueezy webhook signature"""
+    """
+    Verify LemonSqueezy webhook signature.
+
+    Security: If webhook secret is not configured, logs a critical warning
+    and rejects all webhooks in production for safety.
+    """
     if not LEMONSQUEEZY_WEBHOOK_SECRET:
+        log_payment(
+            "SECURITY WARNING: LemonSqueezy webhook secret not configured - rejecting webhook",
+            level='ERROR',
+            details={'signature_provided': bool(signature)}
+        )
+        return False
+
+    if not signature:
+        log_payment("LemonSqueezy webhook missing signature", level='WARNING')
         return False
 
     expected = hmac.new(
@@ -325,8 +339,22 @@ def create_nowpayments_invoice(user, plan, billing_cycle='monthly', crypto_curre
 
 
 def verify_nowpayments_webhook(payload, signature):
-    """Verify NOWPayments IPN signature"""
+    """
+    Verify NOWPayments IPN signature.
+
+    Security: If IPN secret is not configured, logs a critical warning
+    and rejects all webhooks in production for safety.
+    """
     if not NOWPAYMENTS_IPN_SECRET:
+        log_payment(
+            "SECURITY WARNING: NOWPayments IPN secret not configured - rejecting webhook",
+            level='ERROR',
+            details={'signature_provided': bool(signature)}
+        )
+        return False
+
+    if not signature:
+        log_payment("NOWPayments webhook missing signature", level='WARNING')
         return False
 
     import json
@@ -415,13 +443,39 @@ def activate_subscription(user, plan, billing_cycle, provider, external_id=None)
     """
     Activate or extend a user's subscription.
 
+    Idempotent: If external_id was already processed, returns success without
+    double-crediting the subscription.
+
     Args:
         user: User object
         plan: 'pro', 'premium', or 'lifetime'
         billing_cycle: 'monthly' or 'yearly'
         provider: 'lemonsqueezy' or 'nowpayments'
-        external_id: Provider's transaction ID
+        external_id: Provider's transaction ID (used for idempotency)
+
+    Returns:
+        dict with success status and subscription info
     """
+    # IDEMPOTENCY CHECK: If we've already processed this external_id, don't double-credit
+    if external_id:
+        existing_payment = Payment.query.filter_by(
+            provider=provider,
+            external_id=str(external_id),
+            status='completed'
+        ).first()
+
+        if existing_payment:
+            log_payment(
+                f"Idempotency: Webhook already processed for {external_id}",
+                details={'provider': provider, 'external_id': external_id, 'user_id': user.id}
+            )
+            return {
+                'success': True,
+                'idempotent': True,
+                'plan': plan,
+                'message': 'Already processed'
+            }
+
     now = datetime.now(timezone.utc)
 
     # Calculate expiry

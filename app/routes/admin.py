@@ -1498,7 +1498,7 @@ def quick_cleanup():
         with app.app_context():
             run_id = _start_cron_run('cleanup')
             try:
-                result = run_health_check(fix=True, verbose=False)
+                result = run_health_check(fix=True, verbose=False, app=app)
                 verified = result.get('verified', 0) if result else 0
                 errors = result.get('errors', {}) if result else {}
                 error_count = sum(errors.values()) if errors else 0
@@ -1533,7 +1533,7 @@ def quick_sanitize():
             run_id = _start_cron_run('sanitize')
             try:
                 log_admin("Sanitize: Starting candle data integrity check...")
-                result = run_health_check(fix=True, verbose=False)
+                result = run_health_check(fix=True, verbose=False, app=app)
                 verified = result.get('verified', 0) if result else 0
                 errors = result.get('errors', {}) if result else {}
                 error_count = sum(errors.values()) if errors else 0
@@ -1930,7 +1930,8 @@ def api_fix_symbol(symbol_id):
                 log_admin(f"Symbol fix: {sym_name} - starting candle data verification...")
 
                 # Run health check with fix=True for this specific symbol
-                result = run_health_check(symbol_filter=sym_name, fix=True, verbose=False)
+                # Pass app to avoid nested app context
+                result = run_health_check(symbol_filter=sym_name, fix=True, verbose=False, app=app)
 
                 if result:
                     verified_count = result.get('verified', 0)

@@ -290,9 +290,10 @@ class TestConfluence:
             base_time = 1700000000000
 
             # Create patterns with different directions
+            # Note: 1m removed from TIMEFRAMES (too noisy), using valid timeframes only
             patterns_data = [
-                ('1m', 'bullish'),
                 ('5m', 'bullish'),
+                ('30m', 'bullish'),
                 ('15m', 'bearish'),
                 ('1h', 'bullish'),
                 ('4h', 'bullish'),

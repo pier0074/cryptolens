@@ -32,8 +32,26 @@ def require_api_key(f: Callable[..., Any]) -> Callable[..., Any]:
     @wraps(f)
     def decorated(*args: Any, **kwargs: Any) -> JsonResponse:
         # Check if auth is explicitly disabled (development only)
-        if os.getenv('ALLOW_UNAUTHENTICATED_API', 'false').lower() == 'true':
-            return f(*args, **kwargs)
+        allow_unauth = os.getenv('ALLOW_UNAUTHENTICATED_API', 'false').lower() == 'true'
+        flask_env = os.getenv('FLASK_ENV', 'development')
+
+        if allow_unauth:
+            # CRITICAL: Refuse in production even if flag is set
+            if flask_env == 'production':
+                from app.services.logger import log_system
+                log_system(
+                    "SECURITY ALERT: ALLOW_UNAUTHENTICATED_API is set in production - IGNORING",
+                    level='ERROR'
+                )
+                # Fall through to normal auth flow
+            else:
+                # Development only - warn and allow
+                import warnings
+                warnings.warn(
+                    "ALLOW_UNAUTHENTICATED_API is enabled - API endpoints are unauthenticated!",
+                    UserWarning
+                )
+                return f(*args, **kwargs)
 
         # Check for user session
         user_id = session.get('user_id')

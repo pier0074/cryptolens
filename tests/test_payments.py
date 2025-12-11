@@ -311,3 +311,205 @@ class TestPaymentHistory:
 
         response = client.get('/payments/history')
         assert response.status_code == 200
+
+
+class TestWebhookSignatureVerification:
+    """Tests for webhook signature verification with/without secrets configured"""
+
+    def test_lemonsqueezy_verify_rejects_when_no_secret(self, app):
+        """Test LemonSqueezy verification rejects when secret not configured"""
+        with app.app_context():
+            from app.services.payment import verify_lemonsqueezy_webhook
+
+            # Without secret configured, should return False
+            with patch.dict('os.environ', {'LEMONSQUEEZY_WEBHOOK_SECRET': ''}):
+                # Need to reload to pick up env change
+                import importlib
+                import app.services.payment as payment_module
+                importlib.reload(payment_module)
+
+                result = payment_module.verify_lemonsqueezy_webhook(b'test', 'sig')
+                assert result is False
+
+    def test_lemonsqueezy_verify_accepts_valid_signature(self, app):
+        """Test LemonSqueezy verification accepts valid signature"""
+        with app.app_context():
+            secret = 'test_secret_key_123'
+            payload = b'{"test": "data"}'
+
+            # Calculate expected signature
+            expected_sig = hmac.new(
+                secret.encode(),
+                payload,
+                hashlib.sha256
+            ).hexdigest()
+
+            with patch.dict('os.environ', {'LEMONSQUEEZY_WEBHOOK_SECRET': secret}):
+                import importlib
+                import app.services.payment as payment_module
+                importlib.reload(payment_module)
+
+                result = payment_module.verify_lemonsqueezy_webhook(payload, expected_sig)
+                assert result is True
+
+    def test_lemonsqueezy_verify_rejects_invalid_signature(self, app):
+        """Test LemonSqueezy verification rejects invalid signature"""
+        with app.app_context():
+            secret = 'test_secret_key_123'
+
+            with patch.dict('os.environ', {'LEMONSQUEEZY_WEBHOOK_SECRET': secret}):
+                import importlib
+                import app.services.payment as payment_module
+                importlib.reload(payment_module)
+
+                result = payment_module.verify_lemonsqueezy_webhook(b'test', 'invalid_sig')
+                assert result is False
+
+    def test_nowpayments_verify_rejects_when_no_secret(self, app):
+        """Test NOWPayments verification rejects when secret not configured"""
+        with app.app_context():
+            with patch.dict('os.environ', {'NOWPAYMENTS_IPN_SECRET': ''}):
+                import importlib
+                import app.services.payment as payment_module
+                importlib.reload(payment_module)
+
+                result = payment_module.verify_nowpayments_webhook({'test': 'data'}, 'sig')
+                assert result is False
+
+    def test_nowpayments_verify_accepts_valid_signature(self, app):
+        """Test NOWPayments verification accepts valid signature"""
+        with app.app_context():
+            secret = 'test_ipn_secret_123'
+            payload = {'payment_id': 123, 'status': 'finished'}
+
+            # Calculate expected signature
+            import json
+            sorted_payload = json.dumps(payload, sort_keys=True, separators=(',', ':'))
+            expected_sig = hmac.new(
+                secret.encode(),
+                sorted_payload.encode(),
+                hashlib.sha512
+            ).hexdigest()
+
+            with patch.dict('os.environ', {'NOWPAYMENTS_IPN_SECRET': secret}):
+                import importlib
+                import app.services.payment as payment_module
+                importlib.reload(payment_module)
+
+                result = payment_module.verify_nowpayments_webhook(payload, expected_sig)
+                assert result is True
+
+
+class TestPaymentIdempotency:
+    """Tests for payment idempotency - preventing double credits"""
+
+    @pytest.fixture
+    def user_with_subscription(self, app):
+        """Create a user with a subscription for testing"""
+        with app.app_context():
+            user = User(
+                email='idempotency_test@example.com',
+                username='idempotency_test',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_idempotency_test'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='free',
+                starts_at=datetime.now(timezone.utc),
+                status='active'
+            )
+            db.session.add(sub)
+            db.session.commit()
+            return user.id
+
+    def test_activate_subscription_idempotent(self, app, user_with_subscription):
+        """Test that calling activate_subscription twice with same external_id doesn't double credit"""
+        with app.app_context():
+            from app.services.payment import activate_subscription
+            from app.models import Payment
+
+            user = db.session.get(User, user_with_subscription)
+            external_id = 'test_external_id_12345'
+
+            # First activation
+            result1 = activate_subscription(
+                user=user,
+                plan='pro',
+                billing_cycle='monthly',
+                provider='lemonsqueezy',
+                external_id=external_id
+            )
+            assert result1['success'] is True
+            assert result1.get('idempotent') is not True  # First call is not idempotent
+
+            # Create completed payment record (simulating first webhook)
+            payment = Payment.query.filter_by(
+                provider='lemonsqueezy',
+                external_id=external_id
+            ).first()
+            if not payment:
+                payment = Payment(
+                    user_id=user.id,
+                    provider='lemonsqueezy',
+                    external_id=external_id,
+                    plan='pro',
+                    billing_cycle='monthly',
+                    amount=19,
+                    currency='USD',
+                    status='completed'
+                )
+                db.session.add(payment)
+                db.session.commit()
+
+            # Get subscription expiry after first activation
+            db.session.refresh(user)
+            expiry_after_first = user.subscription.expires_at
+
+            # Second activation with same external_id (duplicate webhook)
+            result2 = activate_subscription(
+                user=user,
+                plan='pro',
+                billing_cycle='monthly',
+                provider='lemonsqueezy',
+                external_id=external_id
+            )
+            assert result2['success'] is True
+            assert result2.get('idempotent') is True  # Second call should be idempotent
+
+            # Verify subscription wasn't double-credited
+            db.session.refresh(user)
+            assert user.subscription.expires_at == expiry_after_first
+
+    def test_different_external_ids_credit_separately(self, app, user_with_subscription):
+        """Test that different external_ids do credit separately"""
+        with app.app_context():
+            from app.services.payment import activate_subscription
+
+            user = db.session.get(User, user_with_subscription)
+
+            # First activation
+            result1 = activate_subscription(
+                user=user,
+                plan='pro',
+                billing_cycle='monthly',
+                provider='lemonsqueezy',
+                external_id='unique_id_1'
+            )
+            assert result1['success'] is True
+
+            # Second activation with different external_id
+            result2 = activate_subscription(
+                user=user,
+                plan='pro',
+                billing_cycle='monthly',
+                provider='lemonsqueezy',
+                external_id='unique_id_2'
+            )
+            assert result2['success'] is True
+            assert result2.get('idempotent') is not True  # Different ID, not idempotent

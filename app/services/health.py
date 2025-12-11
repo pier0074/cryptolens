@@ -4,14 +4,67 @@ Provides dependency health checks for monitoring and observability
 """
 import time
 import requests
+import signal
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 from app.config import Config
 
 
-def check_database() -> Dict[str, Any]:
+# Default timeout for health checks (seconds)
+HEALTH_CHECK_TIMEOUT = 5.0
+
+
+class HealthCheckTimeoutError(Exception):
+    """Raised when a health check times out"""
+    pass
+
+
+@contextmanager
+def timeout_context(seconds: float, error_message: str = "Operation timed out"):
+    """
+    Context manager that raises HealthCheckTimeoutError after specified seconds.
+    Uses SIGALRM on Unix systems, threading fallback on Windows.
+    """
+    import sys
+
+    if sys.platform == 'win32':
+        # Windows doesn't support SIGALRM, use threading
+        import threading
+
+        timer_expired = [False]
+
+        def timeout_handler():
+            timer_expired[0] = True
+
+        timer = threading.Timer(seconds, timeout_handler)
+        timer.start()
+        try:
+            yield
+            if timer_expired[0]:
+                raise HealthCheckTimeoutError(error_message)
+        finally:
+            timer.cancel()
+    else:
+        # Unix - use SIGALRM
+        def handler(signum, frame):
+            raise HealthCheckTimeoutError(error_message)
+
+        old_handler = signal.signal(signal.SIGALRM, handler)
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+        try:
+            yield
+        finally:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            signal.signal(signal.SIGALRM, old_handler)
+
+
+def check_database(timeout: float = HEALTH_CHECK_TIMEOUT) -> Dict[str, Any]:
     """
     Check database connectivity and measure latency.
+
+    Args:
+        timeout: Maximum time to wait for database response (seconds)
 
     Returns:
         Dict with status, latency_ms, and optional error
@@ -20,11 +73,18 @@ def check_database() -> Dict[str, Any]:
 
     start = time.time()
     try:
-        db.session.execute(db.text('SELECT 1'))
+        with timeout_context(timeout, "Database health check timed out"):
+            db.session.execute(db.text('SELECT 1'))
         latency = (time.time() - start) * 1000
         return {
             'status': 'healthy',
             'latency_ms': round(latency, 2)
+        }
+    except HealthCheckTimeoutError as e:
+        return {
+            'status': 'unhealthy',
+            'error': str(e),
+            'timeout': True
         }
     except Exception as e:
         return {
@@ -33,9 +93,12 @@ def check_database() -> Dict[str, Any]:
         }
 
 
-def check_cache() -> Dict[str, Any]:
+def check_cache(timeout: float = HEALTH_CHECK_TIMEOUT) -> Dict[str, Any]:
     """
     Check cache connectivity and measure latency.
+
+    Args:
+        timeout: Maximum time to wait for cache response (seconds)
 
     Returns:
         Dict with status, type, latency_ms, and optional error
@@ -45,31 +108,39 @@ def check_cache() -> Dict[str, Any]:
 
     start = time.time()
     try:
-        cache_type = current_app.config.get('CACHE_TYPE', 'SimpleCache')
+        with timeout_context(timeout, "Cache health check timed out"):
+            cache_type = current_app.config.get('CACHE_TYPE', 'SimpleCache')
 
-        if cache_type == 'RedisCache':
-            # Test Redis connection
-            cache.set('_health_check', '1', timeout=5)
-            if cache.get('_health_check') == '1':
+            if cache_type == 'RedisCache':
+                # Test Redis connection
+                cache.set('_health_check', '1', timeout=5)
+                if cache.get('_health_check') == '1':
+                    latency = (time.time() - start) * 1000
+                    return {
+                        'status': 'healthy',
+                        'type': 'redis',
+                        'latency_ms': round(latency, 2)
+                    }
+                else:
+                    return {
+                        'status': 'unhealthy',
+                        'type': 'redis',
+                        'error': 'Redis read/write failed'
+                    }
+            else:
                 latency = (time.time() - start) * 1000
                 return {
                     'status': 'healthy',
-                    'type': 'redis',
+                    'type': 'memory',
                     'latency_ms': round(latency, 2)
                 }
-            else:
-                return {
-                    'status': 'unhealthy',
-                    'type': 'redis',
-                    'error': 'Redis read/write failed'
-                }
-        else:
-            latency = (time.time() - start) * 1000
-            return {
-                'status': 'healthy',
-                'type': 'memory',
-                'latency_ms': round(latency, 2)
-            }
+    except HealthCheckTimeoutError as e:
+        return {
+            'status': 'unhealthy',
+            'type': 'unknown',
+            'error': str(e),
+            'timeout': True
+        }
     except Exception as e:
         return {
             'status': 'unhealthy',

@@ -6,12 +6,31 @@ load_dotenv()
 
 
 def get_secret_key():
-    """Get or generate SECRET_KEY"""
+    """
+    Get or generate SECRET_KEY.
+
+    Security: In production (FLASK_ENV=production), SECRET_KEY MUST be set.
+    In development, generates a random key but warns that sessions won't persist.
+    """
     key = os.getenv('SECRET_KEY')
     if key:
         return key
-    # In development, generate a random key (will change on restart)
-    # In production, SECRET_KEY env var should be set
+
+    # Check if we're in production
+    flask_env = os.getenv('FLASK_ENV', 'development')
+    if flask_env == 'production':
+        raise ValueError(
+            "CRITICAL: SECRET_KEY environment variable is required in production. "
+            "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
+        )
+
+    # Development mode - generate random key with warning
+    import warnings
+    warnings.warn(
+        "SECRET_KEY not set - using random key. Sessions will be invalidated on restart. "
+        "Set SECRET_KEY environment variable for persistent sessions.",
+        UserWarning
+    )
     return secrets.token_hex(32)
 
 
@@ -88,10 +107,10 @@ class Config:
         'ZRO/USDT', 'BLAST/USDT', 'DOGS/USDT', 'NEIRO/USDT', 'TURBO/USDT'
     ]
 
-    # Timeframes
-    # UI displays these 8 timeframes
-    TIMEFRAMES = ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']
-    # Pattern detection excludes 1m (too noisy)
+    # Timeframes for pattern detection and UI display
+    # Note: 1m excluded - too noisy for reliable pattern detection
+    TIMEFRAMES = ['5m', '15m', '30m', '1h', '2h', '4h', '1d']
+    # PATTERN_TIMEFRAMES kept for backwards compatibility (same as TIMEFRAMES)
     PATTERN_TIMEFRAMES = ['5m', '15m', '30m', '1h', '2h', '4h', '1d']
 
     # Exchange (binance has better rate limits and 1000 candles/request)
@@ -180,12 +199,26 @@ class ProductionConfig(Config):
     DEBUG = False
 
     def __init__(self):
-        if not os.getenv('SECRET_KEY'):
-            raise ValueError("SECRET_KEY environment variable is required in production")
+        # SECRET_KEY check is now handled in get_secret_key() which raises
+        # ValueError if not set in production mode
 
-        # Warn if using SQLite in production (not recommended for concurrent users)
+        # Strict check: Refuse SQLite in production with multiple workers
         db_url = os.getenv('DATABASE_URL', '')
         if db_url.startswith('sqlite') or not db_url:
+            # Check if running with multiple workers (gunicorn, uwsgi, etc.)
+            workers = os.getenv('WEB_CONCURRENCY', os.getenv('GUNICORN_WORKERS', '1'))
+            try:
+                worker_count = int(workers)
+            except ValueError:
+                worker_count = 1
+
+            if worker_count > 1:
+                raise ValueError(
+                    "CRITICAL: SQLite cannot be used with multiple workers (WEB_CONCURRENCY={}).\n"
+                    "Set DATABASE_URL to PostgreSQL: postgresql://user:pass@localhost/cryptolens\n"
+                    "Or reduce to single worker for testing only.".format(worker_count)
+                )
+
             import warnings
             warnings.warn(
                 "SQLite is not recommended for production. "

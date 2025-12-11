@@ -249,11 +249,28 @@ def reset_verification(symbol_id=None, timeframe=None):
     return count
 
 
-def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False):
-    """Run incremental health checks."""
-    app = create_app()
+def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False, app=None):
+    """
+    Run incremental health checks.
 
-    with app.app_context():
+    Args:
+        symbol_filter: Check only this symbol (e.g., 'BTC/USDT')
+        fix: Auto-fix issues (delete bad candles)
+        verbose: Print detailed output
+        reset: Reset all verification flags
+        app: Optional Flask app instance. If None, creates a new app.
+             Pass existing app when calling from within app context.
+    """
+    # Create app only if not provided (avoids nested contexts)
+    if app is None:
+        app = create_app()
+        context_manager = app.app_context()
+    else:
+        # Use a null context manager when app is provided
+        from contextlib import nullcontext
+        context_manager = nullcontext()
+
+    with context_manager:
         if symbol_filter:
             symbols = Symbol.query.filter_by(symbol=symbol_filter).all()
         else:

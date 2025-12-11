@@ -413,3 +413,262 @@ class TestSecurityHeaders:
             assert b'Traceback' not in response.data
             assert b'/Users/' not in response.data
             assert b'site-packages' not in response.data
+
+
+class TestProductionConfigEnforcement:
+    """Tests for production configuration enforcement"""
+
+    def test_secret_key_required_in_production(self):
+        """Test that SECRET_KEY must be set in production"""
+        import os
+        from unittest.mock import patch
+
+        # Test that production mode without SECRET_KEY raises error
+        with patch.dict(os.environ, {'FLASK_ENV': 'production', 'SECRET_KEY': ''}):
+            # Need to reimport to trigger the check
+            import importlib
+            import app.config as config_module
+
+            with pytest.raises(ValueError) as excinfo:
+                importlib.reload(config_module)
+
+            assert 'SECRET_KEY' in str(excinfo.value)
+            assert 'production' in str(excinfo.value).lower()
+
+            # Reload with a valid key to restore state
+            with patch.dict(os.environ, {'FLASK_ENV': 'development'}):
+                importlib.reload(config_module)
+
+    def test_secret_key_generated_in_development(self):
+        """Test that SECRET_KEY is auto-generated in development with warning"""
+        import os
+        import warnings
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {'FLASK_ENV': 'development', 'SECRET_KEY': ''}):
+            import importlib
+            import app.config as config_module
+
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                importlib.reload(config_module)
+
+                # Should have generated a key
+                assert config_module.Config.SECRET_KEY is not None
+                assert len(config_module.Config.SECRET_KEY) >= 32
+
+                # Should have issued a warning
+                warning_messages = [str(warning.message) for warning in w]
+                assert any('SECRET_KEY' in msg for msg in warning_messages)
+
+    def test_sqlite_rejected_with_multiple_workers_in_production(self):
+        """Test that SQLite is rejected with multiple workers in production"""
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {
+            'FLASK_ENV': 'production',
+            'SECRET_KEY': 'test-secret-key-for-testing-only',
+            'DATABASE_URL': 'sqlite:///test.db',
+            'WEB_CONCURRENCY': '4'
+        }):
+            import importlib
+            import app.config as config_module
+            importlib.reload(config_module)
+
+            with pytest.raises(ValueError) as excinfo:
+                # Instantiate production config to trigger check
+                config_module.ProductionConfig()
+
+            assert 'SQLite' in str(excinfo.value)
+            assert 'multiple workers' in str(excinfo.value).lower()
+
+            # Cleanup
+            with patch.dict(os.environ, {'FLASK_ENV': 'development'}):
+                importlib.reload(config_module)
+
+    def test_sqlite_allowed_single_worker_in_production_with_warning(self):
+        """Test that SQLite is allowed with single worker but warns"""
+        import os
+        import warnings
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {
+            'FLASK_ENV': 'production',
+            'SECRET_KEY': 'test-secret-key-for-testing-only',
+            'DATABASE_URL': 'sqlite:///test.db',
+            'WEB_CONCURRENCY': '1'
+        }):
+            import importlib
+            import app.config as config_module
+            importlib.reload(config_module)
+
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                # Should not raise, but should warn
+                config_module.ProductionConfig()
+
+                warning_messages = [str(warning.message) for warning in w]
+                assert any('SQLite' in msg and 'production' in msg.lower() for msg in warning_messages)
+
+            # Cleanup
+            with patch.dict(os.environ, {'FLASK_ENV': 'development'}):
+                importlib.reload(config_module)
+
+    def test_allow_unauthenticated_api_ignored_in_production(self, app):
+        """Test that ALLOW_UNAUTHENTICATED_API is ignored in production"""
+        import os
+        from unittest.mock import patch
+
+        with patch.dict(os.environ, {
+            'FLASK_ENV': 'production',
+            'ALLOW_UNAUTHENTICATED_API': 'true'
+        }):
+            # Use the test app which has db, session, etc. properly initialized
+            with app.test_client() as client:
+                # Try to access a protected endpoint
+                response = client.post('/api/scan')
+                # Should NOT allow access despite ALLOW_UNAUTHENTICATED_API=true
+                # because we're in production mode - should require API key
+                assert response.status_code in [401, 503]
+
+
+class TestConcurrentDatabaseAccess:
+    """Tests for concurrent database access safety"""
+
+    def test_concurrent_pattern_creation(self, app):
+        """Test that concurrent pattern creation doesn't cause conflicts"""
+        from app.models import Symbol, Pattern
+        from app import db
+        from datetime import datetime, timezone
+        import threading
+        import time
+
+        results = []
+        errors = []
+
+        def create_pattern(thread_id):
+            try:
+                with app.app_context():
+                    symbol = Symbol.query.filter_by(is_active=True).first()
+                    if symbol:
+                        pattern = Pattern(
+                            symbol_id=symbol.id,
+                            timeframe='1h',
+                            pattern_type='order_block',
+                            direction='bullish',
+                            zone_high=50000 + thread_id,
+                            zone_low=49000 + thread_id,
+                            detected_at=int(datetime.now(timezone.utc).timestamp() * 1000),
+                            status='active'
+                        )
+                        db.session.add(pattern)
+                        db.session.commit()
+                        results.append(pattern.id)
+            except Exception as e:
+                errors.append(str(e))
+
+        with app.app_context():
+            # Ensure we have a symbol
+            symbol = Symbol.query.filter_by(is_active=True).first()
+            if not symbol:
+                symbol = Symbol(symbol='TEST/USDT', is_active=True)
+                db.session.add(symbol)
+                db.session.commit()
+
+        # Create patterns concurrently
+        threads = []
+        for i in range(5):
+            t = threading.Thread(target=create_pattern, args=(i,))
+            threads.append(t)
+            t.start()
+
+        # Wait for all threads
+        for t in threads:
+            t.join(timeout=10)
+
+        # All should succeed without errors
+        assert len(errors) == 0, f"Errors occurred: {errors}"
+        assert len(results) == 5
+
+    def test_concurrent_subscription_update(self, app):
+        """Test that concurrent subscription updates are handled safely"""
+        from app.models import User, Subscription
+        from app import db
+        from datetime import datetime, timezone, timedelta
+        import threading
+
+        results = []
+        errors = []
+
+        with app.app_context():
+            # Create test user
+            user = User(
+                email='concurrent_test@example.com',
+                username='concurrent_test',
+                is_active=True,
+                is_verified=True,
+                ntfy_topic='cl_concurrent_test'
+            )
+            user.set_password('TestPass123')
+            db.session.add(user)
+            db.session.commit()
+
+            sub = Subscription(
+                user_id=user.id,
+                plan='free',
+                starts_at=datetime.now(timezone.utc),
+                expires_at=datetime.now(timezone.utc) + timedelta(days=7),
+                status='active'
+            )
+            db.session.add(sub)
+            db.session.commit()
+            user_id = user.id
+
+        def update_subscription(days_to_add):
+            try:
+                with app.app_context():
+                    user = db.session.get(User, user_id)
+                    if user and user.subscription:
+                        user.subscription.expires_at += timedelta(days=days_to_add)
+                        db.session.commit()
+                        results.append(days_to_add)
+            except Exception as e:
+                errors.append(str(e))
+
+        # Update subscription concurrently
+        threads = []
+        for i in range(3):
+            t = threading.Thread(target=update_subscription, args=(i + 1,))
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join(timeout=10)
+
+        # Should handle concurrent updates gracefully
+        # Some may fail due to locking, but shouldn't crash
+        assert len(errors) == 0 or all('lock' in e.lower() or 'busy' in e.lower() for e in errors)
+
+    def test_database_connection_pool_handling(self, app):
+        """Test that database connections are properly returned to pool"""
+        from app import db
+        import threading
+
+        def query_database():
+            with app.app_context():
+                # Execute simple query
+                result = db.session.execute(db.text('SELECT 1')).scalar()
+                assert result == 1
+
+        # Run many concurrent queries
+        threads = []
+        for i in range(10):
+            t = threading.Thread(target=query_database)
+            threads.append(t)
+            t.start()
+
+        for t in threads:
+            t.join(timeout=10)
+
+        # If we get here without hanging, connection pool is working
