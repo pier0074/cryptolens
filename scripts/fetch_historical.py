@@ -508,7 +508,11 @@ def main():
     mode_desc = 'Gap fill (full DB)' if args.gaps and args.full else 'Gap fill' if args.gaps else 'Full fetch'
     print(f"  Mode: {mode_desc}")
     print(f"  Symbols: {len(symbol_list)}")
-    if not (args.gaps and args.full):
+    for sym_name, _ in symbol_list:
+        print(f"    • {sym_name}")
+    if args.gaps and args.full:
+        print(f"  Period: Entire database to now")
+    else:
         print(f"  Target: {date_info}")
     print(f"{'═'*60}", flush=True)
 
