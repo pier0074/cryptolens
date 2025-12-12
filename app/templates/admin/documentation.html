@@ -937,17 +937,38 @@ curl -H "X-API-Key: your_api_key" https://app.cryptolens.io/api/patterns
             <h2 class="docs-h2">Environment Variables</h2>
             <table class="docs-table">
                 <tr><th>Variable</th><th>Required</th><th>Description</th></tr>
-                <tr><td>SECRET_KEY</td><td>Yes</td><td>Flask secret key for sessions</td></tr>
+                <tr><td colspan="3" class="text-cyan-400 font-bold">Flask</td></tr>
+                <tr><td>SECRET_KEY</td><td>Prod</td><td>Flask secret key for sessions (auto-generated in dev)</td></tr>
                 <tr><td>FLASK_ENV</td><td>Yes</td><td>development or production</td></tr>
-                <tr><td>DATABASE_URL</td><td>Prod</td><td>PostgreSQL connection string</td></tr>
+                <tr><td colspan="3" class="text-cyan-400 font-bold">Database (Development)</td></tr>
+                <tr><td>DB_HOST</td><td>Yes</td><td>MySQL host (default: localhost)</td></tr>
+                <tr><td>DB_PORT</td><td>No</td><td>MySQL port (default: 3306)</td></tr>
+                <tr><td>DB_USER</td><td>Yes</td><td>MySQL username</td></tr>
+                <tr><td>DB_PASS</td><td>Yes</td><td>MySQL password</td></tr>
+                <tr><td>DB_NAME</td><td>Yes</td><td>Database name (default: cryptolens)</td></tr>
+                <tr><td colspan="3" class="text-cyan-400 font-bold">Database (Production)</td></tr>
+                <tr><td>PROD_DB_HOST</td><td>Prod</td><td>Production MySQL host</td></tr>
+                <tr><td>PROD_DB_PORT</td><td>No</td><td>Production MySQL port</td></tr>
+                <tr><td>PROD_DB_USER</td><td>Prod</td><td>Production MySQL username</td></tr>
+                <tr><td>PROD_DB_PASS</td><td>Prod</td><td>Production MySQL password</td></tr>
+                <tr><td>PROD_DB_NAME</td><td>Prod</td><td>Production database name</td></tr>
+                <tr><td>DATABASE_URL</td><td>Alt</td><td>Direct URL (overrides split config)</td></tr>
+                <tr><td colspan="3" class="text-cyan-400 font-bold">Email</td></tr>
                 <tr><td>MAIL_SERVER</td><td>Yes</td><td>SMTP server for email</td></tr>
                 <tr><td>MAIL_PORT</td><td>Yes</td><td>SMTP port (587 for TLS)</td></tr>
                 <tr><td>MAIL_USERNAME</td><td>Yes</td><td>SMTP username</td></tr>
                 <tr><td>MAIL_PASSWORD</td><td>Yes</td><td>SMTP password/app password</td></tr>
+                <tr><td colspan="3" class="text-cyan-400 font-bold">Services</td></tr>
                 <tr><td>NTFY_URL</td><td>Yes</td><td>NTFY server URL</td></tr>
+                <tr><td>REDIS_URL</td><td>Opt</td><td>Redis for caching and rate limiting</td></tr>
+                <tr><td colspan="3" class="text-cyan-400 font-bold">Payments</td></tr>
                 <tr><td>LEMONSQUEEZY_API_KEY</td><td>Opt</td><td>LemonSqueezy API key</td></tr>
                 <tr><td>NOWPAYMENTS_API_KEY</td><td>Opt</td><td>NOWPayments API key</td></tr>
             </table>
+
+            <div class="docs-alert docs-alert-info">
+                <strong>Database Auto-Detection:</strong> The app automatically uses PROD_DB_* variables when FLASK_ENV=production or when running on common PaaS platforms (Heroku, Railway, Render, Vercel, Fly.io).
+            </div>
 
             <h2 class="docs-h2">Pattern Detection Config</h2>
             <p class="docs-p">Located in <code class="docs-code">app/config.py</code>:</p>
@@ -979,6 +1000,7 @@ LIQUIDITY_SWING_LOOKBACK = 5  # Candles to look for swings
             <h2 class="docs-h2">Production Checklist</h2>
             <ol class="docs-list">
                 <li>Set <code class="docs-code">FLASK_ENV=production</code></li>
+                <li>Set <code class="docs-code">SECRET_KEY</code> (generate with: <code class="docs-code">python -c "import secrets; print(secrets.token_hex(32))"</code>)</li>
                 <li>Configure MySQL with <code class="docs-code">PROD_DB_*</code> environment variables</li>
                 <li>Configure HTTPS with valid SSL certificate</li>
                 <li>Set up Redis for rate limiting and caching</li>
@@ -987,6 +1009,53 @@ LIQUIDITY_SWING_LOOKBACK = 5  # Candles to look for swings
                 <li>Configure log aggregation</li>
                 <li>Set up monitoring (Prometheus + Grafana)</li>
             </ol>
+
+            <h2 class="docs-h2">Database Setup</h2>
+            <p class="docs-p">CryptoLens requires MySQL 8.0+ (uses BigInteger for millisecond timestamps).</p>
+
+            <h3 class="docs-h3">Development Setup</h3>
+            <div class="docs-codeblock"># Configure .env
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=root
+DB_PASS=your-password
+DB_NAME=cryptolens
+
+# Create database and tables
+make db-create
+
+# Create test users (admin, free, pro, premium)
+make db-user
+
+# Reset database (drop + create + users)
+make db-reset</div>
+
+            <h3 class="docs-h3">Production Setup</h3>
+            <div class="docs-codeblock"># Configure .env for production
+FLASK_ENV=production
+
+PROD_DB_HOST=your-mysql-host.com
+PROD_DB_PORT=3306
+PROD_DB_USER=cryptolens_user
+PROD_DB_PASS=secure-password-here
+PROD_DB_NAME=cryptolens_prod
+
+# Or use DATABASE_URL directly (overrides split config)
+DATABASE_URL=mysql+pymysql://user:pass@host:3306/dbname</div>
+
+            <h3 class="docs-h3">Makefile Commands</h3>
+            <table class="docs-table">
+                <tr><th>Command</th><th>Description</th></tr>
+                <tr><td><code class="docs-code">make help</code></td><td>Show all available commands</td></tr>
+                <tr><td><code class="docs-code">make db-create</code></td><td>Create database and tables</td></tr>
+                <tr><td><code class="docs-code">make db-user</code></td><td>Create test users (admin + tiers)</td></tr>
+                <tr><td><code class="docs-code">make db-reset</code></td><td>Drop, recreate, and add users</td></tr>
+                <tr><td><code class="docs-code">make db-drop</code></td><td>Drop database (with confirmation)</td></tr>
+                <tr><td><code class="docs-code">make db-shell</code></td><td>Open MySQL shell</td></tr>
+                <tr><td><code class="docs-code">make dev</code></td><td>Start development server</td></tr>
+                <tr><td><code class="docs-code">make test</code></td><td>Run test suite</td></tr>
+                <tr><td><code class="docs-code">make run</code></td><td>Run with gunicorn (production-like)</td></tr>
+            </table>
 
             <h2 class="docs-h2">Gunicorn Configuration</h2>
             <div class="docs-codeblock">
@@ -1042,9 +1111,10 @@ server {
             <table class="docs-table">
                 <tr><th>Script</th><th>Purpose</th><th>Cron Schedule</th></tr>
                 <tr><td><code class="docs-code">fetch.py</code></td><td>Real-time data pipeline - fetch, aggregate, detect, signal, notify</td><td>Every minute</td></tr>
-                <tr><td><code class="docs-code">fetch_historical.py</code></td><td>Historical data load and gap filling</td><td>Manual / Hourly (gaps)</td></tr>
+                <tr><td><code class="docs-code">fetch_historical.py</code></td><td>Historical data load and gap filling (uses fetch_start_date setting)</td><td>Manual / Hourly (gaps)</td></tr>
                 <tr><td><code class="docs-code">compute_stats.py</code></td><td>Pre-compute statistics cache for fast page loads</td><td>Every 5 minutes</td></tr>
                 <tr><td><code class="docs-code">db_health.py</code></td><td>Data integrity verification and repair</td><td>Daily at 3 AM</td></tr>
+                <tr><td><code class="docs-code">init_db.py</code></td><td>MySQL database creation and initialization</td><td>Manual (initial setup)</td></tr>
                 <tr><td><code class="docs-code">migrate_all.py</code></td><td>Database schema migrations (upgrades)</td><td>Manual (on deploy)</td></tr>
                 <tr><td><code class="docs-code">create_admin.py</code></td><td>Create admin and test accounts</td><td>Manual (initial setup)</td></tr>
             </table>
@@ -1128,6 +1198,24 @@ python scripts/fetch_historical.py --delete
 # Verbose with 90 days override
 python scripts/fetch_historical.py --days 90 -v</div>
 
+            <h3 class="docs-h3">Fetch Output Example</h3>
+            <div class="docs-codeblock">════════════════════════════════════════════════════════════
+  CryptoLens Historical Data Fetcher
+════════════════════════════════════════════════════════════
+  Loading...
+  Mode: Gap fill (full DB)
+  Symbols: 5
+    • BTC/USDT
+    • ETH/USDT
+    • BNB/USDT
+    • XRP/USDT
+    • SOL/USDT
+  Period: Entire database to now
+════════════════════════════════════════════════════════════
+  BTC/USDT: 1 gap(s), 1,440 candles filled
+  ETH/USDT: No gaps found
+  ...</div>
+
             <h3 class="docs-h3">Status Output Example</h3>
             <div class="docs-codeblock">════════════════════════════════════════════════════════════
   Database Status
@@ -1138,6 +1226,10 @@ python scripts/fetch_historical.py --days 90 -v</div>
 ────────────────────────────────────────────────────────────
   Total: 1,195,200 candles (1m)
 ════════════════════════════════════════════════════════════</div>
+
+            <div class="docs-alert docs-alert-info">
+                <strong>Target Date:</strong> The script uses the <code class="docs-code">fetch_start_date</code> setting from Admin &gt; Symbols (default: 2024-01-01). Use <code class="docs-code">--days N</code> to override.
+            </div>
 
             <div class="docs-alert docs-alert-warning">
                 <strong>Warning:</strong> The <code class="docs-code">--delete</code> flag will delete ALL candles, patterns, signals, and notifications. You must type 'DELETE' to confirm.
@@ -1233,6 +1325,38 @@ python scripts/migrate_all.py</div>
   - Created stats_cache table
   - Added idx_pattern_list index
   - Created 6 default notification templates</div>
+
+            <!-- ==================== INIT_DB.PY ==================== -->
+            <h2 class="docs-h2">init_db.py - Database Initialization</h2>
+            <p class="docs-p">
+                Creates and manages MySQL database. Used by Makefile commands.
+            </p>
+
+            <h3 class="docs-h3">Command Line Options</h3>
+            <table class="docs-table">
+                <tr><th>Option</th><th>Description</th></tr>
+                <tr><td><code class="docs-code">(none)</code></td><td>Initialize tables only (database must exist)</td></tr>
+                <tr><td><code class="docs-code">--create</code></td><td>Create database + tables</td></tr>
+                <tr><td><code class="docs-code">--drop</code></td><td>Drop database (with confirmation)</td></tr>
+                <tr><td><code class="docs-code">--migrate PATH</code></td><td>Migrate from SQLite file to MySQL</td></tr>
+            </table>
+
+            <h3 class="docs-h3">Usage</h3>
+            <div class="docs-codeblock"># Create database and tables (same as: make db-create)
+python scripts/init_db.py --create
+
+# Drop database (same as: make db-drop)
+python scripts/init_db.py --drop
+
+# Initialize tables only (database must exist)
+python scripts/init_db.py
+
+# Migrate from SQLite to MySQL
+python scripts/init_db.py --migrate data/cryptolens.db</div>
+
+            <div class="docs-alert docs-alert-info">
+                <strong>Tip:</strong> Use Makefile commands instead: <code class="docs-code">make db-create</code>, <code class="docs-code">make db-drop</code>, <code class="docs-code">make db-reset</code>
+            </div>
 
             <!-- ==================== CREATE_ADMIN.PY ==================== -->
             <h2 class="docs-h2">create_admin.py - Test Accounts</h2>
