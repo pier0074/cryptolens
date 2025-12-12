@@ -22,6 +22,8 @@ def get_effective_tier(user):
     instead of bypassing restrictions. Returns None if admin should have
     full access (no view_as or view_as='admin').
     """
+    if user is None:
+        return 'free'  # Default tier for anonymous/missing users
     if user.is_admin:
         view_as = session.get('view_as')
         if view_as and view_as != 'admin':

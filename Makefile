@@ -1,4 +1,4 @@
-.PHONY: help install dev db-create db-drop db-reset db-init db-shell db-migrate-sqlite test test-fast run
+.PHONY: help install dev db-create db-drop db-reset db-init db-user db-shell db-migrate-sqlite test test-fast run
 
 help:
 	@echo "CryptoLens Development Commands"
@@ -6,12 +6,13 @@ help:
 	@echo "Quick Start:"
 	@echo "  make install     - Install Python dependencies"
 	@echo "  make db-create   - Create MySQL database (uses .env credentials)"
+	@echo "  make db-user     - Create test users (admin, free, pro, premium)"
 	@echo "  make dev         - Start development server"
 	@echo ""
 	@echo "Database:"
 	@echo "  make db-init     - Initialize tables only (db must exist)"
 	@echo "  make db-drop     - Drop database (WARNING: deletes data)"
-	@echo "  make db-reset    - Drop and recreate database"
+	@echo "  make db-reset    - Drop and recreate database + users"
 	@echo "  make db-shell    - Open MySQL shell"
 	@echo "  make db-migrate-sqlite - Migrate from SQLite to MySQL"
 	@echo ""
@@ -32,9 +33,13 @@ db-drop:
 db-reset:
 	python scripts/init_db.py --drop
 	python scripts/init_db.py --create
+	python scripts/create_admin.py
 
 db-init:
 	python scripts/init_db.py
+
+db-user:
+	python scripts/create_admin.py
 
 db-shell:
 	@python -c "from dotenv import load_dotenv; import os; load_dotenv(); print(f\"mysql -h {os.getenv('DB_HOST', 'localhost')} -P {os.getenv('DB_PORT', '3306')} -u {os.getenv('DB_USER', 'root')} -p {os.getenv('DB_NAME', 'cryptolens')}\")"
