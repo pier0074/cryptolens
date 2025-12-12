@@ -5,20 +5,93 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
-def get_secret_key():
+def is_production() -> bool:
+    """
+    Detect if running in production environment.
+
+    Returns True if:
+    - FLASK_ENV=production, or
+    - ENV=production, or
+    - Running on common PaaS (detected via env vars)
+    """
+    flask_env = os.getenv('FLASK_ENV', '').lower()
+    env = os.getenv('ENV', '').lower()
+
+    # Explicit production flag
+    if flask_env == 'production' or env == 'production':
+        return True
+
+    # Common PaaS detection
+    paas_indicators = [
+        'DYNO',           # Heroku
+        'RAILWAY_ENVIRONMENT',  # Railway
+        'RENDER',         # Render
+        'VERCEL',         # Vercel
+        'FLY_APP_NAME',   # Fly.io
+    ]
+    for indicator in paas_indicators:
+        if os.getenv(indicator):
+            return True
+
+    return False
+
+
+def get_database_url() -> str:
+    """
+    Build database URL from environment variables.
+
+    Supports two modes:
+    1. Direct URL: DATABASE_URL env var (takes precedence)
+    2. Split config: DB_HOST, DB_USER, DB_PASS, DB_NAME, DB_PORT
+
+    In production, uses PROD_DB_* variables if available.
+    In development, uses DB_* variables.
+    """
+    # Check for direct DATABASE_URL first (backwards compatible)
+    direct_url = os.getenv('DATABASE_URL')
+    if direct_url:
+        return direct_url
+
+    # Determine prefix based on environment
+    prefix = 'PROD_DB' if is_production() else 'DB'
+
+    # Get database configuration
+    db_host = os.getenv(f'{prefix}_HOST', os.getenv('DB_HOST', 'localhost'))
+    db_user = os.getenv(f'{prefix}_USER', os.getenv('DB_USER', 'root'))
+    db_pass = os.getenv(f'{prefix}_PASS', os.getenv('DB_PASS', ''))
+    db_name = os.getenv(f'{prefix}_NAME', os.getenv('DB_NAME', 'cryptolens'))
+    db_port = os.getenv(f'{prefix}_PORT', os.getenv('DB_PORT', '3306'))
+
+    # If no host configured, fall back to SQLite for development
+    if not db_host or db_host == 'localhost' and not db_pass:
+        if is_production():
+            raise ValueError(
+                "CRITICAL: Database not configured for production.\n"
+                "Set either DATABASE_URL or PROD_DB_HOST, PROD_DB_USER, PROD_DB_PASS, PROD_DB_NAME"
+            )
+        # Development fallback to SQLite
+        return 'sqlite:///data/cryptolens.db'
+
+    # Build MySQL connection URL
+    # Format: mysql+pymysql://user:pass@host:port/database
+    if db_pass:
+        return f"mysql+pymysql://{db_user}:{db_pass}@{db_host}:{db_port}/{db_name}"
+    else:
+        return f"mysql+pymysql://{db_user}@{db_host}:{db_port}/{db_name}"
+
+
+def get_secret_key() -> str:
     """
     Get or generate SECRET_KEY.
 
-    Security: In production (FLASK_ENV=production), SECRET_KEY MUST be set.
+    Security: In production, SECRET_KEY MUST be set.
     In development, generates a random key but warns that sessions won't persist.
     """
     key = os.getenv('SECRET_KEY')
     if key:
         return key
 
-    # Check if we're in production
-    flask_env = os.getenv('FLASK_ENV', 'development')
-    if flask_env == 'production':
+    if is_production():
         raise ValueError(
             "CRITICAL: SECRET_KEY environment variable is required in production. "
             "Generate one with: python -c \"import secrets; print(secrets.token_hex(32))\""
@@ -34,36 +107,34 @@ def get_secret_key():
     return secrets.token_hex(32)
 
 
+def get_engine_options() -> dict:
+    """Get database engine options based on database type."""
+    db_url = get_database_url()
+
+    if db_url.startswith('sqlite'):
+        return {
+            'connect_args': {'timeout': 30},
+            'pool_pre_ping': True,
+        }
+    else:
+        # MySQL/PostgreSQL connection pooling
+        return {
+            'pool_size': 10,
+            'pool_recycle': 300,
+            'pool_pre_ping': True,
+            'max_overflow': 20,
+        }
+
+
 class Config:
     """Base configuration"""
     SECRET_KEY = get_secret_key()
-    SQLALCHEMY_DATABASE_URI = os.getenv('DATABASE_URL', 'sqlite:///data/cryptolens.db')
+    SQLALCHEMY_DATABASE_URI = get_database_url()
     SQLALCHEMY_TRACK_MODIFICATIONS = False
+    SQLALCHEMY_ENGINE_OPTIONS = get_engine_options()
 
-    # Database engine options
-    # For SQLite: timeout prevents "database is locked" errors
-    # For PostgreSQL/MySQL: add pool_size, pool_recycle for connection pooling
-    @staticmethod
-    def get_engine_options():
-        """Get database engine options based on database type."""
-        db_url = os.getenv('DATABASE_URL', 'sqlite:///data/cryptolens.db')
-
-        if db_url.startswith('sqlite'):
-            # SQLite uses NullPool by default, no connection pooling needed
-            return {
-                'connect_args': {'timeout': 30},  # Wait up to 30s for locks
-                'pool_pre_ping': True,  # Verify connections before use
-            }
-        else:
-            # PostgreSQL/MySQL connection pooling
-            return {
-                'pool_size': 10,        # Number of connections to keep
-                'pool_recycle': 300,    # Recycle connections after 5 min
-                'pool_pre_ping': True,  # Verify connections before use
-                'max_overflow': 20,     # Allow 20 additional connections
-            }
-
-    SQLALCHEMY_ENGINE_OPTIONS = get_engine_options.__func__()
+    # Environment detection (available to templates/code)
+    IS_PRODUCTION = is_production()
 
     # NTFY.sh Notifications
     NTFY_TOPIC = os.getenv('NTFY_TOPIC', 'cryptolens-signals')
@@ -199,13 +270,12 @@ class ProductionConfig(Config):
     DEBUG = False
 
     def __init__(self):
-        # SECRET_KEY check is now handled in get_secret_key() which raises
-        # ValueError if not set in production mode
+        # SECRET_KEY and database checks are now handled in get_secret_key()
+        # and get_database_url() which raise ValueError if not properly configured
 
-        # Strict check: Refuse SQLite in production with multiple workers
-        db_url = os.getenv('DATABASE_URL', '')
-        if db_url.startswith('sqlite') or not db_url:
-            # Check if running with multiple workers (gunicorn, uwsgi, etc.)
+        # Additional check: Refuse SQLite in production with multiple workers
+        db_url = get_database_url()
+        if db_url.startswith('sqlite'):
             workers = os.getenv('WEB_CONCURRENCY', os.getenv('GUNICORN_WORKERS', '1'))
             try:
                 worker_count = int(workers)
@@ -214,16 +284,15 @@ class ProductionConfig(Config):
 
             if worker_count > 1:
                 raise ValueError(
-                    "CRITICAL: SQLite cannot be used with multiple workers (WEB_CONCURRENCY={}).\n"
-                    "Set DATABASE_URL to PostgreSQL: postgresql://user:pass@localhost/cryptolens\n"
-                    "Or reduce to single worker for testing only.".format(worker_count)
+                    f"CRITICAL: SQLite cannot be used with multiple workers (WEB_CONCURRENCY={worker_count}).\n"
+                    "Configure MySQL: DB_HOST, DB_USER, DB_PASS, DB_NAME\n"
+                    "Or set DATABASE_URL directly."
                 )
 
             import warnings
             warnings.warn(
                 "SQLite is not recommended for production. "
-                "Set DATABASE_URL to a PostgreSQL connection string for better performance. "
-                "Example: DATABASE_URL=postgresql://user:pass@localhost/cryptolens",
+                "Set DB_HOST, DB_USER, DB_PASS, DB_NAME for MySQL.",
                 UserWarning
             )
 
