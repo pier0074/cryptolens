@@ -303,6 +303,10 @@ class TestingConfig(Config):
     DEBUG = True
     WTF_CSRF_ENABLED = False
     SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
+    # SQLite in-memory doesn't support pool_size/max_overflow
+    SQLALCHEMY_ENGINE_OPTIONS = {
+        'pool_pre_ping': True,
+    }
 
 
 config = {

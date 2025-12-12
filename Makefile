@@ -5,14 +5,14 @@ help:
 	@echo ""
 	@echo "Quick Start:"
 	@echo "  make install     - Install Python dependencies"
-	@echo "  make db-create   - Create MySQL database"
-	@echo "  make db-init     - Initialize database tables"
+	@echo "  make db-create   - Create MySQL database (uses .env credentials)"
 	@echo "  make dev         - Start development server"
 	@echo ""
 	@echo "Database:"
-	@echo "  make db-shell    - Open MySQL shell"
+	@echo "  make db-init     - Initialize tables only (db must exist)"
 	@echo "  make db-drop     - Drop database (WARNING: deletes data)"
 	@echo "  make db-reset    - Drop and recreate database"
+	@echo "  make db-shell    - Open MySQL shell"
 	@echo "  make db-migrate-sqlite - Migrate from SQLite to MySQL"
 	@echo ""
 	@echo "Development:"
@@ -24,28 +24,23 @@ install:
 	pip install -r requirements.txt
 
 db-create:
-	@echo "Creating MySQL database 'cryptolens'..."
-	@mysql -u root -p -e "CREATE DATABASE IF NOT EXISTS cryptolens CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
-	@echo "Database created successfully!"
+	python scripts/init_db.py --create
 
 db-drop:
-	@echo "WARNING: This will delete the database!"
-	@read -p "Are you sure? [y/N] " confirm && [ "$$confirm" = "y" ]
-	mysql -u root -p -e "DROP DATABASE IF EXISTS cryptolens;"
-	@echo "Database dropped."
+	python scripts/init_db.py --drop
 
-db-reset: db-drop db-create db-init
+db-reset:
+	python scripts/init_db.py --drop
+	python scripts/init_db.py --create
 
 db-init:
 	python scripts/init_db.py
 
 db-shell:
-	mysql -u root -p cryptolens
+	@python -c "from dotenv import load_dotenv; import os; load_dotenv(); print(f\"mysql -h {os.getenv('DB_HOST', 'localhost')} -P {os.getenv('DB_PORT', '3306')} -u {os.getenv('DB_USER', 'root')} -p {os.getenv('DB_NAME', 'cryptolens')}\")"
+	@python -c "from dotenv import load_dotenv; import os; load_dotenv(); os.system(f\"mysql -h {os.getenv('DB_HOST', 'localhost')} -P {os.getenv('DB_PORT', '3306')} -u {os.getenv('DB_USER', 'root')} -p{os.getenv('DB_PASS', '')} {os.getenv('DB_NAME', 'cryptolens')}\")"
 
 db-migrate-sqlite:
-	@echo "This will migrate data from SQLite to MySQL"
-	@echo "Make sure MySQL database exists (make db-create)"
-	@echo ""
 	python scripts/init_db.py --migrate data/cryptolens.db
 
 dev:

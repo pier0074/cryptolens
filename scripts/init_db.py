@@ -3,7 +3,9 @@
 Database Initialization Script
 
 Usage:
-    python scripts/init_db.py              # Initialize empty database
+    python scripts/init_db.py              # Initialize tables (database must exist)
+    python scripts/init_db.py --create     # Create database + tables
+    python scripts/init_db.py --drop       # Drop database
     python scripts/init_db.py --migrate    # Migrate from SQLite to MySQL
 """
 import os
@@ -13,11 +15,100 @@ import argparse
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app import create_app, db
+from dotenv import load_dotenv
+load_dotenv()
+
+
+def get_db_config():
+    """Get database configuration from environment."""
+    from app.config import is_production
+
+    prefix = 'PROD_DB' if is_production() else 'DB'
+
+    return {
+        'host': os.getenv(f'{prefix}_HOST', os.getenv('DB_HOST', 'localhost')),
+        'port': os.getenv(f'{prefix}_PORT', os.getenv('DB_PORT', '3306')),
+        'user': os.getenv(f'{prefix}_USER', os.getenv('DB_USER', 'root')),
+        'password': os.getenv(f'{prefix}_PASS', os.getenv('DB_PASS', '')),
+        'database': os.getenv(f'{prefix}_NAME', os.getenv('DB_NAME', 'cryptolens')),
+    }
+
+
+def create_database():
+    """Create the MySQL database using credentials from .env"""
+    import pymysql
+
+    config = get_db_config()
+
+    print(f"Connecting to MySQL at {config['host']}:{config['port']} as {config['user']}...")
+
+    try:
+        conn = pymysql.connect(
+            host=config['host'],
+            port=int(config['port']),
+            user=config['user'],
+            password=config['password'],
+        )
+        cursor = conn.cursor()
+
+        db_name = config['database']
+        cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{db_name}` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+        conn.commit()
+
+        print(f"Database '{db_name}' created successfully!")
+
+        cursor.close()
+        conn.close()
+
+        # Now initialize tables
+        init_database()
+
+    except pymysql.err.OperationalError as e:
+        print(f"Error connecting to MySQL: {e}")
+        print("\nCheck your .env file:")
+        print(f"  DB_HOST={config['host']}")
+        print(f"  DB_PORT={config['port']}")
+        print(f"  DB_USER={config['user']}")
+        print(f"  DB_PASS={'*' * len(config['password']) if config['password'] else '(empty)'}")
+        sys.exit(1)
+
+
+def drop_database():
+    """Drop the MySQL database."""
+    import pymysql
+
+    config = get_db_config()
+    db_name = config['database']
+
+    confirm = input(f"Are you sure you want to DROP database '{db_name}'? [y/N] ")
+    if confirm.lower() != 'y':
+        print("Cancelled.")
+        return
+
+    try:
+        conn = pymysql.connect(
+            host=config['host'],
+            port=int(config['port']),
+            user=config['user'],
+            password=config['password'],
+        )
+        cursor = conn.cursor()
+        cursor.execute(f"DROP DATABASE IF EXISTS `{db_name}`")
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        print(f"Database '{db_name}' dropped.")
+
+    except pymysql.err.OperationalError as e:
+        print(f"Error: {e}")
+        sys.exit(1)
 
 
 def init_database():
     """Create all database tables."""
+    from app import create_app, db
+
     app = create_app()
     with app.app_context():
         db_url = app.config['SQLALCHEMY_DATABASE_URI']
@@ -134,12 +225,20 @@ def migrate_sqlite_to_mysql(sqlite_path: str):
 
 def main():
     parser = argparse.ArgumentParser(description='Initialize CryptoLens database')
+    parser.add_argument('--create', action='store_true',
+                        help='Create database and tables (reads credentials from .env)')
+    parser.add_argument('--drop', action='store_true',
+                        help='Drop the database')
     parser.add_argument('--migrate', type=str, metavar='SQLITE_PATH',
                         help='Migrate data from SQLite file to MySQL')
 
     args = parser.parse_args()
 
-    if args.migrate:
+    if args.create:
+        create_database()
+    elif args.drop:
+        drop_database()
+    elif args.migrate:
         migrate_sqlite_to_mysql(args.migrate)
     else:
         init_database()
