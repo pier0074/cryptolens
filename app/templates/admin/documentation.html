@@ -1235,6 +1235,35 @@ python scripts/fetch_historical.py --days 90 -v</div>
                 <strong>Warning:</strong> The <code class="docs-code">--delete</code> flag will delete ALL candles, patterns, signals, and notifications. You must type 'DELETE' to confirm.
             </div>
 
+            <h3 class="docs-h3">Error Handling &amp; Resilience</h3>
+            <p class="docs-p">
+                The script handles errors gracefully and is designed to be crash-safe:
+            </p>
+
+            <table class="docs-table">
+                <tr><th>Feature</th><th>Behavior</th></tr>
+                <tr><td><strong>Incremental Saves</strong></td><td>Data saved to database every 10,000 candles (~1 week of 1m data)</td></tr>
+                <tr><td><strong>Retry on Timeout</strong></td><td>3 retries with 10s delay between attempts</td></tr>
+                <tr><td><strong>Rate Limit Handling</strong></td><td>Dynamic cooloff - extracts wait time from error message (default 30s, max 5min)</td></tr>
+                <tr><td><strong>Error Logging</strong></td><td>All errors logged with symbol, timestamp, and attempt count</td></tr>
+                <tr><td><strong>Graceful Skip</strong></td><td>Skips problematic batches after max retries, continues with next</td></tr>
+                <tr><td><strong>Abort Protection</strong></td><td>Aborts symbol after 9 consecutive errors to prevent infinite loops</td></tr>
+            </table>
+
+            <h3 class="docs-h3">Error Types &amp; Log Levels</h3>
+            <table class="docs-table">
+                <tr><th>Error Type</th><th>Action</th><th>Log Level</th></tr>
+                <tr><td>Rate limit (429)</td><td>Extract wait time, cooloff (30s-5min)</td><td>WARNING</td></tr>
+                <tr><td>Timeout</td><td>Retry after 10s</td><td>WARNING</td></tr>
+                <tr><td>Other errors</td><td>Retry after 5s</td><td>ERROR</td></tr>
+                <tr><td>Max retries exceeded</td><td>Skip batch, continue</td><td>ERROR</td></tr>
+                <tr><td>Too many consecutive (9)</td><td>Abort symbol fetch</td><td>ERROR</td></tr>
+            </table>
+
+            <div class="docs-alert docs-alert-info">
+                <strong>Dynamic Rate Limit:</strong> The script parses error messages like "retry after 60 seconds" or "Retry-After: 30" to determine wait time. If no time is specified, it defaults to 30 seconds. Maximum wait is capped at 5 minutes.
+            </div>
+
             <!-- ==================== COMPUTE_STATS.PY ==================== -->
             <h2 class="docs-h2">compute_stats.py - Statistics Cache</h2>
             <p class="docs-p">

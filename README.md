@@ -375,6 +375,13 @@ python scripts/fetch_historical.py --days=7 --no-aggregate
 3. Fetches only the missing ranges from Binance
 4. Aggregates to higher timeframes automatically
 
+**Error Handling & Resilience:**
+- **Incremental saves**: Data saved every 10,000 candles (crash-safe)
+- **Retry on timeout**: 3 retries with 10s delay, logs WARNING
+- **Rate limit handling**: Dynamic cooloff (extracts wait time from error, default 30s, max 5min)
+- **Error logging**: All errors logged with symbol, timestamp, and attempt count
+- **Graceful degradation**: Skips problematic batches after max retries, continues with next
+
 ---
 
 #### `migrate_all.py` - Database Migrations
@@ -436,25 +443,41 @@ python scripts/db_health.py --fix -q
 
 ---
 
-### API Rate Limiting
+### API Rate Limiting & Error Handling
 
-Binance has strict rate limits. The scripts are configured to prevent rate limit errors:
+Binance has strict rate limits. The scripts handle errors automatically:
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `MAX_CONCURRENT_REQUESTS` | 5 | Max parallel API requests |
-| `RATE_LIMIT_DELAY` | 0.2s | Delay between batch requests |
-| `RATE_LIMIT_RETRY_DELAY` | 2.0s | Initial retry delay (exponential backoff) |
-| `MAX_RETRIES` | 3 | Max retries for rate-limited requests |
+| `MAX_RETRIES` | 3 | Max retries per batch |
+| `RETRY_DELAY_SECONDS` | 5s | Delay between retries (general errors) |
+| `TIMEOUT_RETRY_DELAY_SECONDS` | 10s | Delay after timeout |
+| `DEFAULT_RATE_LIMIT_COOLOFF_SECONDS` | 30s | Default rate limit cooloff |
 
-To adjust these settings, edit `app/config.py`:
+**Error Handling Behavior:**
+
+| Error Type | Action | Log Level |
+|------------|--------|-----------|
+| Rate limit (429) | Extract wait time from error, cooloff (max 5min) | WARNING |
+| Timeout | Retry after 10s | WARNING |
+| Other errors | Retry after 5s | ERROR |
+| Max retries exceeded | Skip batch, continue | ERROR |
+| Too many consecutive errors (9) | Abort symbol fetch | ERROR |
+
+**Dynamic Rate Limit Cooloff:**
+The script parses error messages to extract the suggested wait time:
+- `retry after 60 seconds` → waits 60s
+- `Retry-After: 30` → waits 30s
+- No time specified → waits 30s (default)
+- Maximum wait capped at 300s (5 minutes)
+
+To adjust settings, edit `scripts/fetch_historical.py`:
 
 ```python
-MAX_CONCURRENT_REQUESTS = 3  # Lower for stricter rate limiting
-RATE_LIMIT_DELAY = 0.5       # Higher delay between requests
+MAX_RETRIES = 3
+DEFAULT_RATE_LIMIT_COOLOFF_SECONDS = 30
+TIMEOUT_RETRY_DELAY_SECONDS = 10
 ```
-
-If you frequently see rate limit errors, reduce `MAX_CONCURRENT_REQUESTS` to 3 or lower.
 
 ---
 

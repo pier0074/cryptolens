@@ -2,10 +2,13 @@
 Timeframe Aggregator Service
 Aggregates 1m candles into higher timeframes (5m, 15m, 30m, 1h, 2h, 4h, 1d)
 """
-import sys
+import logging
 import pandas as pd
+from sqlalchemy import text
 from app import db
 from app.models import Symbol, Candle
+
+logger = logging.getLogger(__name__)
 
 
 # Single source of truth for timeframe configuration
@@ -54,14 +57,14 @@ def aggregate_candles_realtime(symbol: str, from_tf: str = '1m', to_tf: str = '5
     # Plus a small buffer for alignment
     limit = tf_minutes + 5
 
-    # Get recent source candles
-    query = """
+    # Get recent source candles (use text() for SQLAlchemy 2.0 + PyMySQL compatibility)
+    query = text("""
         SELECT timestamp, open, high, low, close, volume
         FROM candles
         WHERE symbol_id = :symbol_id AND timeframe = :timeframe
         ORDER BY timestamp DESC
         LIMIT :limit
-    """
+    """)
     df = pd.read_sql(
         query,
         db.engine,
@@ -159,12 +162,13 @@ def aggregate_candles(symbol: str, from_tf: str = '1m', to_tf: str = '5m',
         progress_callback('loading', 0, source_count)
 
     # Direct SQL to DataFrame - 50% less memory than ORM + list comprehension
-    query = """
+    # Use text() for SQLAlchemy 2.0 + PyMySQL compatibility
+    query = text("""
         SELECT timestamp, open, high, low, close, volume
         FROM candles
         WHERE symbol_id = :symbol_id AND timeframe = :timeframe
         ORDER BY timestamp ASC
-    """
+    """)
 
     df = pd.read_sql(
         query,
@@ -313,13 +317,14 @@ def get_candles_as_dataframe(symbol: str, timeframe: str, limit: int = 500) -> p
         return pd.DataFrame()
 
     # Direct SQL to DataFrame - 50% less memory than ORM + list comprehension
-    query = """
+    # Use text() for SQLAlchemy 2.0 + PyMySQL compatibility
+    query = text("""
         SELECT timestamp, open, high, low, close, volume
         FROM candles
         WHERE symbol_id = :symbol_id AND timeframe = :timeframe
         ORDER BY timestamp DESC
         LIMIT :limit
-    """
+    """)
 
     df = pd.read_sql(
         query,

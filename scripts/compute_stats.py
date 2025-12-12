@@ -213,9 +213,21 @@ def compute_stats():
     total_patterns_all = Pattern.query.count()
     total_signals_all = Signal.query.count()
 
-    # Database file size
-    db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'cryptolens.db')
-    db_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
+    # Database size (MySQL)
+    db_size = 0
+    try:
+        result = db.session.execute(db.text("""
+            SELECT SUM(data_length + index_length) as size
+            FROM information_schema.TABLES
+            WHERE table_schema = DATABASE()
+        """))
+        row = result.fetchone()
+        if row and row[0]:
+            db_size = int(row[0])
+    except Exception:
+        # Fallback: try SQLite file (legacy)
+        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'cryptolens.db')
+        db_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
 
     # Verification stats
     verified_count = db.session.query(func.count(Candle.id)).filter(

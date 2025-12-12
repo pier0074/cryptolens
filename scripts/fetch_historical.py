@@ -22,13 +22,24 @@ import sys
 import os
 import time
 import asyncio
+import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Tuple, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import ccxt
 import ccxt.async_support as ccxt_async
 from sqlalchemy import func
+
+# Configure logging
+logger = logging.getLogger('fetch_historical')
+
+# Retry and rate limit configuration
+MAX_RETRIES = 3
+RETRY_DELAY_SECONDS = 5
+DEFAULT_RATE_LIMIT_COOLOFF_SECONDS = 30  # Default if not specified in error
+TIMEOUT_RETRY_DELAY_SECONDS = 10
 
 
 def format_time(seconds):
@@ -89,45 +100,168 @@ def find_gaps(symbol_id: int, start_ts: int, end_ts: int, max_gap_minutes: int =
     return gaps
 
 
+def is_timeout_error(error: Exception) -> bool:
+    """Check if error is a timeout error."""
+    # Check ccxt exception type first
+    if isinstance(error, (ccxt.RequestTimeout, ccxt.NetworkError)):
+        error_str = str(error).lower()
+        if 'timeout' in error_str or 'timed out' in error_str:
+            return True
+    # Fallback to string matching
+    error_str = str(error).lower()
+    return any(x in error_str for x in ['timeout', 'timed out', 'read timed out', 'connect timed out'])
+
+
+def is_rate_limit_error(error: Exception) -> bool:
+    """Check if error is a rate limit error."""
+    # Check ccxt exception type first
+    if isinstance(error, (ccxt.RateLimitExceeded, ccxt.DDoSProtection)):
+        return True
+    # Fallback to string matching
+    error_str = str(error).lower()
+    return any(x in error_str for x in ['rate limit', 'ratelimit', '429', 'too many requests'])
+
+
+def extract_rate_limit_wait_time(error: Exception) -> int:
+    """Extract wait time from rate limit error message.
+
+    Returns:
+        Wait time in seconds, or DEFAULT_RATE_LIMIT_COOLOFF_SECONDS if not found.
+    """
+    import re
+    error_str = str(error).lower()
+
+    patterns = [
+        r'retry[- ]?after[:\s]+(\d+)',       # 'retry after 10', 'Retry-After: 60'
+        r'after\s+(\d+)\s*s',                 # 'after 30s'
+        r'in\s+(\d+)\s*sec',                  # 'in 5 seconds'
+        r'wait\s+(\d+)',                      # 'wait 45 seconds'
+        r'(\d+)\s*seconds?\s*(cool|wait|delay)',  # '10 seconds cooldown'
+    ]
+
+    for pattern in patterns:
+        match = re.search(pattern, error_str)
+        if match:
+            wait_time = int(match.group(1))
+            # Sanity check: don't wait more than 5 minutes
+            return min(wait_time, 300)
+
+    return DEFAULT_RATE_LIMIT_COOLOFF_SECONDS
+
+
 async def fetch_range_async(exchange, symbol: str, start_ts: int, end_ts: int,
-                           verbose: bool = False) -> List:
-    """Fetch candles for a time range using async."""
+                           verbose: bool = False, save_callback=None,
+                           save_every: int = 10000) -> List:
+    """Fetch candles for a time range using async with retry and rate limit handling.
+
+    Args:
+        save_callback: Optional function(candles) to save candles incrementally.
+                       If provided, saves every `save_every` candles for crash resilience.
+        save_every: Save to DB every N candles (default 10,000 = ~1 week of 1m data)
+
+    Returns:
+        List of candles (empty if save_callback was used, since they're already saved)
+    """
     all_candles = []
+    pending_candles = []  # Buffer for incremental saves
     current_ts = start_ts
     batch_size = 1000
     total_range = end_ts - start_ts
     last_progress = -1
+    total_saved = 0
+    consecutive_errors = 0
 
     while current_ts < end_ts:
-        try:
-            ohlcv = await exchange.fetch_ohlcv(symbol, '1m', since=current_ts, limit=batch_size)
-            if not ohlcv:
-                break
+        retries = 0
+        success = False
 
-            all_candles.extend(ohlcv)
+        while retries < MAX_RETRIES and not success:
+            try:
+                ohlcv = await exchange.fetch_ohlcv(symbol, '1m', since=current_ts, limit=batch_size)
+                if not ohlcv:
+                    success = True  # No more data, but not an error
+                    break
 
-            # Move to next batch
-            last_ts = ohlcv[-1][0]
-            if last_ts <= current_ts:
-                break
-            current_ts = last_ts + 60000
+                if save_callback:
+                    pending_candles.extend(ohlcv)
+                    # Save every N candles for crash resilience
+                    if len(pending_candles) >= save_every:
+                        saved = save_callback(pending_candles)
+                        total_saved += saved
+                        pending_candles = []
+                else:
+                    all_candles.extend(ohlcv)
 
-            # Show progress every 10%
-            if not verbose:
-                progress = int((current_ts - start_ts) / total_range * 10)
-                if progress > last_progress:
-                    print(".", end='', flush=True)
-                    last_progress = progress
-            elif len(all_candles) % 10000 == 0:
-                print(f"    Fetched {len(all_candles):,} candles...", end='\r')
+                # Move to next batch
+                last_ts = ohlcv[-1][0]
+                if last_ts <= current_ts:
+                    success = True
+                    break
+                current_ts = last_ts + 60000
+                success = True
+                consecutive_errors = 0  # Reset on success
 
-        except Exception as e:
+                # Show progress every 10%
+                if not verbose:
+                    progress = int((current_ts - start_ts) / total_range * 10)
+                    if progress > last_progress:
+                        print(".", end='', flush=True)
+                        last_progress = progress
+                else:
+                    count = total_saved + len(pending_candles) if save_callback else len(all_candles)
+                    if count % 10000 < batch_size:
+                        print(f"    Fetched {count:,} candles...", end='\r')
+
+            except Exception as e:
+                retries += 1
+                consecutive_errors += 1
+
+                if is_rate_limit_error(e):
+                    # Rate limit: extract wait time and cool off
+                    wait_time = extract_rate_limit_wait_time(e)
+                    logger.warning(f"Rate limit hit for {symbol} at {current_ts}, cooling off {wait_time}s (attempt {retries}/{MAX_RETRIES})")
+                    if verbose:
+                        print(f"\n    Rate limit hit, cooling off {wait_time}s...")
+                    await asyncio.sleep(wait_time)
+
+                elif is_timeout_error(e):
+                    # Timeout: retry with shorter delay
+                    logger.warning(f"Timeout for {symbol} at {current_ts}, retrying in {TIMEOUT_RETRY_DELAY_SECONDS}s (attempt {retries}/{MAX_RETRIES})")
+                    if verbose:
+                        print(f"\n    Timeout, retrying in {TIMEOUT_RETRY_DELAY_SECONDS}s...")
+                    await asyncio.sleep(TIMEOUT_RETRY_DELAY_SECONDS)
+
+                else:
+                    # Other error: log and retry with standard delay
+                    logger.error(f"Error fetching {symbol} at {current_ts}: {e} (attempt {retries}/{MAX_RETRIES})")
+                    if verbose:
+                        print(f"\n    Error at {current_ts}: {e}, retrying...")
+                    await asyncio.sleep(RETRY_DELAY_SECONDS)
+
+        # If all retries failed, skip this batch and move forward
+        if not success:
+            logger.error(f"Failed to fetch {symbol} at {current_ts} after {MAX_RETRIES} retries, skipping batch")
             if verbose:
-                print(f"    Error at {current_ts}: {e}")
-            await asyncio.sleep(1)
+                print(f"\n    Failed after {MAX_RETRIES} retries, skipping batch")
             current_ts += batch_size * 60000
 
-    return all_candles
+            # If too many consecutive errors, bail out
+            if consecutive_errors >= MAX_RETRIES * 3:
+                logger.error(f"Too many consecutive errors for {symbol}, aborting fetch")
+                if verbose:
+                    print(f"\n    Too many consecutive errors, aborting")
+                break
+
+        # Break if no more data
+        if success and not ohlcv:
+            break
+
+    # Save remaining pending candles
+    if save_callback and pending_candles:
+        saved = save_callback(pending_candles)
+        total_saved += saved
+
+    return all_candles if not save_callback else []
 
 
 def save_candles_batch(symbol_id: int, candles: List, verbose: bool = False) -> int:
@@ -216,17 +350,30 @@ async def fill_gaps_for_symbol(exchange, symbol_name: str, symbol_id: int,
     total_filled = 0
     gap_results = []
 
+    # Create save callback that uses app context
+    def make_save_callback():
+        saved_count = [0]  # Use list to allow mutation in closure
+
+        def save_cb(candles):
+            with app.app_context():
+                saved = save_candles_batch(symbol_id, candles, False)
+                saved_count[0] += saved
+                return saved
+        return save_cb, saved_count
+
     for i, (gap_start, gap_end) in enumerate(gaps):
         gap_duration = (gap_end - gap_start) / (60 * 1000)
         gap_start_dt = datetime.fromtimestamp(gap_start / 1000, tz=timezone.utc).strftime('%m-%d %H:%M')
 
-        candles = await fetch_range_async(exchange, symbol_name, gap_start, gap_end, False)  # Quiet fetch
+        # Use incremental saves for large gaps (>10k candles = ~1 week)
+        save_cb, saved_count = make_save_callback()
+        await fetch_range_async(exchange, symbol_name, gap_start, gap_end, False,
+                                save_callback=save_cb, save_every=10000)
 
-        if candles:
-            with app.app_context():
-                filled = save_candles_batch(symbol_id, candles, False)
-                total_filled += filled
-                gap_results.append(f"    [{i+1}/{len(gaps)}] {gap_duration:.0f}m from {gap_start_dt} → {filled:,} saved")
+        filled = saved_count[0]
+        total_filled += filled
+        if filled > 0:
+            gap_results.append(f"    [{i+1}/{len(gaps)}] {gap_duration:.0f}m from {gap_start_dt} → {filled:,} saved")
         else:
             gap_results.append(f"    [{i+1}/{len(gaps)}] {gap_duration:.0f}m from {gap_start_dt} → no data")
 
@@ -249,7 +396,7 @@ async def fill_gaps_for_symbol(exchange, symbol_name: str, symbol_id: int,
 async def fetch_symbol_full(exchange, symbol_name: str, symbol_id: int,
                            days: int, verbose: bool = False, index: int = 0,
                            total: int = 1) -> dict:
-    """Fetch full history for a symbol."""
+    """Fetch full history for a symbol with incremental saves."""
     from app import create_app
 
     now = datetime.now(timezone.utc)
@@ -262,22 +409,32 @@ async def fetch_symbol_full(exchange, symbol_name: str, symbol_id: int,
     if verbose:
         print(f"\n    Range: {days} days")
 
-    candles = await fetch_range_async(exchange, symbol_name, start_ts, end_ts, verbose)
-
-    if verbose:
-        print(f"    Fetched {len(candles):,} candles")
-
     app = create_app()
-    with app.app_context():
-        new_count = save_candles_batch(symbol_id, candles, verbose)
+    total_saved = [0]
+    total_fetched = [0]
+
+    # Create save callback for incremental saves
+    def save_cb(candles):
+        with app.app_context():
+            saved = save_candles_batch(symbol_id, candles, False)
+            total_saved[0] += saved
+            total_fetched[0] += len(candles)
+            return saved
+
+    # Use incremental saves every 10k candles
+    await fetch_range_async(exchange, symbol_name, start_ts, end_ts, verbose,
+                            save_callback=save_cb, save_every=10000)
+
+    new_count = total_saved[0]
+    fetched_count = total_fetched[0]
 
     # Show result on same line (after dots)
     if not verbose:
-        print(f" {len(candles):,} candles, {new_count:,} new", flush=True)
+        print(f" {fetched_count:,} candles, {new_count:,} new", flush=True)
     else:
         print(f"    Saved {new_count:,} new candles")
 
-    return {'symbol': symbol_name, 'fetched': len(candles), 'new': new_count}
+    return {'symbol': symbol_name, 'fetched': fetched_count, 'new': new_count}
 
 
 async def run_gap_fill(symbols: List[Tuple[str, int]], days: int, verbose: bool = False,
@@ -363,6 +520,7 @@ def aggregate_all_symbols(verbose: bool = False, app=None):
         print("\nAggregating to higher timeframes...", flush=True)
 
         total_candles = 0
+        errors = 0
         for i, sym in enumerate(symbols):
             if verbose:
                 print(f"  [{i+1}/{len(symbols)}] {sym.symbol}...", end=' ', flush=True)
@@ -373,11 +531,16 @@ def aggregate_all_symbols(verbose: bool = False, app=None):
                 if verbose:
                     print(f"{totals:,} candles")
             except Exception as e:
+                errors += 1
+                logger.error(f"Aggregation error for {sym.symbol}: {e}")
                 if verbose:
                     print(f"ERROR: {e}")
 
         if not verbose:
             print(f"  {total_candles:,} candles aggregated", flush=True)
+
+        if errors > 0:
+            logger.warning(f"Aggregation completed with {errors} error(s)")
 
 
 def show_status():
