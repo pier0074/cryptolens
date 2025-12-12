@@ -289,8 +289,8 @@ def create_app(config_name=None):
     from app.routes.metrics import metrics_bp
     from app.routes.docs import docs_bp
 
-    app.register_blueprint(dashboard_bp)
-    app.register_blueprint(main_bp)
+    app.register_blueprint(main_bp)  # Public pages (landing, pricing, etc.)
+    app.register_blueprint(dashboard_bp, url_prefix='/dashboard')  # Protected dashboard
     app.register_blueprint(patterns_bp, url_prefix='/patterns')
     app.register_blueprint(signals_bp, url_prefix='/signals')
     app.register_blueprint(backtest_bp, url_prefix='/backtest')

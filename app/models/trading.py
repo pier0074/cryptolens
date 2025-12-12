@@ -41,13 +41,13 @@ class Candle(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     symbol_id = db.Column(db.Integer, db.ForeignKey('symbols.id'), nullable=False)
     timeframe = db.Column(db.String(5), nullable=False)  # '1m', '5m', '15m', '1h', '4h', '1d'
-    timestamp = db.Column(db.Integer, nullable=False)  # Unix timestamp in milliseconds
+    timestamp = db.Column(db.BigInteger, nullable=False)  # Unix timestamp in milliseconds
     open = db.Column(db.Float, nullable=False)
     high = db.Column(db.Float, nullable=False)
     low = db.Column(db.Float, nullable=False)
     close = db.Column(db.Float, nullable=False)
     volume = db.Column(db.Float, nullable=False)
-    verified_at = db.Column(db.Integer, nullable=True)  # Timestamp when health check passed (ms)
+    verified_at = db.Column(db.BigInteger, nullable=True)  # Timestamp when health check passed (ms)
 
     __table_args__ = (
         db.UniqueConstraint('symbol_id', 'timeframe', 'timestamp', name='uix_candle'),
@@ -82,9 +82,9 @@ class Pattern(db.Model):
     direction = db.Column(db.String(10), nullable=False)  # 'bullish', 'bearish'
     zone_high = db.Column(db.Float, nullable=False)
     zone_low = db.Column(db.Float, nullable=False)
-    detected_at = db.Column(db.Integer, nullable=False)  # Candle timestamp when detected
+    detected_at = db.Column(db.BigInteger, nullable=False)  # Candle timestamp when detected (ms)
     status = db.Column(db.String(15), default='active')  # 'active', 'filled', 'expired'
-    filled_at = db.Column(db.Integer, nullable=True)
+    filled_at = db.Column(db.BigInteger, nullable=True)  # Timestamp when filled (ms)
     fill_percentage = db.Column(db.Float, nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 

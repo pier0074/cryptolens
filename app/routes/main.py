@@ -9,9 +9,31 @@ from app.decorators import get_current_user
 main_bp = Blueprint('main', __name__)
 
 
+@main_bp.route('/')
+def index():
+    """Public landing page - redirects logged-in users to dashboard"""
+    user = get_current_user()
+    if user:
+        # Logged-in users go to dashboard
+        return redirect(url_for('dashboard.index'))
+
+    # Public landing page with stats
+    stats = {
+        'patterns_detected': Pattern.query.count(),
+        'signals_generated': Signal.query.count(),
+        'symbols_tracked': Symbol.query.filter_by(is_active=True).count(),
+    }
+
+    return render_template('landing.html',
+        plans=SUBSCRIPTION_PLANS,
+        stats=stats,
+        user=None
+    )
+
+
 @main_bp.route('/landing')
 def landing():
-    """Public landing page"""
+    """Public landing page (alias for root)"""
     # Get some stats for social proof
     stats = {
         'patterns_detected': Pattern.query.count(),

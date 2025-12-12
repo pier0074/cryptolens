@@ -281,7 +281,7 @@
             <table class="docs-table">
                 <tr><th>Component</th><th>Technology</th></tr>
                 <tr><td>Backend</td><td>Python 3.9+, Flask 3.0</td></tr>
-                <tr><td>Database</td><td>SQLite (dev) / PostgreSQL (prod)</td></tr>
+                <tr><td>Database</td><td>MySQL 8.0+ (dev and prod)</td></tr>
                 <tr><td>Exchange Data</td><td>CCXT (Binance)</td></tr>
                 <tr><td>Notifications</td><td>NTFY.sh</td></tr>
                 <tr><td>Payments</td><td>LemonSqueezy (fiat), NOWPayments (crypto)</td></tr>
@@ -319,7 +319,7 @@
 |  +------------------------+--------------------------+   |
 |                           |                              |
 |  +------------------------v--------------------------+   |
-|  |           SQLite / PostgreSQL Database            |   |
+|  |                 MySQL Database                     |   |
 |  +---------------------------------------------------+   |
 +----------------------------------------------------------+</div>
 
@@ -979,7 +979,7 @@ LIQUIDITY_SWING_LOOKBACK = 5  # Candles to look for swings
             <h2 class="docs-h2">Production Checklist</h2>
             <ol class="docs-list">
                 <li>Set <code class="docs-code">FLASK_ENV=production</code></li>
-                <li>Use PostgreSQL instead of SQLite</li>
+                <li>Configure MySQL with <code class="docs-code">PROD_DB_*</code> environment variables</li>
                 <li>Configure HTTPS with valid SSL certificate</li>
                 <li>Set up Redis for rate limiting and caching</li>
                 <li>Configure reverse proxy (nginx)</li>
@@ -1091,13 +1091,13 @@ python scripts/fetch.py --gaps</div>
             <!-- ==================== FETCH_HISTORICAL.PY ==================== -->
             <h2 class="docs-h2">fetch_historical.py - Historical Data &amp; Gap Fill</h2>
             <p class="docs-p">
-                Fetches historical candle data for initial setup, backfilling, or gap detection. Uses async parallel fetching for speed.
+                Fetches historical candle data for initial setup, backfilling, or gap detection. Uses the <strong>fetch_start_date</strong> setting from Admin &gt; Symbols (default: 2024-01-01).
             </p>
 
             <h3 class="docs-h3">Command Line Options</h3>
             <table class="docs-table">
                 <tr><th>Option</th><th>Description</th><th>Default</th></tr>
-                <tr><td><code class="docs-code">--days N</code></td><td>Number of days of history to fetch</td><td>365</td></tr>
+                <tr><td><code class="docs-code">--days N</code></td><td>Override days (ignores fetch_start_date setting)</td><td>Uses setting</td></tr>
                 <tr><td><code class="docs-code">--gaps</code></td><td>Only find and fill gaps (for hourly cron)</td><td>Off</td></tr>
                 <tr><td><code class="docs-code">--full</code></td><td>With --gaps: scan entire database, not just last X days</td><td>Off</td></tr>
                 <tr><td><code class="docs-code">--status</code></td><td>Show database status (candle counts, date ranges)</td><td>-</td></tr>
@@ -1107,10 +1107,10 @@ python scripts/fetch.py --gaps</div>
             </table>
 
             <h3 class="docs-h3">Usage Examples</h3>
-            <div class="docs-codeblock"># Initial load - fetch 1 year of history for all active symbols
+            <div class="docs-codeblock"># Initial load - fetch from fetch_start_date (Admin > Symbols)
 python scripts/fetch_historical.py
 
-# Fetch only last 30 days
+# Override with specific number of days
 python scripts/fetch_historical.py --days 30
 
 # Gap fill mode (finds missing candles and fetches them)
@@ -1125,7 +1125,7 @@ python scripts/fetch_historical.py --status
 # Delete all data (DANGEROUS - requires confirmation)
 python scripts/fetch_historical.py --delete
 
-# Verbose with 90 days
+# Verbose with 90 days override
 python scripts/fetch_historical.py --days 90 -v</div>
 
             <h3 class="docs-h3">Status Output Example</h3>

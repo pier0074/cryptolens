@@ -908,7 +908,7 @@ class TestDashboardSignalRestrictions:
         })
 
         # Access dashboard
-        response = client.get('/')
+        response = client.get('/dashboard/')
         assert response.status_code == 200
         html = response.data.decode('utf-8')
 

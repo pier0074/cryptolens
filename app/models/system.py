@@ -76,7 +76,7 @@ class StatsCache(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     key = db.Column(db.String(50), unique=True, nullable=False)  # 'global' or symbol name
     data = db.Column(db.Text, nullable=False)  # JSON blob
-    computed_at = db.Column(db.Integer, nullable=False)  # Timestamp in ms
+    computed_at = db.Column(db.BigInteger, nullable=False)  # Timestamp in ms
 
     def __repr__(self):
         return f'<StatsCache {self.key}>'

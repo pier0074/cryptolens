@@ -173,20 +173,21 @@ def save_candles_batch(symbol_id: int, candles: List, verbose: bool = False) -> 
 
 async def fill_gaps_for_symbol(exchange, symbol_name: str, symbol_id: int,
                                days: int, verbose: bool = False,
-                               full_scan: bool = False) -> dict:
+                               full_scan: bool = False, app=None, print_lock=None) -> dict:
     """Find and fill gaps for a single symbol.
 
     Args:
         full_scan: If True, scan from beginning of database to now (ignores days parameter)
+        app: Flask app context to reuse (avoids creating multiple apps)
+        print_lock: asyncio.Lock for serializing output
     """
-    from app import create_app, db
+    from app import db
     from app.models import Candle
     from sqlalchemy import func
 
     now = datetime.now(timezone.utc)
     end_ts = int(now.timestamp() * 1000) - (5 * 60 * 1000)  # 5 min buffer
 
-    app = create_app()
     with app.app_context():
         if full_scan:
             # Get earliest candle timestamp from database
@@ -197,9 +198,6 @@ async def fill_gaps_for_symbol(exchange, symbol_name: str, symbol_id: int,
 
             if earliest:
                 start_ts = earliest
-                if verbose:
-                    start_date = datetime.fromtimestamp(earliest / 1000, tz=timezone.utc).strftime('%Y-%m-%d')
-                    print(f"    {symbol_name}: Scanning from {start_date} to now")
             else:
                 # No data, use days parameter
                 start_ts = int((now - timedelta(days=days)).timestamp() * 1000)
@@ -209,14 +207,18 @@ async def fill_gaps_for_symbol(exchange, symbol_name: str, symbol_id: int,
         gaps = find_gaps(symbol_id, start_ts, end_ts)
 
     if not gaps:
+        if verbose and print_lock:
+            async with print_lock:
+                print(f"  {symbol_name}: No gaps found")
         return {'symbol': symbol_name, 'gaps': 0, 'filled': 0}
 
+    # Collect results, then print at end to avoid interleaving
     total_filled = 0
+    gap_results = []
+
     for i, (gap_start, gap_end) in enumerate(gaps):
         gap_duration = (gap_end - gap_start) / (60 * 1000)
-        if verbose:
-            gap_start_dt = datetime.fromtimestamp(gap_start / 1000, tz=timezone.utc).strftime('%m-%d %H:%M')
-            print(f"    Gap {i+1}/{len(gaps)}: {gap_duration:.0f} min starting {gap_start_dt}", end='', flush=True)
+        gap_start_dt = datetime.fromtimestamp(gap_start / 1000, tz=timezone.utc).strftime('%m-%d %H:%M')
 
         candles = await fetch_range_async(exchange, symbol_name, gap_start, gap_end, False)  # Quiet fetch
 
@@ -224,10 +226,22 @@ async def fill_gaps_for_symbol(exchange, symbol_name: str, symbol_id: int,
             with app.app_context():
                 filled = save_candles_batch(symbol_id, candles, False)
                 total_filled += filled
-                if verbose:
-                    print(f" → fetched {len(candles)}, saved {filled} new")
-        elif verbose:
-            print(f" → no candles returned")
+                gap_results.append(f"    [{i+1}/{len(gaps)}] {gap_duration:.0f}m from {gap_start_dt} → {filled:,} saved")
+        else:
+            gap_results.append(f"    [{i+1}/{len(gaps)}] {gap_duration:.0f}m from {gap_start_dt} → no data")
+
+    # Print all output for this symbol at once (with lock)
+    if print_lock:
+        async with print_lock:
+            print(f"  {symbol_name}: {len(gaps)} gap(s), {total_filled:,} candles filled")
+            if verbose:
+                for line in gap_results:
+                    print(line)
+    else:
+        print(f"  {symbol_name}: {len(gaps)} gap(s), {total_filled:,} candles filled")
+        if verbose:
+            for line in gap_results:
+                print(line)
 
     return {'symbol': symbol_name, 'gaps': len(gaps), 'filled': total_filled}
 
@@ -273,7 +287,11 @@ async def run_gap_fill(symbols: List[Tuple[str, int]], days: int, verbose: bool 
     Args:
         full_scan: If True, scan from beginning of database (not just last X days)
     """
+    from app import create_app
     from app.config import Config
+
+    # Create app once to avoid repeated "Logging system active" messages
+    app = create_app()
 
     exchange = ccxt_async.binance({
         'enableRateLimit': True,
@@ -283,9 +301,12 @@ async def run_gap_fill(symbols: List[Tuple[str, int]], days: int, verbose: bool 
     # Semaphore to limit concurrent requests
     semaphore = asyncio.Semaphore(Config.MAX_CONCURRENT_REQUESTS)
 
+    # Lock for serializing output
+    print_lock = asyncio.Lock()
+
     async def limited_fill(name, sid):
         async with semaphore:
-            return await fill_gaps_for_symbol(exchange, name, sid, days, verbose, full_scan)
+            return await fill_gaps_for_symbol(exchange, name, sid, days, verbose, full_scan, app, print_lock)
 
     scan_type = "entire database" if full_scan else f"last {days} days"
     if verbose:
@@ -328,13 +349,14 @@ async def run_full_fetch(symbols: List[Tuple[str, int]], days: int, verbose: boo
         await exchange.close()
 
 
-def aggregate_all_symbols(verbose: bool = False):
+def aggregate_all_symbols(verbose: bool = False, app=None):
     """Aggregate 1m candles to all higher timeframes."""
     from app import create_app
     from app.models import Symbol
     from app.services.aggregator import aggregate_all_timeframes
 
-    app = create_app()
+    if app is None:
+        app = create_app()
     with app.app_context():
         symbols = Symbol.query.filter_by(is_active=True).all()
 
@@ -423,7 +445,7 @@ def delete_all():
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Historical data fetcher')
-    parser.add_argument('--days', type=int, default=365, help='Days of history (default: 365)')
+    parser.add_argument('--days', type=int, default=None, help='Days of history (overrides fetch_start_date setting)')
     parser.add_argument('--gaps', action='store_true', help='Only fill gaps (for hourly cron)')
     parser.add_argument('--full', action='store_true', help='With --gaps: scan entire database, not just last X days')
     parser.add_argument('--status', action='store_true', help='Show database status')
@@ -449,9 +471,9 @@ def main():
         else:
             return
 
-    # Get symbols
+    # Get symbols and fetch_start_date setting
     from app import create_app, db
-    from app.models import Symbol
+    from app.models import Symbol, Setting
     from app.config import Config
 
     app = create_app()
@@ -459,13 +481,27 @@ def main():
         symbols = Symbol.query.filter_by(is_active=True).all()
 
         if not symbols:
-            print("  Initializing default symbols...", flush=True)
-            for name in Config.SYMBOLS:
-                db.session.add(Symbol(symbol=name, exchange='binance'))
-            db.session.commit()
-            symbols = Symbol.query.filter_by(is_active=True).all()
+            print("  No active symbols found. Add symbols in Admin > Symbols.", flush=True)
+            return
 
         symbol_list = [(s.symbol, s.id) for s in symbols]
+
+        # Get fetch_start_date from database setting (default: 2024-01-01)
+        fetch_start_setting = Setting.query.filter_by(key='fetch_start_date').first()
+        fetch_start_date = fetch_start_setting.value if fetch_start_setting else '2024-01-01'
+
+        # Calculate days from start date to now
+        if args.days is not None:
+            days = args.days
+            date_info = f"{days} days (--days override)"
+        else:
+            try:
+                start_dt = datetime.strptime(fetch_start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+                days = (datetime.now(timezone.utc) - start_dt).days
+                date_info = f"from {fetch_start_date} ({days} days)"
+            except ValueError:
+                days = 365
+                date_info = f"365 days (invalid fetch_start_date: {fetch_start_date})"
 
     start_time = time.time()
 
@@ -473,12 +509,12 @@ def main():
     print(f"  Mode: {mode_desc}")
     print(f"  Symbols: {len(symbol_list)}")
     if not (args.gaps and args.full):
-        print(f"  Days: {args.days}")
+        print(f"  Target: {date_info}")
     print(f"{'═'*60}", flush=True)
 
     if args.gaps:
         # Gap fill mode
-        results = asyncio.run(run_gap_fill(symbol_list, args.days, args.verbose, args.full))
+        results = asyncio.run(run_gap_fill(symbol_list, days, args.verbose, args.full))
 
         total_gaps = sum(r['gaps'] for r in results)
         total_filled = sum(r['filled'] for r in results)
@@ -487,14 +523,14 @@ def main():
         print(f"  Candles filled: {total_filled:,}")
     else:
         # Full fetch mode
-        results = asyncio.run(run_full_fetch(symbol_list, args.days, args.verbose))
+        results = asyncio.run(run_full_fetch(symbol_list, days, args.verbose))
 
         total_new = sum(r['new'] for r in results)
         print(f"\n  New candles: {total_new:,}")
 
-    # Aggregate
+    # Aggregate (reuse app from initial symbol fetch)
     if not args.no_aggregate:
-        aggregate_all_symbols(args.verbose)
+        aggregate_all_symbols(args.verbose, app)
 
     elapsed = time.time() - start_time
     print(f"\n  Time: {format_time(elapsed)}")

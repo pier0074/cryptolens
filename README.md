@@ -6,7 +6,7 @@ Automated detection of institutional trading patterns across multiple timeframes
 
 ![Python](https://img.shields.io/badge/Python-3.9+-blue.svg)
 ![Flask](https://img.shields.io/badge/Flask-3.0-green.svg)
-![SQLite](https://img.shields.io/badge/SQLite-3-lightgrey.svg)
+![MySQL](https://img.shields.io/badge/MySQL-8.0-blue.svg)
 
 ## Features
 
@@ -149,19 +149,31 @@ pip install -r requirements.txt
 
 # Configure environment
 cp .env.example .env
-# Edit .env with your SMTP settings for email verification
+# Edit .env with your database and SMTP settings
 
-# Run database migrations
-python scripts/migrate_all.py
+# Create MySQL database and tables
+make db-create
 
 # Create test accounts (admin + one per tier)
-python scripts/create_admin.py
+make db-user
 
-# Fetch historical data
+# Fetch historical data (from fetch_start_date setting, default: 2024-01-01)
 python scripts/fetch_historical.py -v
 
 # Run the web app
-python run.py
+flask run --debug
+```
+
+### Makefile Commands
+
+```bash
+make help          # Show all commands
+make db-create     # Create database and tables
+make db-user       # Create test accounts
+make db-reset      # Drop + recreate + create users
+make db-drop       # Drop database
+make dev           # Start development server
+make test          # Run tests
 ```
 
 Visit `http://localhost:5000` and login with a test account:
@@ -186,7 +198,20 @@ Create a `.env` file with:
 ```bash
 # Flask
 SECRET_KEY=your-secret-key-here
-FLASK_ENV=production
+FLASK_ENV=development  # or 'production'
+
+# Database (MySQL)
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=root
+DB_PASS=your-password
+DB_NAME=cryptolens
+
+# Production Database (used when FLASK_ENV=production)
+# PROD_DB_HOST=your-prod-host.com
+# PROD_DB_USER=cryptolens_user
+# PROD_DB_PASS=secure-password
+# PROD_DB_NAME=cryptolens_prod
 
 # Email (for verification and password reset)
 MAIL_SERVER=smtp.gmail.com
@@ -199,6 +224,11 @@ MAIL_DEFAULT_SENDER=your-email@gmail.com
 # NTFY (self-hosted or ntfy.sh)
 NTFY_URL=https://ntfy.sh
 ```
+
+**Database Notes:**
+- MySQL 8.0+ required (uses BigInteger for millisecond timestamps)
+- Auto-detects production environment (FLASK_ENV, common PaaS indicators)
+- Falls back to `DB_*` vars if `PROD_DB_*` not set in production
 
 ---
 
@@ -299,11 +329,11 @@ python scripts/db_health.py -q --fix
 
 #### `fetch_historical.py` - Historical Data Loader
 
-Fetches historical candle data for initial setup or backfilling gaps. Supports parallel async fetching for speed.
+Fetches historical candle data for initial setup or backfilling gaps. Uses the `fetch_start_date` setting from Admin > Symbols (default: 2024-01-01).
 
 | Parameter | Description |
 |-----------|-------------|
-| `--days` | Days of history to fetch (default: **365**) |
+| `--days` | Override days (ignores fetch_start_date setting) |
 | `--gaps` | Only fill gaps (skip full fetch) |
 | `--full` | With `--gaps`: scan entire database, not just last X days |
 | `--status` | Show database status (candle counts, date ranges) |
@@ -312,14 +342,14 @@ Fetches historical candle data for initial setup or backfilling gaps. Supports p
 | `--no-aggregate` | Skip aggregation to higher timeframes after fetch |
 
 ```bash
-# Full fetch - 1 year of history (default)
+# Full fetch from fetch_start_date (default: 2024-01-01)
 python scripts/fetch_historical.py
 
-# Fetch specific number of days
+# Override with specific number of days
 python scripts/fetch_historical.py --days=30
 
-# Fill gaps in last 7 days
-python scripts/fetch_historical.py --gaps --days=7
+# Fill gaps in date range from fetch_start_date
+python scripts/fetch_historical.py --gaps
 
 # Fill ALL gaps in entire database (from beginning to now)
 python scripts/fetch_historical.py --gaps --full -v
@@ -334,8 +364,13 @@ python scripts/fetch_historical.py --delete
 python scripts/fetch_historical.py --days=7 --no-aggregate
 ```
 
+**Target Date Configuration:**
+- Set in Admin > Symbols page ("Fetch Start Date")
+- Default: 2024-01-01
+- Use `--days` flag to override temporarily
+
 **Gap fill mode** (`--gaps`):
-1. Scans existing data for the specified day range
+1. Scans existing data from fetch_start_date to now
 2. Detects missing candle sequences (gaps > 5 minutes)
 3. Fetches only the missing ranges from Binance
 4. Aggregates to higher timeframes automatically

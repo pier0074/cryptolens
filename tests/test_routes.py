@@ -16,37 +16,42 @@ class TestDashboardRoutes:
     def test_dashboard_index(self, client, app, sample_user, sample_symbol):
         """Test dashboard index page loads for authenticated user"""
         login_user(client, 'test@example.com', 'TestPass123')
-        response = client.get('/')
+        response = client.get('/dashboard/')
         assert response.status_code == 200
         assert b'BTC/USDT' in response.data or b'Dashboard' in response.data
 
     def test_dashboard_redirects_unauthenticated(self, client, app, sample_symbol):
         """Test dashboard redirects unauthenticated users"""
-        response = client.get('/')
+        response = client.get('/dashboard/')
         assert response.status_code == 302  # Redirect to login
+
+    def test_landing_page_public(self, client, app, sample_symbol):
+        """Test landing page is public (no login required)"""
+        response = client.get('/')
+        assert response.status_code == 200  # Landing page is public
 
     def test_dashboard_with_patterns(self, client, app, sample_user, sample_symbol, sample_pattern):
         """Test dashboard shows patterns"""
         login_user(client, 'test@example.com', 'TestPass123')
-        response = client.get('/')
+        response = client.get('/dashboard/')
         assert response.status_code == 200
 
     def test_analytics_page(self, client, app, user_lifetime, sample_symbol):
         """Test analytics page loads for authenticated Premium user"""
         login_user(client, 'lifetime@example.com', 'TestPass123')
-        response = client.get('/analytics')
+        response = client.get('/dashboard/analytics')
         assert response.status_code == 200
 
     def test_analytics_with_data(self, client, app, user_lifetime, sample_symbol, sample_pattern):
         """Test analytics with patterns data"""
         login_user(client, 'lifetime@example.com', 'TestPass123')
-        response = client.get('/analytics')
+        response = client.get('/dashboard/analytics')
         assert response.status_code == 200
 
     def test_analytics_accessible_to_pro(self, client, app, sample_user):
         """Test analytics is accessible to Pro users"""
         login_user(client, 'test@example.com', 'TestPass123')
-        response = client.get('/analytics')
+        response = client.get('/dashboard/analytics')
         assert response.status_code == 200  # Pro users have analytics access
 
     def test_analytics_redirects_free_users(self, client, app):
@@ -79,7 +84,7 @@ class TestDashboardRoutes:
             db.session.commit()
 
         login_user(client, 'free@example.com', 'FreePass123')
-        response = client.get('/analytics')
+        response = client.get('/dashboard/analytics')
         assert response.status_code == 302  # Redirect to upgrade page
 
 
