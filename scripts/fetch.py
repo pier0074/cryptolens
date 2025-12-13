@@ -56,7 +56,7 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
     """
     import time as _time
     from app.models import Symbol, Candle
-    from app.services.aggregator import aggregate_candles_realtime
+    from app.services.aggregator import aggregate_candles_realtime, aggregate_candles
     from app.services.patterns import get_all_detectors
     from app import db
 
@@ -94,10 +94,16 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
         if new_count > 0:
             db.session.commit()
 
-        # 2. Aggregate ALL higher timeframes (always)
+        # 2. Aggregate ALL higher timeframes
+        # Use full aggregation if catching up (many new candles), otherwise realtime (faster)
+        use_full_aggregation = new_count > 10  # More than 10 minutes of catch-up
+
         for tf in ALL_TIMEFRAMES:
             try:
-                aggregate_candles_realtime(symbol_name, '1m', tf)
+                if use_full_aggregation:
+                    aggregate_candles(symbol_name, '1m', tf)
+                else:
+                    aggregate_candles_realtime(symbol_name, '1m', tf)
             except Exception:
                 pass
 
