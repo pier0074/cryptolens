@@ -261,6 +261,57 @@ class Notification(db.Model):
         return f'<Notification {self.channel} {self.signal_id}>'
 
 
+class KnownGap(db.Model):
+    """
+    Known/Accepted gaps in candle data.
+
+    When the exchange has no data for a time range (e.g., no trades, maintenance),
+    we record it here so verification can continue past it.
+    """
+    __tablename__ = 'known_gaps'
+
+    id = db.Column(db.Integer, primary_key=True)
+    symbol_id = db.Column(db.Integer, db.ForeignKey('symbols.id'), nullable=False)
+    timeframe = db.Column(db.String(5), nullable=False)
+    gap_start = db.Column(db.BigInteger, nullable=False)  # First missing timestamp (ms)
+    gap_end = db.Column(db.BigInteger, nullable=False)    # Last missing timestamp (ms)
+    missing_candles = db.Column(db.Integer, nullable=False)
+    reason = db.Column(db.String(50), default='no_exchange_data')  # 'no_exchange_data', 'accepted', 'maintenance'
+    verified_empty = db.Column(db.Boolean, default=False)  # True if we confirmed exchange has no data
+    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
+
+    # Relationship
+    symbol = db.relationship('Symbol', backref=db.backref('known_gaps', lazy='dynamic'))
+
+    __table_args__ = (
+        db.UniqueConstraint('symbol_id', 'timeframe', 'gap_start', name='uix_known_gap'),
+        db.Index('idx_known_gap_lookup', 'symbol_id', 'timeframe', 'gap_start', 'gap_end'),
+    )
+
+    def __repr__(self):
+        return f'<KnownGap {self.symbol_id} {self.timeframe} {self.gap_start}-{self.gap_end}>'
+
+    @classmethod
+    def is_known_gap(cls, symbol_id, timeframe, timestamp):
+        """Check if a timestamp falls within a known gap."""
+        return cls.query.filter(
+            cls.symbol_id == symbol_id,
+            cls.timeframe == timeframe,
+            cls.gap_start <= timestamp,
+            cls.gap_end >= timestamp
+        ).first() is not None
+
+    @classmethod
+    def get_gaps_in_range(cls, symbol_id, timeframe, start_ts, end_ts):
+        """Get all known gaps that overlap with a time range."""
+        return cls.query.filter(
+            cls.symbol_id == symbol_id,
+            cls.timeframe == timeframe,
+            cls.gap_start <= end_ts,
+            cls.gap_end >= start_ts
+        ).all()
+
+
 class UserSymbolPreference(db.Model):
     """User-specific symbol notification preferences (for Premium users)"""
     __tablename__ = 'user_symbol_preferences'

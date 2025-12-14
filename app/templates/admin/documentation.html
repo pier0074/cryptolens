@@ -1299,24 +1299,41 @@ python scripts/compute_stats.py</div>
                 <tr><th>Check</th><th>Description</th><th>Fix Action</th></tr>
                 <tr><td>OHLCV Validity</td><td>high &gt;= low, high &gt;= open/close, prices &gt; 0, volume &gt;= 0</td><td>Delete invalid candle</td></tr>
                 <tr><td>Timestamp Alignment</td><td>Timestamps align to timeframe boundaries (5m at :00/:05, etc.)</td><td>Delete misaligned candle</td></tr>
-                <tr><td>Gap Detection</td><td>Missing candles in sequence (gaps &gt; 5 minutes)</td><td>Report only (use fetch_historical --gaps)</td></tr>
+                <tr><td>Gap Detection</td><td>Missing candles in sequence</td><td>Fetch from exchange, or mark as known gap</td></tr>
                 <tr><td>Continuity</td><td>Open should equal previous close (informational only)</td><td>None (crypto can gap)</td></tr>
             </table>
 
             <h3 class="docs-h3">Command Line Options</h3>
             <table class="docs-table">
                 <tr><th>Option</th><th>Description</th><th>Example</th></tr>
-                <tr><td><code class="docs-code">--fix</code></td><td>Auto-fix issues (delete invalid candles)</td><td><code class="docs-code">--fix</code></td></tr>
+                <tr><td><code class="docs-code">--fix</code></td><td>Auto-fix: delete invalid, fetch missing, re-aggregate</td><td><code class="docs-code">--fix</code></td></tr>
                 <tr><td><code class="docs-code">--symbol NAME</code></td><td>Check specific symbol only</td><td><code class="docs-code">--symbol BTC/USDT</code></td></tr>
                 <tr><td><code class="docs-code">--reset</code></td><td>Reset all verification flags (re-check everything)</td><td><code class="docs-code">--reset</code></td></tr>
-                <tr><td><code class="docs-code">--verbose, -v</code></td><td>Verbose output</td><td><code class="docs-code">-v</code></td></tr>
+                <tr><td><code class="docs-code">--quiet, -q</code></td><td>Only show summary (for cron)</td><td><code class="docs-code">-q</code></td></tr>
+                <tr><td><code class="docs-code">--accept-gaps</code></td><td>Mark current gaps as "accepted" (exchange has no data)</td><td><code class="docs-code">--accept-gaps</code></td></tr>
+                <tr><td><code class="docs-code">--show-gaps</code></td><td>Show all known/accepted gaps</td><td><code class="docs-code">--show-gaps</code></td></tr>
+                <tr><td><code class="docs-code">--clear-gaps</code></td><td>Clear all known gaps (to re-verify them)</td><td><code class="docs-code">--clear-gaps</code></td></tr>
             </table>
+
+            <h3 class="docs-h3">Gap Handling</h3>
+            <p class="docs-p">
+                When <code class="docs-code">--fix</code> encounters a gap in 1m candles:
+            </p>
+            <ol class="docs-list">
+                <li>Attempts to fetch missing candles from Binance</li>
+                <li>If data found: saves candles and re-aggregates higher timeframes</li>
+                <li>If exchange has no data: marks gap as "known" and continues verification</li>
+                <li>Known gaps are skipped on future runs (no errors)</li>
+            </ol>
+            <p class="docs-p">
+                Use <code class="docs-code">--accept-gaps</code> to manually mark gaps as OK without fetching (e.g., exchange maintenance periods).
+            </p>
 
             <h3 class="docs-h3">Usage Examples</h3>
             <div class="docs-codeblock"># Check only (report issues, no changes)
 python scripts/db_health.py
 
-# Check and auto-fix issues
+# Auto-fix: delete invalid, fetch missing, re-aggregate
 python scripts/db_health.py --fix
 
 # Check specific symbol only
@@ -1325,8 +1342,17 @@ python scripts/db_health.py --symbol BTC/USDT
 # Reset verification and re-check everything
 python scripts/db_health.py --reset
 
-# Verbose output
-python scripts/db_health.py --fix -v</div>
+# Show all known gaps
+python scripts/db_health.py --show-gaps
+
+# Mark current gaps as "accepted" (exchange has no data)
+python scripts/db_health.py --accept-gaps
+
+# Clear known gaps to re-verify them
+python scripts/db_health.py --clear-gaps
+
+# Quiet mode for cron
+python scripts/db_health.py --fix -q</div>
 
             <!-- ==================== MIGRATE_ALL.PY ==================== -->
             <h2 class="docs-h2">migrate_all.py - Database Migrations</h2>
@@ -1711,15 +1737,19 @@ Signal N--1 Symbol</div>
                 <tr><td>active</td><td>cancelled</td><td>User cancels subscription</td></tr>
             </table>
 
-            <h2 class="docs-h2">DB Health Check (Only Fix Invalid Data)</h2>
+            <h2 class="docs-h2">DB Health Check (--fix Behavior)</h2>
             <p class="docs-p">
-                The <code class="docs-code">db_health.py --fix</code> command only deletes <strong>invalid candles</strong>:
+                The <code class="docs-code">db_health.py --fix</code> command performs three actions:
             </p>
             <ul class="docs-list">
-                <li>Candles with high &lt; low (impossible price data)</li>
-                <li>Candles with price ≤ 0</li>
-                <li>Candles with misaligned timestamps</li>
+                <li><strong>Deletes invalid candles:</strong> high &lt; low, price ≤ 0, misaligned timestamps</li>
+                <li><strong>Fetches missing candles:</strong> Tries to fetch gaps from Binance</li>
+                <li><strong>Re-aggregates:</strong> Rebuilds higher timeframes after filling gaps</li>
             </ul>
+            <p class="docs-p">
+                If the exchange has no data for a gap (legitimate), it's marked as a <strong>"known gap"</strong>
+                and skipped on future runs. Use <code class="docs-code">--show-gaps</code> to view all known gaps.
+            </p>
             <p class="docs-p">
                 Valid historical data is never deleted, even if old.
             </p>

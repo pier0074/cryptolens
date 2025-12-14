@@ -297,16 +297,19 @@ Performs incremental verification of candle data. Checks for gaps, OHLCV validit
 
 | Parameter | Description |
 |-----------|-------------|
-| `--fix` | Auto-fix issues (deletes invalid candles) |
+| `--fix` | Auto-fix: delete bad candles, fetch missing 1m data from exchange, re-aggregate |
 | `--symbol`, `-s` | Check specific symbol (e.g., `BTC/USDT`) |
 | `--quiet`, `-q` | Only show summary (suppresses per-symbol output) |
 | `--reset` | Reset all verification flags (start fresh) |
+| `--accept-gaps` | Mark current gaps as accepted (exchange has no data) |
+| `--show-gaps` | Show all known/accepted gaps |
+| `--clear-gaps` | Clear all known gaps (to re-check them) |
 
 ```bash
 # Report only (no changes)
 python scripts/db_health.py
 
-# Auto-fix bad data
+# Auto-fix bad data (fetch missing, re-aggregate)
 python scripts/db_health.py --fix
 
 # Check single symbol
@@ -317,13 +320,29 @@ python scripts/db_health.py --reset
 
 # Fix silently (for cron)
 python scripts/db_health.py -q --fix
+
+# Show all known gaps
+python scripts/db_health.py --show-gaps
+
+# Mark current gaps as "OK" (exchange has no data)
+python scripts/db_health.py --accept-gaps
+
+# Clear known gaps to re-verify them
+python scripts/db_health.py --clear-gaps
 ```
 
 **Checks performed**:
-1. **Gap detection** - Missing candles in sequence (> 5 min gap)
+1. **Gap detection** - Missing candles in sequence
 2. **Timestamp alignment** - Higher TFs at correct boundaries (e.g., 15m at :00, :15, :30, :45)
 3. **OHLCV sanity** - high >= low, high >= open/close, volume >= 0, prices > 0
 4. **Continuity** - Open should approximately equal previous candle's close
+
+**Gap Handling**:
+- `--fix` attempts to fetch missing 1m candles from Binance
+- If exchange returns no data (legitimate gap), it's marked as "known"
+- Known gaps are skipped during verification (no errors)
+- Higher timeframes are re-aggregated after filling gaps
+- Use `--accept-gaps` to manually mark gaps as OK without fetching
 
 ---
 
@@ -473,11 +492,17 @@ with app.app_context():
 # Check for issues (report only)
 python scripts/db_health.py
 
-# Auto-fix issues (deletes invalid candles)
+# Auto-fix issues (fetch missing, delete invalid, re-aggregate)
 python scripts/db_health.py --fix
 
 # Check specific symbol
 python scripts/db_health.py -s BTC/USDT --fix
+
+# See what gaps exist
+python scripts/db_health.py --show-gaps
+
+# Mark gaps as OK (if exchange legitimately has no data)
+python scripts/db_health.py --accept-gaps
 ```
 
 #### Daily Maintenance (Manual)
