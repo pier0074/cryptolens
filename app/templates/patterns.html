@@ -677,10 +677,16 @@ document.addEventListener('DOMContentLoaded', async function() {
     let hasMore = false;
     let isLoadingMore = false;
     let oldestTimestamp = null;
+    const MAX_CANDLES = 2000;  // Maximum candles to load (browser performance)
 
     // Function to load more historical candles
     async function loadMoreCandles() {
         if (!hasMore || isLoadingMore || !oldestTimestamp) return;
+        if (allCandles.length >= MAX_CANDLES) {
+            console.log(`Max candles reached (${MAX_CANDLES})`);
+            hasMore = false;
+            return;
+        }
 
         isLoadingMore = true;
         try {
