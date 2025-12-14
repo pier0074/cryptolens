@@ -563,6 +563,7 @@ def main():
     parser.add_argument('--delete', action='store_true', help='Delete all data')
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
     parser.add_argument('--no-aggregate', action='store_true', help='Skip aggregation')
+    parser.add_argument('--symbol', '-s', type=str, help='Fetch specific symbol only (e.g., BTC/USDT)')
     args = parser.parse_args()
 
     # Immediate feedback
@@ -589,7 +590,14 @@ def main():
 
     app = create_app()
     with app.app_context():
-        symbols = Symbol.query.filter_by(is_active=True).all()
+        # Filter by specific symbol if provided
+        if args.symbol:
+            symbols = Symbol.query.filter_by(symbol=args.symbol).all()
+            if not symbols:
+                print(f"  Symbol '{args.symbol}' not found in database.", flush=True)
+                return
+        else:
+            symbols = Symbol.query.filter_by(is_active=True).all()
 
         if not symbols:
             print("  No active symbols found. Add symbols in Admin > Symbols.", flush=True)
