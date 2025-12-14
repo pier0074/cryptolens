@@ -311,7 +311,8 @@ async def fill_gaps_for_symbol(exchange, symbol_name: str, symbol_id: int,
 
     for i, (gap_start, gap_end) in enumerate(gaps):
         gap_duration = (gap_end - gap_start) / (60 * 1000)
-        gap_start_dt = datetime.fromtimestamp(gap_start / 1000, tz=timezone.utc).strftime('%m-%d %H:%M')
+        gap_start_dt = datetime.fromtimestamp(gap_start / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')
+        gap_end_dt = datetime.fromtimestamp(gap_end / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')
 
         # Use incremental saves for large gaps (>10k candles = ~1 week)
         save_cb, saved_count = make_save_callback()
@@ -321,9 +322,9 @@ async def fill_gaps_for_symbol(exchange, symbol_name: str, symbol_id: int,
         filled = saved_count[0]
         total_filled += filled
         if filled > 0:
-            gap_results.append(f"    [{i+1}/{len(gaps)}] {gap_duration:.0f}m from {gap_start_dt} → {filled:,} saved")
+            gap_results.append(f"    [{i+1}/{len(gaps)}] {gap_start_dt} → {gap_end_dt} ({gap_duration:.0f}m) = {filled:,} saved")
         else:
-            gap_results.append(f"    [{i+1}/{len(gaps)}] {gap_duration:.0f}m from {gap_start_dt} → no data")
+            gap_results.append(f"    [{i+1}/{len(gaps)}] {gap_start_dt} → {gap_end_dt} ({gap_duration:.0f}m) = no data")
 
     # Print all output for this symbol at once (with lock)
     if print_lock:
@@ -454,7 +455,7 @@ async def run_full_fetch(symbols: List[Tuple[str, int]], days: int, verbose: boo
         await exchange.close()
 
 
-def aggregate_all_symbols(verbose: bool = False, app=None):
+def aggregate_all_symbols(verbose: bool = False, app=None, symbol_filter: str = None):
     """Aggregate 1m candles to all higher timeframes."""
     from app import create_app
     from app.models import Symbol
@@ -463,7 +464,10 @@ def aggregate_all_symbols(verbose: bool = False, app=None):
     if app is None:
         app = create_app()
     with app.app_context():
-        symbols = Symbol.query.filter_by(is_active=True).all()
+        if symbol_filter:
+            symbols = Symbol.query.filter_by(symbol=symbol_filter).all()
+        else:
+            symbols = Symbol.query.filter_by(is_active=True).all()
 
         print("\nAggregating to higher timeframes...", flush=True)
 
@@ -653,7 +657,7 @@ def main():
 
     # Aggregate (reuse app from initial symbol fetch)
     if not args.no_aggregate:
-        aggregate_all_symbols(args.verbose, app)
+        aggregate_all_symbols(args.verbose, app, symbol_filter=args.symbol)
 
     elapsed = time.time() - start_time
     print(f"\n  Time: {format_time(elapsed)}")
