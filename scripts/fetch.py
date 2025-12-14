@@ -22,56 +22,13 @@ import os
 import asyncio
 import time
 import traceback
-import logging
-import re
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import ccxt
 import ccxt.async_support as ccxt_async
 from datetime import datetime, timezone
 
-# Configure logging
-logger = logging.getLogger('fetch')
-
-# Retry configuration
-MAX_RETRIES = 3
-RETRY_DELAY_SECONDS = 5
-DEFAULT_RATE_LIMIT_COOLOFF_SECONDS = 30
-TIMEOUT_RETRY_DELAY_SECONDS = 10
-
-
-def is_timeout_error(error: Exception) -> bool:
-    """Check if error is a timeout error."""
-    if isinstance(error, (ccxt.RequestTimeout, ccxt.NetworkError)):
-        error_str = str(error).lower()
-        if 'timeout' in error_str or 'timed out' in error_str:
-            return True
-    error_str = str(error).lower()
-    return any(x in error_str for x in ['timeout', 'timed out', 'read timed out', 'connect timed out'])
-
-
-def is_rate_limit_error(error: Exception) -> bool:
-    """Check if error is a rate limit error."""
-    if isinstance(error, (ccxt.RateLimitExceeded, ccxt.DDoSProtection)):
-        return True
-    error_str = str(error).lower()
-    return any(x in error_str for x in ['rate limit', 'ratelimit', '429', 'too many requests'])
-
-
-def extract_rate_limit_wait_time(error: Exception) -> int:
-    """Extract wait time from rate limit error message."""
-    error_str = str(error).lower()
-    patterns = [
-        r'retry[- ]?after[:\s]+(\d+)',
-        r'after\s+(\d+)\s*s',
-        r'in\s+(\d+)\s*sec',
-        r'wait\s+(\d+)',
-    ]
-    for pattern in patterns:
-        match = re.search(pattern, error_str)
-        if match:
-            return min(int(match.group(1)), 300)  # Cap at 5 min
-    return DEFAULT_RATE_LIMIT_COOLOFF_SECONDS
+# Import shared retry utilities
+from scripts.utils.retry import async_retry_call
 
 # All timeframes to aggregate (always, regardless of current time)
 ALL_TIMEFRAMES = ['5m', '15m', '30m', '1h', '2h', '4h', '1d']
@@ -202,41 +159,12 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
 
 async def fetch_with_retry(exchange, symbol, timeframe, since=None, limit=None, verbose=False):
     """Fetch OHLCV with retry logic for rate limits, timeouts, and errors."""
-    last_error = None
-
-    for attempt in range(MAX_RETRIES):
-        try:
-            if since:
-                return await exchange.fetch_ohlcv(symbol, timeframe, since=since, limit=limit)
-            else:
-                return await exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-
-        except Exception as e:
-            last_error = e
-
-            if is_rate_limit_error(e):
-                wait_time = extract_rate_limit_wait_time(e)
-                logger.warning(f"Rate limit for {symbol}, cooling off {wait_time}s (attempt {attempt + 1}/{MAX_RETRIES})")
-                if verbose:
-                    print(f"  {symbol}: Rate limit, waiting {wait_time}s (attempt {attempt + 1}/{MAX_RETRIES})")
-                await asyncio.sleep(wait_time)
-
-            elif is_timeout_error(e):
-                logger.warning(f"Timeout for {symbol}, retrying in {TIMEOUT_RETRY_DELAY_SECONDS}s (attempt {attempt + 1}/{MAX_RETRIES})")
-                if verbose:
-                    print(f"  {symbol}: Timeout, retrying in {TIMEOUT_RETRY_DELAY_SECONDS}s (attempt {attempt + 1}/{MAX_RETRIES})")
-                await asyncio.sleep(TIMEOUT_RETRY_DELAY_SECONDS)
-
-            else:
-                # Other errors - retry with standard delay
-                logger.error(f"Error fetching {symbol}: {e} (attempt {attempt + 1}/{MAX_RETRIES})")
-                if verbose:
-                    print(f"  {symbol}: Error, retrying in {RETRY_DELAY_SECONDS}s (attempt {attempt + 1}/{MAX_RETRIES})")
-                await asyncio.sleep(RETRY_DELAY_SECONDS)
-
-    # All retries exhausted
-    logger.error(f"Failed to fetch {symbol} after {MAX_RETRIES} retries: {last_error}")
-    return None  # Return None instead of raising - allows other symbols to continue
+    return await async_retry_call(
+        exchange.fetch_ohlcv,
+        symbol, timeframe, since=since, limit=limit,
+        context=symbol,
+        verbose=verbose
+    )
 
 
 async def fetch_and_process(exchange, symbol, app, semaphore, verbose=False):

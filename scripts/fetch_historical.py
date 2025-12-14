@@ -22,24 +22,21 @@ import sys
 import os
 import time
 import asyncio
-import logging
 from datetime import datetime, timezone, timedelta
 from typing import List, Tuple, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import ccxt
 import ccxt.async_support as ccxt_async
 from sqlalchemy import func
 
-# Configure logging
-logger = logging.getLogger('fetch_historical')
-
-# Retry and rate limit configuration
-MAX_RETRIES = 3
-RETRY_DELAY_SECONDS = 5
-DEFAULT_RATE_LIMIT_COOLOFF_SECONDS = 30  # Default if not specified in error
-TIMEOUT_RETRY_DELAY_SECONDS = 10
+# Import shared retry utilities
+from scripts.utils.retry import (
+    async_retry_call, is_rate_limit_error, is_timeout_error,
+    extract_rate_limit_wait_time, logger,
+    MAX_RETRIES, RETRY_DELAY_SECONDS, TIMEOUT_RETRY_DELAY_SECONDS,
+    DEFAULT_RATE_LIMIT_COOLOFF_SECONDS
+)
 
 
 def format_time(seconds):
@@ -98,55 +95,6 @@ def find_gaps(symbol_id: int, start_ts: int, end_ts: int, max_gap_minutes: int =
         gaps.append((timestamps[-1] + expected_interval, min(end_ts, now_ts)))
 
     return gaps
-
-
-def is_timeout_error(error: Exception) -> bool:
-    """Check if error is a timeout error."""
-    # Check ccxt exception type first
-    if isinstance(error, (ccxt.RequestTimeout, ccxt.NetworkError)):
-        error_str = str(error).lower()
-        if 'timeout' in error_str or 'timed out' in error_str:
-            return True
-    # Fallback to string matching
-    error_str = str(error).lower()
-    return any(x in error_str for x in ['timeout', 'timed out', 'read timed out', 'connect timed out'])
-
-
-def is_rate_limit_error(error: Exception) -> bool:
-    """Check if error is a rate limit error."""
-    # Check ccxt exception type first
-    if isinstance(error, (ccxt.RateLimitExceeded, ccxt.DDoSProtection)):
-        return True
-    # Fallback to string matching
-    error_str = str(error).lower()
-    return any(x in error_str for x in ['rate limit', 'ratelimit', '429', 'too many requests'])
-
-
-def extract_rate_limit_wait_time(error: Exception) -> int:
-    """Extract wait time from rate limit error message.
-
-    Returns:
-        Wait time in seconds, or DEFAULT_RATE_LIMIT_COOLOFF_SECONDS if not found.
-    """
-    import re
-    error_str = str(error).lower()
-
-    patterns = [
-        r'retry[- ]?after[:\s]+(\d+)',       # 'retry after 10', 'Retry-After: 60'
-        r'after\s+(\d+)\s*s',                 # 'after 30s'
-        r'in\s+(\d+)\s*sec',                  # 'in 5 seconds'
-        r'wait\s+(\d+)',                      # 'wait 45 seconds'
-        r'(\d+)\s*seconds?\s*(cool|wait|delay)',  # '10 seconds cooldown'
-    ]
-
-    for pattern in patterns:
-        match = re.search(pattern, error_str)
-        if match:
-            wait_time = int(match.group(1))
-            # Sanity check: don't wait more than 5 minutes
-            return min(wait_time, 300)
-
-    return DEFAULT_RATE_LIMIT_COOLOFF_SECONDS
 
 
 async def fetch_range_async(exchange, symbol: str, start_ts: int, end_ts: int,
