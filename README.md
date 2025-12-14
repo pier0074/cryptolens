@@ -400,44 +400,98 @@ python scripts/migrate_all.py
 
 ---
 
+### When to Use Which Script
+
+| Scenario | Script | Command |
+|----------|--------|---------|
+| **First time setup** | `fetch_historical.py` | `python scripts/fetch_historical.py -v` |
+| **Regular cron job** | `fetch.py` | `python scripts/fetch.py` |
+| **Missing 1m candles** | `fetch_historical.py --gaps` | `python scripts/fetch_historical.py --gaps -v` |
+| **Missing higher TF candles** | Re-aggregate | See "Re-aggregate" below |
+| **Data looks wrong** | `db_health.py` | `python scripts/db_health.py --fix` |
+| **Dashboard slow** | `compute_stats.py` | `python scripts/compute_stats.py` |
+| **After code update** | `migrate_all.py` | `python scripts/migrate_all.py` |
+
+---
+
 ### Common Scenarios
 
-#### Catching Up After Downtime
-
-If you haven't fetched candles for several days:
+#### Initial Setup (New Installation)
 
 ```bash
-# Option 1: Gap detection (recommended - only fetches what's missing)
-python scripts/fetch_historical.py --gaps --days=7
+# 1. Create database and tables
+make db-create
 
-# Option 2: Just run fetch.py - it auto-catches up
-python scripts/fetch.py -v
-```
+# 2. Create test accounts
+make db-user
 
-`fetch.py` automatically detects the last candle timestamp and fetches all missing data in batches.
-
-#### Initial Setup
-
-```bash
-# 1. Run migrations
-python scripts/migrate_all.py
-
-# 2. Fetch 1 year of history
+# 3. Fetch historical data (from 2024-01-01, takes ~1 hour for 5 symbols)
 python scripts/fetch_historical.py -v
 
-# 3. Compute initial stats
+# 4. Compute initial stats
 python scripts/compute_stats.py
 
-# 4. Verify data integrity
+# 5. Verify data integrity
 python scripts/db_health.py
 ```
 
-#### Daily Maintenance
+#### Catching Up After Downtime
+
+```bash
+# Option 1: fetch.py auto-catches up (recommended for < 1 day gap)
+python scripts/fetch.py -v
+
+# Option 2: Gap fill mode (recommended for > 1 day gap)
+python scripts/fetch_historical.py --gaps -v
+
+# Option 3: Full scan for gaps in entire database
+python scripts/fetch_historical.py --gaps --full -v
+```
+
+#### Re-aggregate Higher Timeframes
+
+If 5m/15m/1h/etc candles are missing but 1m candles exist:
+
+```bash
+python -c "
+from app import create_app
+from app.models import Symbol
+from app.services.aggregator import aggregate_all_timeframes
+
+app = create_app()
+with app.app_context():
+    for sym in Symbol.query.filter_by(is_active=True).all():
+        print(f'{sym.symbol}...', end=' ', flush=True)
+        results = aggregate_all_timeframes(sym.symbol)
+        print(f'{sum(results.values())} candles')
+"
+```
+
+#### Fix Data Issues
+
+```bash
+# Check for issues (report only)
+python scripts/db_health.py
+
+# Auto-fix issues (deletes invalid candles)
+python scripts/db_health.py --fix
+
+# Check specific symbol
+python scripts/db_health.py -s BTC/USDT --fix
+```
+
+#### Daily Maintenance (Manual)
 
 The crontab handles this automatically, but manually:
 
 ```bash
-# Health check with auto-fix
+# 1. Fetch latest candles
+python scripts/fetch.py -v
+
+# 2. Refresh stats cache
+python scripts/compute_stats.py
+
+# 3. Health check with auto-fix
 python scripts/db_health.py --fix -q
 ```
 
@@ -445,7 +499,7 @@ python scripts/db_health.py --fix -q
 
 ### API Rate Limiting & Error Handling
 
-Binance has strict rate limits. The scripts handle errors automatically:
+Both `fetch.py` and `fetch_historical.py` use a shared retry module (`scripts/utils/retry.py`) for consistent error handling.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -471,10 +525,11 @@ The script parses error messages to extract the suggested wait time:
 - No time specified → waits 30s (default)
 - Maximum wait capped at 300s (5 minutes)
 
-To adjust settings, edit `scripts/fetch_historical.py`:
+To adjust settings, edit `scripts/utils/retry.py`:
 
 ```python
 MAX_RETRIES = 3
+RETRY_DELAY_SECONDS = 5
 DEFAULT_RATE_LIMIT_COOLOFF_SECONDS = 30
 TIMEOUT_RETRY_DELAY_SECONDS = 10
 ```

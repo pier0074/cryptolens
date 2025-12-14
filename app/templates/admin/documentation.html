@@ -1410,6 +1410,44 @@ python scripts/create_admin.py</div>
                 <strong>Important:</strong> Change passwords after testing! These are well-known test credentials.
             </div>
 
+            <!-- ==================== WHEN TO USE WHICH SCRIPT ==================== -->
+            <h2 class="docs-h2">When to Use Which Script</h2>
+            <p class="docs-p">Quick reference for common scenarios:</p>
+
+            <table class="docs-table">
+                <tr><th>Scenario</th><th>Script</th><th>Command</th></tr>
+                <tr><td><strong>First time setup</strong></td><td>fetch_historical.py</td><td><code class="docs-code">python scripts/fetch_historical.py -v</code></td></tr>
+                <tr><td><strong>Regular cron job</strong></td><td>fetch.py</td><td><code class="docs-code">python scripts/fetch.py</code></td></tr>
+                <tr><td><strong>Missing 1m candles</strong></td><td>fetch_historical.py --gaps</td><td><code class="docs-code">python scripts/fetch_historical.py --gaps -v</code></td></tr>
+                <tr><td><strong>Missing higher TF candles</strong></td><td>Re-aggregate (see below)</td><td>Python one-liner</td></tr>
+                <tr><td><strong>Data looks wrong</strong></td><td>db_health.py</td><td><code class="docs-code">python scripts/db_health.py --fix</code></td></tr>
+                <tr><td><strong>Dashboard slow</strong></td><td>compute_stats.py</td><td><code class="docs-code">python scripts/compute_stats.py</code></td></tr>
+                <tr><td><strong>After code update</strong></td><td>migrate_all.py</td><td><code class="docs-code">python scripts/migrate_all.py</code></td></tr>
+            </table>
+
+            <h3 class="docs-h3">Re-aggregate Higher Timeframes</h3>
+            <p class="docs-p">If 5m/15m/1h/etc candles are missing but 1m candles exist:</p>
+            <div class="docs-codeblock">python -c "
+from app import create_app
+from app.models import Symbol
+from app.services.aggregator import aggregate_all_timeframes
+
+app = create_app()
+with app.app_context():
+    for sym in Symbol.query.filter_by(is_active=True).all():
+        print(f'{sym.symbol}...', end=' ', flush=True)
+        results = aggregate_all_timeframes(sym.symbol)
+        print(f'{sum(results.values())} candles')
+"</div>
+
+            <h3 class="docs-h3">Catching Up After Downtime</h3>
+            <table class="docs-table">
+                <tr><th>Gap Size</th><th>Recommended Approach</th><th>Command</th></tr>
+                <tr><td>&lt; 1 day</td><td>fetch.py (auto-catches up)</td><td><code class="docs-code">python scripts/fetch.py -v</code></td></tr>
+                <tr><td>1-7 days</td><td>Gap fill mode</td><td><code class="docs-code">python scripts/fetch_historical.py --gaps -v</code></td></tr>
+                <tr><td>&gt; 7 days</td><td>Full database gap scan</td><td><code class="docs-code">python scripts/fetch_historical.py --gaps --full -v</code></td></tr>
+            </table>
+
             <!-- ==================== CRON SCHEDULE ==================== -->
             <h2 class="docs-h2">Recommended Cron Schedule</h2>
             <p class="docs-p">Production crontab configuration:</p>
