@@ -189,10 +189,11 @@ class Config:
 
     # Data fetching
     BATCH_SIZE = 1000  # Binance allows 1000 candles per request
-    RATE_LIMIT_DELAY = 0.2  # Minimum delay between API calls (seconds)
-    MAX_CONCURRENT_REQUESTS = 5  # Max parallel API requests (prevents rate limiting)
+    RATE_LIMIT_DELAY = 0.5  # Minimum delay between API calls (seconds)
+    MAX_CONCURRENT_REQUESTS = 2  # Max parallel API requests (Binance limit: 1200/min, but be conservative)
     RATE_LIMIT_RETRY_DELAY = 2.0  # Delay before retrying after rate limit error (seconds)
     MAX_RETRIES = 3  # Max retries for rate-limited requests
+    INTER_SYMBOL_DELAY = 0.3  # Delay between starting each symbol fetch (seconds)
 
     # Pattern detection
     MIN_ZONE_PERCENT = 0.15  # Minimum zone size as % of price

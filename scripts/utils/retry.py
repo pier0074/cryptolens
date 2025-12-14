@@ -43,6 +43,39 @@ def is_timeout_error(error: Exception) -> bool:
     return any(x in error_str for x in ['timeout', 'timed out', 'read timed out', 'connect timed out'])
 
 
+def get_error_summary(error: Exception) -> str:
+    """Extract a concise error summary from ccxt exceptions."""
+    error_type = type(error).__name__
+
+    # Check for common ccxt error types
+    if isinstance(error, ccxt.RateLimitExceeded):
+        return "Rate limit exceeded"
+    elif isinstance(error, ccxt.DDoSProtection):
+        return "DDoS protection triggered"
+    elif isinstance(error, ccxt.RequestTimeout):
+        return "Request timeout"
+    elif isinstance(error, ccxt.NetworkError):
+        return "Network error"
+    elif isinstance(error, ccxt.ExchangeError):
+        # Try to extract Binance error code
+        error_str = str(error)
+        if '-1021' in error_str:
+            return "Timestamp out of recvWindow (check system time)"
+        elif '-1003' in error_str:
+            return "Too many requests (IP banned temporarily)"
+        elif '-1015' in error_str:
+            return "Too many orders"
+        elif '-1001' in error_str:
+            return "Internal error"
+        return f"Exchange error: {error_str[:100]}"
+
+    # Fallback to first 80 chars of error
+    error_str = str(error)
+    if len(error_str) > 80:
+        return f"{error_type}: {error_str[:77]}..."
+    return f"{error_type}: {error_str}"
+
+
 def is_rate_limit_error(error: Exception) -> bool:
     """Check if error is a rate limit error."""
     if isinstance(error, (ccxt.RateLimitExceeded, ccxt.DDoSProtection)):
@@ -137,18 +170,20 @@ async def async_retry_call(
 
             else:
                 wait_time = RETRY_DELAY_SECONDS
-                logger.error(f"{ctx}Error: {e} (attempt {attempt + 1}/{max_retries})")
+                error_summary = get_error_summary(e)
+                logger.error(f"{ctx}{error_summary} (attempt {attempt + 1}/{max_retries})")
                 if verbose:
-                    print(f"  {ctx}Error, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                    print(f"  {ctx}{error_summary}, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
                 if on_retry:
                     on_retry(attempt, e, wait_time)
                 if attempts_left > 0:
                     await asyncio.sleep(wait_time)
 
     # All retries exhausted
-    logger.error(f"{ctx}Failed after {max_retries} retries: {last_error}")
+    error_summary = get_error_summary(last_error) if last_error else "Unknown error"
+    logger.error(f"{ctx}Failed after {max_retries} retries: {error_summary}")
     if verbose:
-        print(f"  {ctx}Failed after {max_retries} retries")
+        print(f"  {ctx}Failed after {max_retries} retries: {error_summary}")
     return None
 
 

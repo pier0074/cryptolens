@@ -28,7 +28,7 @@ import ccxt.async_support as ccxt_async
 from datetime import datetime, timezone
 
 # Import shared retry utilities
-from scripts.utils.retry import async_retry_call
+from scripts.utils.retry import async_retry_call, get_error_summary
 
 # All timeframes to aggregate (always, regardless of current time)
 ALL_TIMEFRAMES = ['5m', '15m', '30m', '1h', '2h', '4h', '1d']
@@ -216,9 +216,10 @@ async def fetch_and_process(exchange, symbol, app, semaphore, verbose=False):
             return {'symbol': symbol, 'new': 0, 'patterns': 0}
 
         except Exception as e:
+            error_msg = get_error_summary(e)
             if verbose:
-                print(f"  {symbol}: ERROR - {e}")
-            return {'symbol': symbol, 'new': 0, 'patterns': 0, 'error': str(e)}
+                print(f"  {symbol}: ERROR - {error_msg}")
+            return {'symbol': symbol, 'new': 0, 'patterns': 0, 'error': error_msg}
 
 
 async def run_fetch_cycle(symbols, app, verbose=False):
@@ -227,7 +228,8 @@ async def run_fetch_cycle(symbols, app, verbose=False):
 
     exchange = ccxt_async.binance({
         'enableRateLimit': True,
-        'options': {'defaultType': 'spot'}
+        'options': {'defaultType': 'spot'},
+        'rateLimit': 100,  # More conservative rate limit (ms between requests)
     })
 
     # Semaphore to limit concurrent requests (prevents rate limiting)
@@ -237,12 +239,19 @@ async def run_fetch_cycle(symbols, app, verbose=False):
         print(f"  Fetching {len(symbols)} symbols (max {Config.MAX_CONCURRENT_REQUESTS} concurrent)...")
 
     try:
-        tasks = [fetch_and_process(exchange, s, app, semaphore, verbose) for s in symbols]
-        results = []
-        for coro in asyncio.as_completed(tasks):
-            result = await coro
-            results.append(result)
-        return results
+        # Stagger task creation to prevent burst requests
+        inter_delay = getattr(Config, 'INTER_SYMBOL_DELAY', 0.3)
+        tasks = []
+        for i, symbol in enumerate(symbols):
+            task = asyncio.create_task(fetch_and_process(exchange, symbol, app, semaphore, verbose))
+            tasks.append(task)
+            # Small delay between starting each symbol (except last)
+            if i < len(symbols) - 1:
+                await asyncio.sleep(inter_delay)
+
+        # Wait for all to complete
+        results = await asyncio.gather(*tasks)
+        return list(results)
     finally:
         await exchange.close()
 
