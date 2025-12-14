@@ -672,11 +672,61 @@ document.addEventListener('DOMContentLoaded', async function() {
 
     const symbol = '{{ current_symbol }}'.replace('/', '-');
 
+    // State for lazy loading
+    let allCandles = [];  // All loaded candles (raw data)
+    let hasMore = false;
+    let isLoadingMore = false;
+    let oldestTimestamp = null;
+
+    // Function to load more historical candles
+    async function loadMoreCandles() {
+        if (!hasMore || isLoadingMore || !oldestTimestamp) return;
+
+        isLoadingMore = true;
+        try {
+            const response = await fetch(`/patterns/chart/${symbol}/${timeframe}?before=${oldestTimestamp}`);
+            const data = await response.json();
+
+            if (data.candles && data.candles.length > 0) {
+                // Prepend new candles to existing data
+                allCandles = [...data.candles, ...allCandles];
+                oldestTimestamp = data.candles[0].timestamp;
+                hasMore = data.has_more;
+
+                // Update chart with all candles
+                const chartCandles = allCandles.map(c => ({
+                    time: c.timestamp / 1000,
+                    open: c.open,
+                    high: c.high,
+                    low: c.low,
+                    close: c.close,
+                }));
+                candlestickSeries.setData(chartCandles);
+
+                // Update Alpine component data
+                const alpineComponent = Alpine.$data(document.querySelector('[x-data]'));
+                alpineComponent.chartData.candles = allCandles;
+
+                console.log(`Loaded ${data.candles.length} more candles (total: ${allCandles.length})`);
+            } else {
+                hasMore = false;
+            }
+        } catch (e) {
+            console.error('Failed to load more candles:', e);
+        } finally {
+            isLoadingMore = false;
+        }
+    }
+
     try {
         const response = await fetch(`/patterns/chart/${symbol}/${timeframe}`);
         const data = await response.json();
 
         if (data.candles && data.candles.length > 0) {
+            allCandles = data.candles;
+            hasMore = data.has_more;
+            oldestTimestamp = data.candles[0].timestamp;
+
             const candles = data.candles.map(c => ({
                 time: c.timestamp / 1000,
                 open: c.open,
@@ -705,6 +755,17 @@ document.addEventListener('DOMContentLoaded', async function() {
 
             // Draw all patterns initially
             alpineComponent.drawAllPatterns();
+
+            // Subscribe to visible range changes for lazy loading
+            chart.timeScale().subscribeVisibleLogicalRangeChange((logicalRange) => {
+                if (!logicalRange || !hasMore || isLoadingMore) return;
+
+                // Load more when user scrolls to show first 10% of data
+                const threshold = Math.max(10, allCandles.length * 0.1);
+                if (logicalRange.from < threshold) {
+                    loadMoreCandles();
+                }
+            });
         }
 
         chart.timeScale().fitContent();

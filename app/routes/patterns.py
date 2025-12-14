@@ -136,13 +136,18 @@ def index():
 
 @patterns_bp.route('/chart/<symbol>/<timeframe>')
 def chart(symbol, timeframe):
-    """Get chart data with patterns for a specific symbol/timeframe"""
+    """Get chart data with patterns for a specific symbol/timeframe.
+
+    Query params:
+        before: timestamp (ms) - fetch candles before this time (for lazy loading)
+        limit: int - override default limit
+    """
     sym = Symbol.query.filter_by(symbol=symbol.replace('-', '/')).first()
     if not sym:
         return jsonify({'error': 'Symbol not found'}), 404
 
     # Adjust candle limit based on timeframe
-    limits = {
+    default_limits = {
         '1m': 500,
         '5m': 400,
         '15m': 300,
@@ -151,22 +156,42 @@ def chart(symbol, timeframe):
         '1d': 150,
         '1w': 100
     }
-    limit = limits.get(timeframe, 200)
+    limit = request.args.get('limit', type=int) or default_limits.get(timeframe, 200)
+    before = request.args.get('before', type=int)  # Timestamp in ms
 
-    # Get candles
-    candles = Candle.query.filter_by(
+    # Build query
+    query = Candle.query.filter_by(
         symbol_id=sym.id,
         timeframe=timeframe
-    ).order_by(Candle.timestamp.desc()).limit(limit).all()
+    )
 
-    # Get active patterns
-    patterns = Pattern.query.filter_by(
-        symbol_id=sym.id,
-        timeframe=timeframe,
-        status='active'
-    ).all()
+    # If 'before' specified, fetch older candles (for lazy loading)
+    if before:
+        query = query.filter(Candle.timestamp < before)
+
+    candles = query.order_by(Candle.timestamp.desc()).limit(limit).all()
+
+    # Get active patterns (only on initial load, not for lazy loading)
+    patterns = []
+    if not before:
+        patterns = Pattern.query.filter_by(
+            symbol_id=sym.id,
+            timeframe=timeframe,
+            status='active'
+        ).all()
+
+    # Check if there's more data available (for lazy loading indicator)
+    has_more = False
+    if candles:
+        oldest_ts = candles[-1].timestamp
+        has_more = Candle.query.filter(
+            Candle.symbol_id == sym.id,
+            Candle.timeframe == timeframe,
+            Candle.timestamp < oldest_ts
+        ).first() is not None
 
     return jsonify({
         'candles': [c.to_dict() for c in reversed(candles)],
-        'patterns': [p.to_dict() for p in patterns]
+        'patterns': [p.to_dict() for p in patterns],
+        'has_more': has_more
     })
