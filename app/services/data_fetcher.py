@@ -28,6 +28,10 @@ def get_exchange():
     if _exchange_instance is not None and _exchange_id == exchange_id:
         return _exchange_instance
 
+    # Clean up existing instance before creating new one
+    if _exchange_instance is not None:
+        cleanup_exchange()
+
     # Create new instance
     exchange_class = getattr(ccxt, exchange_id, ccxt.binance)
     _exchange_instance = exchange_class({
@@ -39,6 +43,25 @@ def get_exchange():
     _exchange_id = exchange_id
 
     return _exchange_instance
+
+
+def cleanup_exchange():
+    """
+    Clean up the exchange singleton instance.
+    Should be called during application shutdown or test teardown.
+    """
+    global _exchange_instance, _exchange_id
+
+    if _exchange_instance is not None:
+        try:
+            # Close any open connections if the exchange supports it
+            if hasattr(_exchange_instance, 'close'):
+                _exchange_instance.close()
+        except Exception as e:
+            logger.warning(f"Error closing exchange connection: {e}")
+        finally:
+            _exchange_instance = None
+            _exchange_id = None
 
 
 def fetch_candles(symbol: str, timeframe: str, limit: int = None, since: int = None) -> Tuple[int, int]:

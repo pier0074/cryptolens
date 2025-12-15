@@ -87,11 +87,17 @@ def require_api_key(f: Callable[..., Any]) -> Callable[..., Any]:
             provided_key = request.args.get('api_key')
 
         if not provided_key:
-            return jsonify({'error': 'Unauthorized - API key required'}), 401
+            return jsonify({
+                'error': 'Unauthorized',
+                'message': 'API key required. Provide via X-API-Key header or api_key query param'
+            }), 401
 
         # Verify API key against stored hash
         if not verify_api_key(provided_key, api_key_hash):
-            return jsonify({'error': 'Unauthorized - Invalid API key'}), 401
+            return jsonify({
+                'error': 'Unauthorized',
+                'message': 'Invalid API key'
+            }), 401
 
         return f(*args, **kwargs)
     return decorated
@@ -158,6 +164,7 @@ def readiness_check() -> JsonResponse:
 
 
 @api_bp.route('/symbols')
+@require_api_key
 def get_symbols() -> Response:
     """Get all symbols"""
     active_only = request.args.get('active', 'true') == 'true'
@@ -169,11 +176,15 @@ def get_symbols() -> Response:
 
 
 @api_bp.route('/candles/<symbol>/<timeframe>')
+@require_api_key
 def get_candles(symbol: str, timeframe: str) -> JsonResponse:
     """Get candles for a symbol/timeframe"""
     sym = Symbol.query.filter_by(symbol=symbol.replace('-', '/')).first()
     if not sym:
-        return jsonify({'error': 'Symbol not found'}), 404
+        return jsonify({
+            'error': 'Not found',
+            'message': f'Symbol {symbol} not found'
+        }), 404
 
     limit = min(max(request.args.get('limit', 200, type=int), 1), 2000)
 
@@ -186,6 +197,7 @@ def get_candles(symbol: str, timeframe: str) -> JsonResponse:
 
 
 @api_bp.route('/patterns')
+@require_api_key
 def get_patterns() -> Response:
     """Get patterns with optional filters"""
     symbol = request.args.get('symbol')
@@ -211,6 +223,7 @@ def get_patterns() -> Response:
 
 
 @api_bp.route('/signals')
+@require_api_key
 def get_signals() -> Response:
     """Get signals with optional filters"""
     status = request.args.get('status')
@@ -237,6 +250,7 @@ def get_signals() -> Response:
 
 
 @api_bp.route('/matrix')
+@require_api_key
 @cache.cached(timeout=Config.CACHE_TTL_PATTERN_MATRIX, key_prefix='pattern_matrix')
 def get_matrix() -> Response:
     """Get the symbol/timeframe pattern matrix (optimized: 1 query instead of 180)"""
@@ -306,10 +320,14 @@ def trigger_fetch():
         new_count, _ = fetch_candles(symbol, timeframe)
         return jsonify({'success': True, 'candles_fetched': new_count})
 
-    return jsonify({'error': 'Symbol and timeframe required'}), 400
+    return jsonify({
+        'error': 'Bad request',
+        'message': 'Symbol and timeframe are required'
+    }), 400
 
 
 @api_bp.route('/scheduler/status')
+@require_api_key
 def scheduler_status():
     """Get current scheduler status"""
     from app.services.scheduler import get_scheduler_status

@@ -399,6 +399,9 @@ def verify_email(token):
 @limiter.limit("3 per hour")
 def resend_verification():
     """Resend verification email"""
+    import time
+    import random
+
     if 'user_id' in session:
         return redirect(url_for('auth.profile'))
 
@@ -407,11 +410,15 @@ def resend_verification():
 
         user = User.query.filter_by(email=email).first()
 
+        # Always perform similar work to prevent timing attacks
         if user and not user.is_verified:
             if is_email_configured():
                 token = user.generate_email_verification_token()
                 db.session.commit()
                 send_verification_email(user, token)
+        else:
+            # Add random delay to match email sending time (50-200ms)
+            time.sleep(random.uniform(0.05, 0.2))
 
         # Always show same message to prevent email enumeration
         flash('If an account with that email exists and is not verified, a verification link has been sent.', 'info')
@@ -428,6 +435,9 @@ def resend_verification():
 @limiter.limit("3 per hour")
 def forgot_password():
     """Request password reset"""
+    import time
+    import random
+
     if 'user_id' in session:
         return redirect(url_for('auth.profile'))
 
@@ -436,11 +446,15 @@ def forgot_password():
 
         user = User.query.filter_by(email=email).first()
 
+        # Always perform similar work to prevent timing attacks
         if user and user.is_verified:
             if is_email_configured():
                 token = user.generate_password_reset_token()
                 db.session.commit()
                 send_password_reset_email(user, token)
+        else:
+            # Add random delay to match email sending time (50-200ms)
+            time.sleep(random.uniform(0.05, 0.2))
 
         # Always show same message to prevent email enumeration
         flash('If an account with that email exists, a password reset link has been sent.', 'info')

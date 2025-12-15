@@ -156,8 +156,10 @@ class Payment(db.Model):
     completed_at = db.Column(db.DateTime, nullable=True)
     expires_at = db.Column(db.DateTime, nullable=True)  # For pending crypto payments
 
-    # Relationships
-    user = db.relationship('User', backref='payments')
+    # Relationships - payments are deleted when user is deleted
+    user = db.relationship('User', backref=db.backref('payments', lazy='dynamic',
+                                                      cascade='all, delete-orphan',
+                                                      passive_deletes=True))
 
     __table_args__ = (
         db.Index('idx_payment_user', 'user_id'),

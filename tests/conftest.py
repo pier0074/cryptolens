@@ -35,6 +35,13 @@ def app():
         db.session.remove()
         db.drop_all()
 
+        # Clean up exchange singleton after each test
+        try:
+            from app.services.data_fetcher import cleanup_exchange
+            cleanup_exchange()
+        except ImportError:
+            pass
+
 
 @pytest.fixture(scope='function')
 def client(app):

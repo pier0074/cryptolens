@@ -14,6 +14,23 @@ from unittest.mock import patch, MagicMock
 from datetime import datetime, timezone, timedelta
 import json
 
+from app.services.auth import hash_api_key
+from app.models import Setting
+from app import db
+
+
+# Test API key for authenticated endpoints
+TEST_API_KEY = 'test-api-key-security'
+
+
+@pytest.fixture
+def api_key_headers(app):
+    """Setup API key and return headers for authenticated requests"""
+    with app.app_context():
+        Setting.set('api_key_hash', hash_api_key(TEST_API_KEY))
+        db.session.commit()
+    return {'X-API-Key': TEST_API_KEY}
+
 
 class TestCSRFProtection:
     """Tests for CSRF protection"""
@@ -27,14 +44,15 @@ class TestCSRFProtection:
         # Test mode should have CSRF disabled
         assert app.config['WTF_CSRF_ENABLED'] is False
 
-    def test_api_endpoints_exempt_from_csrf(self, app):
+    def test_api_endpoints_exempt_from_csrf(self, app, api_key_headers):
         """Test that API endpoints work without CSRF (uses API key instead)"""
         with app.test_client() as client:
-            # API GET endpoints should work
+            # Health endpoint - no auth required
             response = client.get('/api/health')
             assert response.status_code == 200
 
-            response = client.get('/api/symbols')
+            # API endpoints with auth - no CSRF required
+            response = client.get('/api/symbols', headers=api_key_headers)
             assert response.status_code == 200
 
     def test_payment_webhook_csrf_exempt(self, app):
@@ -175,7 +193,7 @@ class TestAuthenticationBypass:
 class TestInputValidation:
     """Tests for input validation"""
 
-    def test_sql_injection_in_symbol_param(self, app):
+    def test_sql_injection_in_symbol_param(self, app, api_key_headers):
         """Test SQL injection is prevented in symbol parameter"""
         with app.test_client() as client:
             # Try SQL injection in symbol parameter
@@ -186,7 +204,7 @@ class TestInputValidation:
             ]
 
             for payload in malicious_inputs:
-                response = client.get(f'/api/patterns?symbol={payload}')
+                response = client.get(f'/api/patterns?symbol={payload}', headers=api_key_headers)
                 # Should return 200 (no results) or 404, not crash
                 assert response.status_code in [200, 404]
 
@@ -208,17 +226,17 @@ class TestInputValidation:
             # Should return 404, not file contents
             assert response.status_code == 404
 
-    def test_large_limit_parameter_handled(self, app):
+    def test_large_limit_parameter_handled(self, app, api_key_headers):
         """Test that unreasonably large limit parameters are handled"""
         with app.test_client() as client:
-            response = client.get('/api/patterns?limit=999999999')
+            response = client.get('/api/patterns?limit=999999999', headers=api_key_headers)
             # Should not crash, may return limited results
             assert response.status_code == 200
 
-    def test_negative_limit_handled(self, app):
+    def test_negative_limit_handled(self, app, api_key_headers):
         """Test that negative limit parameters are handled"""
         with app.test_client() as client:
-            response = client.get('/api/patterns?limit=-1')
+            response = client.get('/api/patterns?limit=-1', headers=api_key_headers)
             # Should not crash
             assert response.status_code in [200, 400]
 

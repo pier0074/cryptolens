@@ -16,10 +16,13 @@ class Symbol(db.Model):
     notify_enabled = db.Column(db.Boolean, default=True)  # Whether to send notifications
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
-    # Relationships
-    candles = db.relationship('Candle', backref='symbol', lazy='dynamic')
-    patterns = db.relationship('Pattern', backref='symbol', lazy='dynamic')
-    signals = db.relationship('Signal', backref='symbol', lazy='dynamic')
+    # Relationships - cascade delete ensures child records are removed when symbol is deleted
+    candles = db.relationship('Candle', backref='symbol', lazy='dynamic',
+                              cascade='all, delete-orphan', passive_deletes=True)
+    patterns = db.relationship('Pattern', backref='symbol', lazy='dynamic',
+                               cascade='all, delete-orphan', passive_deletes=True)
+    signals = db.relationship('Signal', backref='symbol', lazy='dynamic',
+                              cascade='all, delete-orphan', passive_deletes=True)
 
     __table_args__ = (
         db.Index('idx_symbol_is_active', 'is_active'),
@@ -43,7 +46,7 @@ class Candle(db.Model):
     __tablename__ = 'candles'
 
     id = db.Column(db.Integer, primary_key=True)
-    symbol_id = db.Column(db.Integer, db.ForeignKey('symbols.id'), nullable=False)
+    symbol_id = db.Column(db.Integer, db.ForeignKey('symbols.id', ondelete='CASCADE'), nullable=False)
     timeframe = db.Column(db.String(5), nullable=False)  # '1m', '5m', '15m', '1h', '4h', '1d'
     timestamp = db.Column(db.BigInteger, nullable=False)  # Unix timestamp in milliseconds
     open = db.Column(db.Float, nullable=False)
@@ -80,7 +83,7 @@ class Pattern(db.Model):
     __tablename__ = 'patterns'
 
     id = db.Column(db.Integer, primary_key=True)
-    symbol_id = db.Column(db.Integer, db.ForeignKey('symbols.id'), nullable=False)
+    symbol_id = db.Column(db.Integer, db.ForeignKey('symbols.id', ondelete='CASCADE'), nullable=False)
     timeframe = db.Column(db.String(5), nullable=False)
     pattern_type = db.Column(db.String(30), nullable=False)  # 'imbalance', 'order_block', etc.
     direction = db.Column(db.String(10), nullable=False)  # 'bullish', 'bearish'
@@ -207,7 +210,7 @@ class Signal(db.Model):
     __tablename__ = 'signals'
 
     id = db.Column(db.Integer, primary_key=True)
-    symbol_id = db.Column(db.Integer, db.ForeignKey('symbols.id'), nullable=False)
+    symbol_id = db.Column(db.Integer, db.ForeignKey('symbols.id', ondelete='CASCADE'), nullable=False)
     direction = db.Column(db.String(10), nullable=False)  # 'long', 'short'
     entry_price = db.Column(db.Float, nullable=False)
     stop_loss = db.Column(db.Float, nullable=False)
@@ -217,13 +220,14 @@ class Signal(db.Model):
     risk_reward = db.Column(db.Float, nullable=False)
     confluence_score = db.Column(db.Integer, default=1)  # How many timeframes agree
     timeframes_aligned = db.Column(db.Text, nullable=True)  # JSON array of aligned TFs
-    pattern_id = db.Column(db.Integer, db.ForeignKey('patterns.id'), nullable=True)
+    pattern_id = db.Column(db.Integer, db.ForeignKey('patterns.id', ondelete='CASCADE'), nullable=True)
     status = db.Column(db.String(15), default='pending')  # 'pending', 'notified', 'filled', 'stopped', 'tp_hit'
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     notified_at = db.Column(db.DateTime, nullable=True)
 
-    # Relationship
-    pattern = db.relationship('Pattern', backref='signals')
+    # Relationship - signals are deleted when pattern is deleted
+    pattern = db.relationship('Pattern', backref=db.backref('signals', cascade='all, delete-orphan',
+                                                            passive_deletes=True))
 
     __table_args__ = (
         db.Index('idx_signal_symbol', 'symbol_id'),
@@ -254,14 +258,15 @@ class Notification(db.Model):
     __tablename__ = 'notifications'
 
     id = db.Column(db.Integer, primary_key=True)
-    signal_id = db.Column(db.Integer, db.ForeignKey('signals.id'), nullable=False)
+    signal_id = db.Column(db.Integer, db.ForeignKey('signals.id', ondelete='CASCADE'), nullable=False)
     channel = db.Column(db.String(20), nullable=False)  # 'ntfy', 'telegram', 'email'
     sent_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     success = db.Column(db.Boolean, default=True)
     error_message = db.Column(db.Text, nullable=True)
 
-    # Relationship
-    signal = db.relationship('Signal', backref='notifications')
+    # Relationship - notifications are deleted when signal is deleted
+    signal = db.relationship('Signal', backref=db.backref('notifications', cascade='all, delete-orphan',
+                                                          passive_deletes=True))
 
     def __repr__(self):
         return f'<Notification {self.channel} {self.signal_id}>'
@@ -277,7 +282,7 @@ class KnownGap(db.Model):
     __tablename__ = 'known_gaps'
 
     id = db.Column(db.Integer, primary_key=True)
-    symbol_id = db.Column(db.Integer, db.ForeignKey('symbols.id'), nullable=False)
+    symbol_id = db.Column(db.Integer, db.ForeignKey('symbols.id', ondelete='CASCADE'), nullable=False)
     timeframe = db.Column(db.String(5), nullable=False)
     gap_start = db.Column(db.BigInteger, nullable=False)  # First missing timestamp (ms)
     gap_end = db.Column(db.BigInteger, nullable=False)    # Last missing timestamp (ms)
@@ -286,8 +291,10 @@ class KnownGap(db.Model):
     verified_empty = db.Column(db.Boolean, default=False)  # True if we confirmed exchange has no data
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
-    # Relationship
-    symbol = db.relationship('Symbol', backref=db.backref('known_gaps', lazy='dynamic'))
+    # Relationship - gaps are deleted when symbol is deleted
+    symbol = db.relationship('Symbol', backref=db.backref('known_gaps', lazy='dynamic',
+                                                          cascade='all, delete-orphan',
+                                                          passive_deletes=True))
 
     __table_args__ = (
         db.UniqueConstraint('symbol_id', 'timeframe', 'gap_start', name='uix_known_gap'),
@@ -323,16 +330,20 @@ class UserSymbolPreference(db.Model):
     __tablename__ = 'user_symbol_preferences'
 
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False)
-    symbol_id = db.Column(db.Integer, db.ForeignKey('symbols.id'), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
+    symbol_id = db.Column(db.Integer, db.ForeignKey('symbols.id', ondelete='CASCADE'), nullable=False)
     notify_enabled = db.Column(db.Boolean, default=True)  # User's notification preference
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc),
                           onupdate=lambda: datetime.now(timezone.utc))
 
-    # Relationships
-    user = db.relationship('User', backref=db.backref('symbol_preferences', lazy='dynamic'))
-    symbol = db.relationship('Symbol', backref=db.backref('user_preferences', lazy='dynamic'))
+    # Relationships - preferences are deleted when user or symbol is deleted
+    user = db.relationship('User', backref=db.backref('symbol_preferences', lazy='dynamic',
+                                                      cascade='all, delete-orphan',
+                                                      passive_deletes=True))
+    symbol = db.relationship('Symbol', backref=db.backref('user_preferences', lazy='dynamic',
+                                                          cascade='all, delete-orphan',
+                                                          passive_deletes=True))
 
     __table_args__ = (
         db.UniqueConstraint('user_id', 'symbol_id', name='uix_user_symbol_pref'),

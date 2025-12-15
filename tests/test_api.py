@@ -8,6 +8,19 @@ from app.services.auth import hash_api_key
 from app import db
 
 
+# Test API key for authenticated endpoints
+TEST_API_KEY = 'test-api-key-12345'
+
+
+@pytest.fixture
+def api_key_headers(app):
+    """Setup API key and return headers for authenticated requests"""
+    with app.app_context():
+        Setting.set('api_key_hash', hash_api_key(TEST_API_KEY))
+        db.session.commit()
+    return {'X-API-Key': TEST_API_KEY}
+
+
 class TestHealthEndpoint:
     """Tests for /api/health endpoint (Phase 2.1)"""
 
@@ -58,24 +71,24 @@ class TestHealthEndpoint:
 class TestSymbolsEndpoint:
     """Tests for /api/symbols endpoint"""
 
-    def test_get_symbols_empty(self, client, app):
+    def test_get_symbols_empty(self, client, app, api_key_headers):
         """Test getting symbols when none exist"""
         with app.app_context():
-            response = client.get('/api/symbols')
+            response = client.get('/api/symbols', headers=api_key_headers)
             assert response.status_code == 200
             assert response.json == []
 
-    def test_get_symbols(self, client, app, sample_symbol):
+    def test_get_symbols(self, client, app, sample_symbol, api_key_headers):
         """Test getting all active symbols"""
         with app.app_context():
-            response = client.get('/api/symbols')
+            response = client.get('/api/symbols', headers=api_key_headers)
             assert response.status_code == 200
             data = response.json
             assert len(data) == 1
             assert data[0]['symbol'] == 'BTC/USDT'
             assert data[0]['is_active'] is True
 
-    def test_get_symbols_include_inactive(self, client, app, sample_symbol):
+    def test_get_symbols_include_inactive(self, client, app, sample_symbol, api_key_headers):
         """Test getting all symbols including inactive"""
         with app.app_context():
             # Add inactive symbol
@@ -84,18 +97,18 @@ class TestSymbolsEndpoint:
             db.session.commit()
 
             # Default: only active
-            response = client.get('/api/symbols')
+            response = client.get('/api/symbols', headers=api_key_headers)
             assert len(response.json) == 1
 
             # Include all
-            response = client.get('/api/symbols?active=false')
+            response = client.get('/api/symbols?active=false', headers=api_key_headers)
             assert len(response.json) == 2
 
 
 class TestCandlesEndpoint:
     """Tests for /api/candles endpoint"""
 
-    def test_get_candles(self, client, app, sample_symbol):
+    def test_get_candles(self, client, app, sample_symbol, api_key_headers):
         """Test getting candles for a symbol"""
         with app.app_context():
             # Add candles
@@ -109,7 +122,7 @@ class TestCandlesEndpoint:
                 db.session.add(candle)
             db.session.commit()
 
-            response = client.get('/api/candles/BTC-USDT/1h')
+            response = client.get('/api/candles/BTC-USDT/1h', headers=api_key_headers)
             assert response.status_code == 200
             data = response.json
             assert len(data) == 5
@@ -118,7 +131,7 @@ class TestCandlesEndpoint:
             assert 'low' in data[0]
             assert 'close' in data[0]
 
-    def test_get_candles_with_limit(self, client, app, sample_symbol):
+    def test_get_candles_with_limit(self, client, app, sample_symbol, api_key_headers):
         """Test candles endpoint respects limit parameter"""
         with app.app_context():
             for i in range(10):
@@ -131,18 +144,18 @@ class TestCandlesEndpoint:
                 db.session.add(candle)
             db.session.commit()
 
-            response = client.get('/api/candles/BTC-USDT/1h?limit=3')
+            response = client.get('/api/candles/BTC-USDT/1h?limit=3', headers=api_key_headers)
             assert response.status_code == 200
             assert len(response.json) == 3
 
-    def test_get_candles_unknown_symbol(self, client, app):
+    def test_get_candles_unknown_symbol(self, client, app, api_key_headers):
         """Test 404 for unknown symbol"""
         with app.app_context():
-            response = client.get('/api/candles/UNKNOWN-PAIR/1h')
+            response = client.get('/api/candles/UNKNOWN-PAIR/1h', headers=api_key_headers)
             assert response.status_code == 404
             assert 'error' in response.json
 
-    def test_get_candles_slash_format(self, client, app, sample_symbol):
+    def test_get_candles_slash_format(self, client, app, sample_symbol, api_key_headers):
         """Test symbol with dash is converted to slash"""
         with app.app_context():
             candle = Candle(
@@ -155,7 +168,7 @@ class TestCandlesEndpoint:
             db.session.commit()
 
             # Using dash format in URL
-            response = client.get('/api/candles/BTC-USDT/1h')
+            response = client.get('/api/candles/BTC-USDT/1h', headers=api_key_headers)
             assert response.status_code == 200
             assert len(response.json) == 1
 
@@ -163,16 +176,16 @@ class TestCandlesEndpoint:
 class TestPatternsEndpoint:
     """Tests for /api/patterns endpoint"""
 
-    def test_get_patterns(self, client, app, sample_pattern):
+    def test_get_patterns(self, client, app, sample_pattern, api_key_headers):
         """Test getting patterns"""
         with app.app_context():
-            response = client.get('/api/patterns')
+            response = client.get('/api/patterns', headers=api_key_headers)
             assert response.status_code == 200
             data = response.json
             assert len(data) >= 1
             assert data[0]['pattern_type'] == 'imbalance'
 
-    def test_get_patterns_filter_status(self, client, app, sample_symbol):
+    def test_get_patterns_filter_status(self, client, app, sample_symbol, api_key_headers):
         """Test filtering patterns by status"""
         with app.app_context():
             # Add active pattern
@@ -201,14 +214,14 @@ class TestPatternsEndpoint:
             db.session.commit()
 
             # Default filter: active
-            response = client.get('/api/patterns?status=active')
+            response = client.get('/api/patterns?status=active', headers=api_key_headers)
             assert all(p['status'] == 'active' for p in response.json)
 
             # Filter: filled
-            response = client.get('/api/patterns?status=filled')
+            response = client.get('/api/patterns?status=filled', headers=api_key_headers)
             assert all(p['status'] == 'filled' for p in response.json)
 
-    def test_get_patterns_filter_timeframe(self, client, app, sample_symbol):
+    def test_get_patterns_filter_timeframe(self, client, app, sample_symbol, api_key_headers):
         """Test filtering patterns by timeframe"""
         with app.app_context():
             for tf in ['1h', '4h', '1d']:
@@ -225,14 +238,14 @@ class TestPatternsEndpoint:
                 db.session.add(pattern)
             db.session.commit()
 
-            response = client.get('/api/patterns?timeframe=4h')
+            response = client.get('/api/patterns?timeframe=4h', headers=api_key_headers)
             assert response.status_code == 200
             assert all(p['timeframe'] == '4h' for p in response.json)
 
-    def test_get_patterns_empty(self, client, app):
+    def test_get_patterns_empty(self, client, app, api_key_headers):
         """Test getting patterns when none exist"""
         with app.app_context():
-            response = client.get('/api/patterns')
+            response = client.get('/api/patterns', headers=api_key_headers)
             assert response.status_code == 200
             assert response.json == []
 
@@ -240,10 +253,10 @@ class TestPatternsEndpoint:
 class TestSignalsEndpoint:
     """Tests for /api/signals endpoint"""
 
-    def test_get_signals(self, client, app, sample_signal):
+    def test_get_signals(self, client, app, sample_signal, api_key_headers):
         """Test getting signals"""
         with app.app_context():
-            response = client.get('/api/signals')
+            response = client.get('/api/signals', headers=api_key_headers)
             assert response.status_code == 200
             data = response.json
             assert len(data) >= 1
@@ -251,7 +264,7 @@ class TestSignalsEndpoint:
             assert 'entry_price' in data[0]
             assert 'symbol' in data[0]
 
-    def test_get_signals_filter_direction(self, client, app, sample_symbol, sample_pattern):
+    def test_get_signals_filter_direction(self, client, app, sample_symbol, sample_pattern, api_key_headers):
         """Test filtering signals by direction"""
         with app.app_context():
             # Add long signal
@@ -285,16 +298,16 @@ class TestSignalsEndpoint:
             db.session.add_all([long_signal, short_signal])
             db.session.commit()
 
-            response = client.get('/api/signals?direction=long')
+            response = client.get('/api/signals?direction=long', headers=api_key_headers)
             assert all(s['direction'] == 'long' for s in response.json)
 
-            response = client.get('/api/signals?direction=short')
+            response = client.get('/api/signals?direction=short', headers=api_key_headers)
             assert all(s['direction'] == 'short' for s in response.json)
 
-    def test_get_signals_empty(self, client, app):
+    def test_get_signals_empty(self, client, app, api_key_headers):
         """Test getting signals when none exist"""
         with app.app_context():
-            response = client.get('/api/signals')
+            response = client.get('/api/signals', headers=api_key_headers)
             assert response.status_code == 200
             assert response.json == []
 
@@ -302,10 +315,10 @@ class TestSignalsEndpoint:
 class TestMatrixEndpoint:
     """Tests for /api/matrix endpoint"""
 
-    def test_get_matrix_empty(self, client, app, sample_symbol):
+    def test_get_matrix_empty(self, client, app, sample_symbol, api_key_headers):
         """Test matrix with no patterns (all neutral)"""
         with app.app_context():
-            response = client.get('/api/matrix')
+            response = client.get('/api/matrix', headers=api_key_headers)
             assert response.status_code == 200
             data = response.json
 
@@ -314,7 +327,7 @@ class TestMatrixEndpoint:
             # All timeframes should be neutral
             assert all(v == 'neutral' for v in data['BTC/USDT'].values())
 
-    def test_get_matrix_with_patterns(self, client, app, sample_symbol):
+    def test_get_matrix_with_patterns(self, client, app, sample_symbol, api_key_headers):
         """Test matrix reflects pattern directions"""
         with app.app_context():
             # Add patterns
@@ -341,7 +354,7 @@ class TestMatrixEndpoint:
             db.session.add_all([bullish, bearish])
             db.session.commit()
 
-            response = client.get('/api/matrix')
+            response = client.get('/api/matrix', headers=api_key_headers)
             assert response.status_code == 200
             data = response.json
 
@@ -423,8 +436,14 @@ class TestAPIAuthentication:
             Setting.set('api_key_hash', hash_api_key('test-secret-key'))
             db.session.commit()
 
-            # Status is read-only, shouldn't need auth
+            # Status endpoint now requires auth (security fix)
             response = client.get('/api/scheduler/status')
+            assert response.status_code == 401
+            assert 'Unauthorized' in response.json['error']
+
+            # With auth, should work
+            response = client.get('/api/scheduler/status',
+                                  headers={'X-API-Key': 'test-secret-key'})
             assert response.status_code == 200
 
 
@@ -478,10 +497,10 @@ class TestFetchEndpoint:
 class TestSchedulerEndpoint:
     """Tests for /api/scheduler endpoints"""
 
-    def test_scheduler_status(self, client, app):
+    def test_scheduler_status(self, client, app, api_key_headers):
         """Test getting scheduler status"""
         with app.app_context():
-            response = client.get('/api/scheduler/status')
+            response = client.get('/api/scheduler/status', headers=api_key_headers)
             assert response.status_code == 200
             data = response.json
             assert data['mode'] == 'cron'
@@ -491,10 +510,10 @@ class TestSchedulerEndpoint:
 class TestRateLimiting:
     """Tests for API rate limiting"""
 
-    def test_rate_limit_headers_present(self, client, app):
+    def test_rate_limit_headers_present(self, client, app, api_key_headers):
         """Test that rate limit headers are present in responses"""
         with app.app_context():
-            response = client.get('/api/symbols')
+            response = client.get('/api/symbols', headers=api_key_headers)
             # Rate limit headers should be present
             assert response.status_code == 200
 
@@ -502,34 +521,34 @@ class TestRateLimiting:
 class TestJSONResponses:
     """Tests to ensure all endpoints return valid JSON"""
 
-    def test_symbols_returns_json(self, client, app):
+    def test_symbols_returns_json(self, client, app, api_key_headers):
         """Test symbols endpoint returns JSON"""
         with app.app_context():
-            response = client.get('/api/symbols')
+            response = client.get('/api/symbols', headers=api_key_headers)
             assert response.content_type == 'application/json'
 
-    def test_patterns_returns_json(self, client, app):
+    def test_patterns_returns_json(self, client, app, api_key_headers):
         """Test patterns endpoint returns JSON"""
         with app.app_context():
-            response = client.get('/api/patterns')
+            response = client.get('/api/patterns', headers=api_key_headers)
             assert response.content_type == 'application/json'
 
-    def test_signals_returns_json(self, client, app):
+    def test_signals_returns_json(self, client, app, api_key_headers):
         """Test signals endpoint returns JSON"""
         with app.app_context():
-            response = client.get('/api/signals')
+            response = client.get('/api/signals', headers=api_key_headers)
             assert response.content_type == 'application/json'
 
-    def test_matrix_returns_json(self, client, app, sample_symbol):
+    def test_matrix_returns_json(self, client, app, sample_symbol, api_key_headers):
         """Test matrix endpoint returns JSON"""
         with app.app_context():
-            response = client.get('/api/matrix')
+            response = client.get('/api/matrix', headers=api_key_headers)
             assert response.content_type == 'application/json'
 
-    def test_error_returns_json(self, client, app):
+    def test_error_returns_json(self, client, app, api_key_headers):
         """Test 404 error returns JSON"""
         with app.app_context():
-            response = client.get('/api/candles/UNKNOWN-PAIR/1h')
+            response = client.get('/api/candles/UNKNOWN-PAIR/1h', headers=api_key_headers)
             assert response.status_code == 404
             assert response.content_type == 'application/json'
             assert 'error' in response.json

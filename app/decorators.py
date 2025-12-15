@@ -45,7 +45,10 @@ def login_required(f):
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
             if request.is_json:
-                return jsonify({'error': 'Authentication required'}), 401
+                return jsonify({
+                    'error': 'Unauthorized',
+                    'message': 'Authentication required'
+                }), 401
             flash('Please log in to access this page.', 'warning')
             return redirect(url_for('auth.login', next=request.url))
         return f(*args, **kwargs)
@@ -58,14 +61,20 @@ def admin_required(f):
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
             if request.is_json:
-                return jsonify({'error': 'Authentication required'}), 401
+                return jsonify({
+                    'error': 'Unauthorized',
+                    'message': 'Authentication required'
+                }), 401
             flash('Please log in to access this page.', 'warning')
             return redirect(url_for('auth.login', next=request.url))
 
         user = get_user_by_id(session['user_id'])
         if not user or not user.is_admin:
             if request.is_json:
-                return jsonify({'error': 'Admin access required'}), 403
+                return jsonify({
+                    'error': 'Forbidden',
+                    'message': 'Admin access required'
+                }), 403
             flash('Admin access required.', 'error')
             return redirect(url_for('dashboard.index'))
 
@@ -82,7 +91,10 @@ def subscription_required(f):
     def decorated_function(*args, **kwargs):
         if 'user_id' not in session:
             if request.is_json:
-                return jsonify({'error': 'Authentication required'}), 401
+                return jsonify({
+                    'error': 'Unauthorized',
+                    'message': 'Authentication required'
+                }), 401
             flash('Please log in to access this page.', 'warning')
             return redirect(url_for('auth.login', next=request.url))
 
@@ -90,12 +102,18 @@ def subscription_required(f):
         if not user:
             session.pop('user_id', None)
             if request.is_json:
-                return jsonify({'error': 'User not found'}), 401
+                return jsonify({
+                    'error': 'Unauthorized',
+                    'message': 'User not found'
+                }), 401
             return redirect(url_for('auth.login'))
 
         if not user.has_valid_subscription:
             if request.is_json:
-                return jsonify({'error': 'Valid subscription required'}), 403
+                return jsonify({
+                    'error': 'Forbidden',
+                    'message': 'Valid subscription required'
+                }), 403
             flash('An active subscription is required to access this feature.', 'warning')
             return redirect(url_for('auth.subscription'))
 
@@ -120,7 +138,10 @@ def tier_required(min_tier):
         def decorated_function(*args, **kwargs):
             if 'user_id' not in session:
                 if request.is_json:
-                    return jsonify({'error': 'Authentication required'}), 401
+                    return jsonify({
+                        'error': 'Unauthorized',
+                        'message': 'Authentication required'
+                    }), 401
                 flash('Please log in to access this page.', 'warning')
                 return redirect(url_for('auth.login', next=request.url))
 
@@ -128,7 +149,10 @@ def tier_required(min_tier):
             if not user:
                 session.pop('user_id', None)
                 if request.is_json:
-                    return jsonify({'error': 'User not found'}), 401
+                    return jsonify({
+                        'error': 'Unauthorized',
+                        'message': 'User not found'
+                    }), 401
                 return redirect(url_for('auth.login'))
 
             # Get effective tier (respects admin 'view_as' mode)
@@ -146,7 +170,8 @@ def tier_required(min_tier):
 
                 if request.is_json:
                     return jsonify({
-                        'error': f'{required_name} subscription required',
+                        'error': 'Forbidden',
+                        'message': f'{required_name} subscription required',
                         'current_tier': effective_tier,
                         'required_tier': min_tier,
                     }), 403
@@ -181,7 +206,10 @@ def feature_required(feature_name, redirect_on_fail='auth.subscription'):
         def decorated_function(*args, **kwargs):
             if 'user_id' not in session:
                 if request.is_json:
-                    return jsonify({'error': 'Authentication required'}), 401
+                    return jsonify({
+                        'error': 'Unauthorized',
+                        'message': 'Authentication required'
+                    }), 401
                 flash('Please log in to access this page.', 'warning')
                 return redirect(url_for('auth.login', next=request.url))
 
@@ -189,7 +217,10 @@ def feature_required(feature_name, redirect_on_fail='auth.subscription'):
             if not user:
                 session.pop('user_id', None)
                 if request.is_json:
-                    return jsonify({'error': 'User not found'}), 401
+                    return jsonify({
+                        'error': 'Unauthorized',
+                        'message': 'User not found'
+                    }), 401
                 return redirect(url_for('auth.login'))
 
             # Get effective tier (respects admin 'view_as' mode)
@@ -215,7 +246,8 @@ def feature_required(feature_name, redirect_on_fail='auth.subscription'):
 
                 if request.is_json:
                     return jsonify({
-                        'error': f'Access to {feature_display} not available in your plan',
+                        'error': 'Forbidden',
+                        'message': f'Access to {feature_display} not available in your plan',
                         'feature': feature_name,
                         'current_tier': effective_tier,
                     }), 403

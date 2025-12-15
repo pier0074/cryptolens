@@ -162,7 +162,14 @@ def authenticate_user(email: str, password: str) -> Optional[User]:
 
     Returns:
         User object if authentication successful, None otherwise
+
+    Note:
+        Uses constant-time comparison to prevent timing-based email enumeration.
+        Always performs a password hash check even for non-existent users.
     """
+    # Import werkzeug for password hashing
+    from werkzeug.security import check_password_hash
+
     if not email or not password:
         log_auth("Login attempt with missing credentials", level='WARNING')
         return None
@@ -170,11 +177,22 @@ def authenticate_user(email: str, password: str) -> Optional[User]:
     email = email.lower().strip()
     user = User.query.filter_by(email=email).first()
 
+    # Always perform a password check to prevent timing attacks
+    # This ensures consistent response time regardless of whether user exists
+    if user:
+        password_valid = user.check_password(password)
+    else:
+        # Dummy hash comparison to maintain consistent timing
+        # Use a bcrypt hash that will never match
+        dummy_hash = 'pbkdf2:sha256:600000$dummy$0000000000000000000000000000000000000000000000000000000000000000'
+        check_password_hash(dummy_hash, password)
+        password_valid = False
+
     if not user:
-        log_auth(f"Login failed: unknown email {email}", level='WARNING', details={'email': email})
+        log_auth(f"Login failed: unknown email", level='WARNING', details={'email': email})
         return None
 
-    if not user.check_password(password):
+    if not password_valid:
         log_auth(
             f"Login failed: incorrect password for {user.username}",
             level='WARNING',

@@ -26,7 +26,7 @@ class ErrorLog(db.Model):
     endpoint = db.Column(db.String(200))  # Request endpoint
     method = db.Column(db.String(10))  # HTTP method
     url = db.Column(db.Text)  # Full URL
-    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     ip_address = db.Column(db.String(45))  # IPv6 compatible
 
     # Request data (sanitized - no passwords/tokens)
@@ -42,7 +42,7 @@ class ErrorLog(db.Model):
     # Status
     status = db.Column(db.String(20), default='new')  # new, acknowledged, resolved, ignored
     resolved_at = db.Column(db.DateTime(timezone=True))
-    resolved_by = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
+    resolved_by = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='SET NULL'), nullable=True)
     notes = db.Column(db.Text)
 
     # Occurrence tracking
@@ -53,8 +53,9 @@ class ErrorLog(db.Model):
     # Timestamps
     created_at = db.Column(db.DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
-    # Relationships
-    user = db.relationship('User', foreign_keys=[user_id], backref='errors')
+    # Relationships - errors are kept for audit but user reference is cleared on user delete
+    user = db.relationship('User', foreign_keys=[user_id],
+                           backref=db.backref('errors', passive_deletes=True))
     resolver = db.relationship('User', foreign_keys=[resolved_by])
 
     def to_dict(self):
