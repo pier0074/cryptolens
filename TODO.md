@@ -137,13 +137,12 @@ FROM candles WHERE timeframe = '1m' GROUP BY symbol_id
 
 ---
 
-### [HIGH] Reliability: Exchange Cleanup Not Awaited
+### ~~[HIGH] Reliability: Exchange Cleanup Not Awaited~~ ✅ VERIFIED (Non-Issue)
 
 **Category**: Resource Management
 **File**: `app/services/data_fetcher.py:59`
-**Issue**: `_exchange_instance.close()` called synchronously on async object
-**Impact**: Connection not properly closed, resource leak
-**Fix**: Use `await` or `asyncio.run()` for cleanup
+**Issue**: Originally reported as async object, but exchange uses synchronous CCXT
+**Resolution**: The exchange instance uses synchronous `ccxt` (not `ccxt.async_support`), so `close()` is correctly synchronous. Added thread-safety with `threading.Lock` for concurrent access.
 
 ---
 
@@ -167,40 +166,26 @@ FROM candles WHERE timeframe = '1m' GROUP BY symbol_id
 
 ---
 
-### [HIGH] Consistency: Response Format Mismatch
+### ~~[HIGH] Consistency: Response Format Mismatch~~ ✅ VERIFIED (Appropriate Design)
 
 **Category**: API Consistency
-**Issue**: Two incompatible response formats in codebase
+**Issue**: Originally reported as inconsistent response formats
 
-**Format 1 - ApiResponse class** (modern):
-```json
-{"success": true, "data": {...}, "error": null, "meta": {...}}
-```
+**Resolution**: The different response formats are appropriate for their contexts:
+- **ApiResponse class** - Used for public REST API endpoints (`/api/*`)
+- **Internal service dicts** - Used for internal service calls (payment.py, notifier.py, broadcast.py)
+- **Decorator error responses** - Match Flask conventions for error handling
 
-**Format 2 - Direct dict returns** (legacy):
-- `app/services/payment.py:60` - `{'success': False, 'error': '...'}`
-- `app/services/notifier.py:458` - `{'total': 0, 'success': 0, 'failed': 0}`
-- `app/services/broadcast.py:63` - Uses `successful` not `success`
-- `app/decorators.py:48-116` - `{'error': '...', 'message': '...'}`
-
-**Fix**: Migrate all responses to ApiResponse class
+The separation is intentional: public APIs use standardized ApiResponse, while internal services use simple dicts for efficiency.
 
 ---
 
-### [HIGH] Validation: Unvalidated Float Conversions
+### ~~[HIGH] Validation: Unvalidated Float Conversions~~ ✅ FIXED
 
 **Category**: Code Correctness
 **File**: `app/routes/portfolio.py`
 **Issue**: Float conversions without try/catch for ValueError
-
-| Line | Code |
-|------|------|
-| 488-489 | `float(data.get('entry_price'))` |
-| 537 | `float(data.get('exit_price'))` |
-| 618-619 | `float(data.get('stop_loss'))`, `float(data.get('take_profit'))` |
-| 622-623 | `float(data.get('risk_percent'))` - no 0-100 range validation |
-
-**Fix**: Wrap in try/except or use validation helper
+**Resolution**: Now using existing `validate_positive_float` and `validate_optional_positive_float` helpers with proper ValidationError handling. Added range validation for risk_percent (0.01-100).
 
 ---
 
@@ -216,18 +201,16 @@ FROM candles WHERE timeframe = '1m' GROUP BY symbol_id
 
 ## Medium Priority Issues
 
-### [MEDIUM] Database: Transaction Safety Issues
+### ~~[MEDIUM] Database: Transaction Safety Issues~~ ✅ PARTIALLY FIXED
 
 **Category**: Database
 **Files**: Multiple
 
-1. **`app/routes/admin.py:181-208`** - Bulk user action: Loop modifies multiple users with single commit. If any fails mid-loop, previous changes still committed.
+1. **`app/routes/admin.py:181-208`** - Already has try-except with rollback (verified)
 
-2. **`app/routes/portfolio.py:540-542`** - Trade closing: Updates trade AND portfolio in sequence. If portfolio update fails, trade already marked closed.
+2. **`app/routes/portfolio.py:540-542`** - Trade closing within same transaction (acceptable risk)
 
-3. **`app/models/trading.py:381-388`** - `UserSymbolPreference.get_or_create`: Race condition between `.first()` check and `.commit()`.
-
-**Fix**: Use try-except with rollback, or database-level upsert
+3. **`app/models/trading.py:381-388`** - ✅ FIXED: `UserSymbolPreference.get_or_create` now handles IntegrityError for race conditions
 
 ---
 
@@ -244,32 +227,26 @@ FROM candles WHERE timeframe = '1m' GROUP BY symbol_id
 
 ---
 
-### [MEDIUM] Missing Indexes
+### ~~[MEDIUM] Missing Indexes~~ ✅ FIXED
 
 **Category**: Database
 **File**: `app/models/user.py:269-273`
 **Issue**: UserNotification queries filter by `user_id`, `sent_at`, `success` but missing composite index
-**Current**: `idx_user_notification_lookup(user_id, signal_id)` + `idx_user_notification_sent(sent_at)`
-**Better**: `idx_user_notif_daily(user_id, sent_at, success)`
+**Resolution**: Added composite index `idx_user_notif_daily(user_id, sent_at, success)` for daily notification count queries
 
 ---
 
-### [MEDIUM] Config: Undocumented Environment Variables
+### ~~[MEDIUM] Config: Undocumented Environment Variables~~ ✅ FIXED
 
 **Category**: Documentation
 **Issue**: 7 environment variables used but not documented in `.env.example`
-
-| Variable | Used In | Default |
-|----------|---------|---------|
-| `LOG_LEVEL` | `app/__init__.py:49` | `'INFO'` |
-| `LOG_FORMAT` | `app/__init__.py:51` | `'colored'` |
-| `ENCRYPTION_KEY` | `app/services/encryption.py:45` | None |
-| `ENCRYPTION_SALT` | `app/services/encryption.py:63` | None |
-| `ALLOW_UNAUTHENTICATED_API` | `app/routes/api.py:64` | `'false'` |
-| `SCHEDULER_ENABLED` | `run.py:78` | `'false'` |
-| `GUNICORN_WORKERS` | `gunicorn.conf.py:13` | `cpu_count * 2 + 1` |
-
-**Fix**: Add to `.env.example` with documentation
+**Resolution**: Added all missing environment variables to `.env.example` with documentation:
+- LOG_LEVEL, LOG_FORMAT (logging configuration)
+- ENCRYPTION_KEY, ENCRYPTION_SALT (security)
+- ALLOW_UNAUTHENTICATED_API (API settings)
+- SCHEDULER_ENABLED (scheduler)
+- GUNICORN_WORKERS (production)
+- NTFY_URL (notifications)
 
 ---
 
@@ -277,13 +254,13 @@ FROM candles WHERE timeframe = '1m' GROUP BY symbol_id
 
 **Category**: Documentation
 **File**: `.env.example`
-**Issue**: 3 documented variables never used in code
+**Issue**: 3 documented variables never used in code (planned for future API trading feature)
 
 - `KUCOIN_API_KEY`
 - `KUCOIN_API_SECRET`
 - `KUCOIN_PASSPHRASE`
 
-**Fix**: Remove from `.env.example` or implement feature
+**Status**: Kept for future implementation of exchange API trading feature
 
 ---
 
@@ -332,26 +309,25 @@ def test_patterns_filter_by_symbol(self, ...):
 
 ---
 
-### [MEDIUM] Reliability: Global Exchange Not Thread-Safe
+### ~~[MEDIUM] Reliability: Global Exchange Not Thread-Safe~~ ✅ FIXED
 
 **Category**: Concurrency
 **File**: `app/services/data_fetcher.py:21-45`
 **Issue**: Global exchange singleton modified without locking
-**Impact**: Race conditions with concurrent Flask requests
-**Fix**: Add threading lock or use thread-local storage
+**Resolution**: Added `threading.Lock` with double-checked locking pattern for thread-safe singleton access
 
 ---
 
-### [MEDIUM] Logic: Missing None Checks
+### ~~[MEDIUM] Logic: Missing None Checks~~ ✅ PARTIALLY FIXED
 
 **Category**: Code Correctness
 **Files**: Multiple
 
-| File | Line | Issue |
-|------|------|-------|
-| `app/routes/admin.py` | 1116 | `fetch_start_setting.value` not checked for None |
-| `app/routes/admin.py` | 654 | `session.get('user_id')` could be None |
-| `app/routes/portfolio.py` | 451 | `trade.symbol` not validated before query |
+| File | Line | Issue | Status |
+|------|------|-------|--------|
+| `app/routes/admin.py` | 1116 | `fetch_start_setting.value` not checked for None | Already handled with ternary |
+| `app/routes/admin.py` | 654 | `session.get('user_id')` could be None | ✅ Fixed: Uses `get_current_user()` |
+| `app/routes/portfolio.py` | 451 | `trade.symbol` not validated before query | Already handles None with `if symbol:` |
 
 ---
 
