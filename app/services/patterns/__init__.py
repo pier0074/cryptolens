@@ -194,7 +194,8 @@ def scan_symbol(symbol: str, pattern_types: list = None) -> dict:
         # Load DataFrame once per timeframe
         try:
             df = get_candles_as_dataframe(symbol, tf, limit=200)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Failed to load candles for {symbol} {tf}: {e}")
             continue
 
         # Pass to all detectors
@@ -202,7 +203,7 @@ def scan_symbol(symbol: str, pattern_types: list = None) -> dict:
             try:
                 patterns = detector.detect(symbol, tf, df=df)
                 results[tf].extend(patterns)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug(f"Pattern detection failed for {symbol} {tf} {pattern_type}: {e}")
 
     return results

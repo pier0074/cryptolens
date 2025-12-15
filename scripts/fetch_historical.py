@@ -36,10 +36,34 @@ import sys
 import os
 import time
 import asyncio
+import fcntl
 from datetime import datetime, timezone, timedelta
 from typing import List, Tuple, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Lock file path for preventing concurrent execution
+LOCK_FILE = '/tmp/cryptolens_historical.lock'
+
+
+def acquire_lock():
+    """Acquire file lock to prevent concurrent execution."""
+    try:
+        lock_file = open(LOCK_FILE, 'w')
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lock_file
+    except IOError:
+        return None
+
+
+def release_lock(lock_file):
+    """Release file lock."""
+    if lock_file:
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+            lock_file.close()
+        except Exception:
+            pass
 
 import ccxt.async_support as ccxt_async
 from sqlalchemy import func
@@ -584,98 +608,111 @@ def main():
     parser.add_argument('--symbol', '-s', type=str, help='Fetch specific symbol only (e.g., BTC/USDT)')
     args = parser.parse_args()
 
-    # Immediate feedback
-    print(f"\n{'═'*60}")
-    print(f"  CryptoLens Historical Data Fetcher")
-    print(f"{'═'*60}")
-    print(f"  Loading...", flush=True)
-
-    if args.status:
-        show_status()
-        return
-
-    if args.delete:
-        if delete_all():
-            # Continue with fetch after delete
-            pass
-        else:
+    # Acquire lock to prevent concurrent execution (except for --status which is read-only)
+    lock_file = None
+    if not args.status:
+        lock_file = acquire_lock()
+        if lock_file is None:
+            print("Another instance is already running, skipping")
             return
 
-    # Get symbols and fetch_start_date setting
-    from app import create_app, db
-    from app.models import Symbol, Setting
-    from app.config import Config
+    try:
+        # Immediate feedback
+        print(f"\n{'═'*60}")
+        print(f"  CryptoLens Historical Data Fetcher")
+        print(f"{'═'*60}")
+        print(f"  Loading...", flush=True)
 
-    app = create_app()
-    with app.app_context():
-        # Filter by specific symbol if provided
-        if args.symbol:
-            symbols = Symbol.query.filter_by(symbol=args.symbol).all()
-            if not symbols:
-                print(f"  Symbol '{args.symbol}' not found in database.", flush=True)
+        if args.status:
+            show_status()
+            return
+
+        if args.delete:
+            if delete_all():
+                # Continue with fetch after delete
+                pass
+            else:
                 return
+
+        # Get symbols and fetch_start_date setting
+        from app import create_app, db
+        from app.models import Symbol, Setting
+        from app.config import Config
+
+        app = create_app()
+        with app.app_context():
+            # Filter by specific symbol if provided
+            if args.symbol:
+                symbols = Symbol.query.filter_by(symbol=args.symbol).all()
+                if not symbols:
+                    print(f"  Symbol '{args.symbol}' not found in database.", flush=True)
+                    return
+            else:
+                symbols = Symbol.query.filter_by(is_active=True).all()
+
+            if not symbols:
+                print("  No active symbols found. Add symbols in Admin > Symbols.", flush=True)
+                return
+
+            symbol_list = [(s.symbol, s.id) for s in symbols]
+
+            # Get fetch_start_date from database setting (default: 2024-01-01)
+            fetch_start_setting = Setting.query.filter_by(key='fetch_start_date').first()
+            fetch_start_date = fetch_start_setting.value if fetch_start_setting else '2024-01-01'
+
+            # Calculate days from start date to now
+            if args.days is not None:
+                days = args.days
+                date_info = f"{days} days (--days override)"
+            else:
+                try:
+                    start_dt = datetime.strptime(fetch_start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+                    days = (datetime.now(timezone.utc) - start_dt).days
+                    date_info = f"from {fetch_start_date} ({days} days)"
+                except ValueError:
+                    days = 365
+                    date_info = f"365 days (invalid fetch_start_date: {fetch_start_date})"
+
+        start_time = time.time()
+
+        mode_desc = 'Gap fill (full DB)' if args.gaps and args.full else 'Gap fill' if args.gaps else 'Full fetch'
+        print(f"  Mode: {mode_desc}")
+        print(f"  Symbols: {len(symbol_list)}")
+        for sym_name, _ in symbol_list:
+            print(f"    • {sym_name}")
+        if args.gaps and args.full:
+            print(f"  Period: Entire database to now")
         else:
-            symbols = Symbol.query.filter_by(is_active=True).all()
+            print(f"  Target: {date_info}")
+        print(f"{'═'*60}", flush=True)
 
-        if not symbols:
-            print("  No active symbols found. Add symbols in Admin > Symbols.", flush=True)
-            return
+        if args.gaps:
+            # Gap fill mode
+            results = asyncio.run(run_gap_fill(symbol_list, days, args.verbose, args.full))
 
-        symbol_list = [(s.symbol, s.id) for s in symbols]
+            total_gaps = sum(r['gaps'] for r in results)
+            total_filled = sum(r['filled'] for r in results)
 
-        # Get fetch_start_date from database setting (default: 2024-01-01)
-        fetch_start_setting = Setting.query.filter_by(key='fetch_start_date').first()
-        fetch_start_date = fetch_start_setting.value if fetch_start_setting else '2024-01-01'
-
-        # Calculate days from start date to now
-        if args.days is not None:
-            days = args.days
-            date_info = f"{days} days (--days override)"
+            print(f"\n  Gaps found: {total_gaps}")
+            print(f"  Candles filled: {total_filled:,}")
         else:
-            try:
-                start_dt = datetime.strptime(fetch_start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
-                days = (datetime.now(timezone.utc) - start_dt).days
-                date_info = f"from {fetch_start_date} ({days} days)"
-            except ValueError:
-                days = 365
-                date_info = f"365 days (invalid fetch_start_date: {fetch_start_date})"
+            # Full fetch mode
+            results = asyncio.run(run_full_fetch(symbol_list, days, args.verbose))
 
-    start_time = time.time()
+            total_new = sum(r['new'] for r in results)
+            print(f"\n  New candles: {total_new:,}")
 
-    mode_desc = 'Gap fill (full DB)' if args.gaps and args.full else 'Gap fill' if args.gaps else 'Full fetch'
-    print(f"  Mode: {mode_desc}")
-    print(f"  Symbols: {len(symbol_list)}")
-    for sym_name, _ in symbol_list:
-        print(f"    • {sym_name}")
-    if args.gaps and args.full:
-        print(f"  Period: Entire database to now")
-    else:
-        print(f"  Target: {date_info}")
-    print(f"{'═'*60}", flush=True)
+        # Aggregate (reuse app from initial symbol fetch)
+        if not args.no_aggregate:
+            aggregate_all_symbols(args.verbose, app, symbol_filter=args.symbol)
 
-    if args.gaps:
-        # Gap fill mode
-        results = asyncio.run(run_gap_fill(symbol_list, days, args.verbose, args.full))
+        elapsed = time.time() - start_time
+        print(f"\n  Time: {format_time(elapsed)}")
+        print(f"{'═'*60}\n")
 
-        total_gaps = sum(r['gaps'] for r in results)
-        total_filled = sum(r['filled'] for r in results)
-
-        print(f"\n  Gaps found: {total_gaps}")
-        print(f"  Candles filled: {total_filled:,}")
-    else:
-        # Full fetch mode
-        results = asyncio.run(run_full_fetch(symbol_list, days, args.verbose))
-
-        total_new = sum(r['new'] for r in results)
-        print(f"\n  New candles: {total_new:,}")
-
-    # Aggregate (reuse app from initial symbol fetch)
-    if not args.no_aggregate:
-        aggregate_all_symbols(args.verbose, app, symbol_filter=args.symbol)
-
-    elapsed = time.time() - start_time
-    print(f"\n  Time: {format_time(elapsed)}")
-    print(f"{'═'*60}\n")
+    finally:
+        # Always release the lock
+        release_lock(lock_file)
 
 
 if __name__ == '__main__':

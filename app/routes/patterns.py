@@ -154,6 +154,7 @@ def index():
 
 
 @patterns_bp.route('/chart/<symbol>/<timeframe>')
+@login_required
 def chart(symbol, timeframe):
     """
     Get chart data with patterns for a specific symbol/timeframe.

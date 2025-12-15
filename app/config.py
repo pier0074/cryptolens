@@ -120,7 +120,7 @@ class Config:
     # NTFY.sh Notifications
     NTFY_TOPIC = os.getenv('NTFY_TOPIC', 'cryptolens-signals')
     NTFY_PRIORITY = int(os.getenv('NTFY_PRIORITY', 4))
-    NTFY_URL = 'https://ntfy.sh'
+    NTFY_URL = os.getenv('NTFY_URL', 'https://ntfy.sh')
 
     # Scanner Settings
     SCAN_INTERVAL_MINUTES = int(os.getenv('SCAN_INTERVAL_MINUTES', 5))

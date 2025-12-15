@@ -39,11 +39,12 @@ def get_smtp_connection():
         raise EmailError("Email credentials not configured")
 
     context = ssl.create_default_context()
+    timeout = 30  # 30 second timeout to prevent indefinite hangs
 
     if use_ssl:
-        smtp = smtplib.SMTP_SSL(server, port, context=context)
+        smtp = smtplib.SMTP_SSL(server, port, context=context, timeout=timeout)
     else:
-        smtp = smtplib.SMTP(server, port)
+        smtp = smtplib.SMTP(server, port, timeout=timeout)
         if use_tls:
             smtp.starttls(context=context)
 

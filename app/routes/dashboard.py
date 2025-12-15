@@ -141,13 +141,22 @@ def index():
         Signal.symbol_id.in_(symbol_ids)
     ).order_by(Signal.created_at.desc()).limit(signal_limit).all()
 
-    # Enrich signals with symbol and pattern info
-    for signal in recent_signals:
-        signal.symbol_obj = db.session.get(Symbol, signal.symbol_id)
-        if signal.pattern_id:
-            signal.pattern_obj = db.session.get(Pattern, signal.pattern_id)
-        else:
-            signal.pattern_obj = None
+    # Bulk fetch symbols and patterns to avoid N+1 queries
+    if recent_signals:
+        # Get unique IDs
+        signal_symbol_ids = list(set(s.symbol_id for s in recent_signals))
+        signal_pattern_ids = [s.pattern_id for s in recent_signals if s.pattern_id]
+
+        # Bulk load symbols and patterns
+        symbols_map = {s.id: s for s in Symbol.query.filter(Symbol.id.in_(signal_symbol_ids)).all()}
+        patterns_map = {p.id: p for p in Pattern.query.filter(Pattern.id.in_(signal_pattern_ids)).all()} if signal_pattern_ids else {}
+
+        # Enrich signals
+        for signal in recent_signals:
+            signal.symbol_obj = symbols_map.get(signal.symbol_id)
+            signal.pattern_obj = patterns_map.get(signal.pattern_id) if signal.pattern_id else None
+    else:
+        pass  # No signals to enrich
 
     # Filter pattern types shown in legend based on tier
     display_pattern_types = allowed_pattern_types if allowed_pattern_types else PATTERN_TYPES

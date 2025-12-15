@@ -195,7 +195,21 @@ def send_bulk_notifications_job(
     app = create_app()
     with app.app_context():
         # Run async batch send
-        results = asyncio.run(send_batch_notifications_async(notifications))
+        # Use get_event_loop to avoid RuntimeError if already in async context
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            # Already in async context - create new loop in thread
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, send_batch_notifications_async(notifications))
+                results = future.result()
+        else:
+            # Normal sync context
+            results = asyncio.run(send_batch_notifications_async(notifications))
 
         # Record results for notifications with signal_id
         for i, res in enumerate(results):

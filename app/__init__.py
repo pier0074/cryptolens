@@ -179,7 +179,8 @@ def create_app(config_name=None):
                 return {'last_data_update': last_update}
             cache.set('last_data_update', None, timeout=60)
             return {'last_data_update': None}
-        except Exception:
+        except Exception as e:
+            logging.getLogger('cryptolens').debug(f"Failed to get last_data_update: {e}")
             return {'last_data_update': None}
 
     # Request ID and timing middleware
@@ -221,8 +222,8 @@ def create_app(config_name=None):
                     endpoint = request.endpoint or request.path
                     REQUEST_LATENCY.labels(method=request.method, endpoint=endpoint).observe(elapsed_sec)
                     REQUEST_COUNT.labels(method=request.method, endpoint=endpoint, status=response.status_code).inc()
-                except Exception:
-                    pass  # Don't fail request if metrics unavailable
+                except Exception as e:
+                    logging.getLogger('cryptolens').debug(f"Failed to record metrics: {e}")
         return response
 
     # Register error handlers for domain exceptions

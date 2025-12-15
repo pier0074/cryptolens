@@ -28,6 +28,7 @@ def get_request_id() -> str:
         if has_request_context() and hasattr(g, 'request_id'):
             return g.request_id
     except Exception:
+        # Expected in non-request contexts (CLI scripts, background jobs)
         pass
     return None
 

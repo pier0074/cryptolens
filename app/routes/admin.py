@@ -1092,28 +1092,31 @@ def symbols():
 
     symbols_list = Symbol.query.order_by(Symbol.symbol).all()
 
-    # Get earliest candle date for each symbol
-    symbol_stats = {}
-    for sym in symbols_list:
-        earliest = db.session.query(func.min(Candle.timestamp)).filter(
-            Candle.symbol_id == sym.id,
-            Candle.timeframe == '1m'
-        ).scalar()
-        latest = db.session.query(func.max(Candle.timestamp)).filter(
-            Candle.symbol_id == sym.id,
-            Candle.timeframe == '1m'
-        ).scalar()
-        candle_count = Candle.query.filter_by(symbol_id=sym.id, timeframe='1m').count()
+    # Get candle stats for all symbols in a single query (avoids N+1)
+    candle_stats = db.session.query(
+        Candle.symbol_id,
+        func.min(Candle.timestamp).label('earliest'),
+        func.max(Candle.timestamp).label('latest'),
+        func.count(Candle.id).label('count')
+    ).filter(
+        Candle.timeframe == '1m'
+    ).group_by(Candle.symbol_id).all()
 
-        symbol_stats[sym.id] = {
-            'earliest': earliest,
-            'latest': latest,
-            'count': candle_count
-        }
+    # Build lookup dict
+    symbol_stats = {stat.symbol_id: {
+        'earliest': stat.earliest,
+        'latest': stat.latest,
+        'count': stat.count
+    } for stat in candle_stats}
+
+    # Ensure all symbols have stats (even if no candles)
+    for sym in symbols_list:
+        if sym.id not in symbol_stats:
+            symbol_stats[sym.id] = {'earliest': None, 'latest': None, 'count': 0}
 
     # Get fetch start date setting
     fetch_start_setting = Setting.query.filter_by(key='fetch_start_date').first()
-    fetch_start_date = fetch_start_setting.value if fetch_start_setting else '2024-01-01'
+    fetch_start_date = fetch_start_setting.value if fetch_start_setting and fetch_start_setting.value else '2024-01-01'
 
     return render_template('admin/symbols.html',
                            symbols=symbols_list,
@@ -1130,24 +1133,32 @@ def api_symbols():
     from sqlalchemy import func
 
     symbols_list = Symbol.query.order_by(Symbol.symbol).all()
+
+    # Get candle stats for all symbols in a single query (avoids N+1)
+    candle_stats = db.session.query(
+        Candle.symbol_id,
+        func.min(Candle.timestamp).label('earliest'),
+        func.max(Candle.timestamp).label('latest'),
+        func.count(Candle.id).label('count')
+    ).filter(
+        Candle.timeframe == '1m'
+    ).group_by(Candle.symbol_id).all()
+
+    # Build lookup dict
+    stats_map = {stat.symbol_id: {
+        'earliest': stat.earliest,
+        'latest': stat.latest,
+        'count': stat.count
+    } for stat in candle_stats}
+
     result = []
-
     for sym in symbols_list:
-        earliest = db.session.query(func.min(Candle.timestamp)).filter(
-            Candle.symbol_id == sym.id,
-            Candle.timeframe == '1m'
-        ).scalar()
-        latest = db.session.query(func.max(Candle.timestamp)).filter(
-            Candle.symbol_id == sym.id,
-            Candle.timeframe == '1m'
-        ).scalar()
-        candle_count = Candle.query.filter_by(symbol_id=sym.id, timeframe='1m').count()
-
+        stats = stats_map.get(sym.id, {'earliest': None, 'latest': None, 'count': 0})
         result.append({
             **sym.to_dict(),
-            'earliest_ts': earliest,
-            'latest_ts': latest,
-            'candle_count': candle_count,
+            'earliest_ts': stats['earliest'],
+            'latest_ts': stats['latest'],
+            'candle_count': stats['count'],
             'is_mandatory': sym.symbol in MANDATORY_SYMBOLS
         })
 

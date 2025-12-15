@@ -64,10 +64,16 @@ async def send_notification_async(
         ) as response:
             return response.status == 200
     except asyncio.TimeoutError:
+        import logging
+        logging.getLogger('cryptolens').debug(f"NTFY notification timeout for topic {topic}")
         return False
-    except aiohttp.ClientError:
+    except aiohttp.ClientError as e:
+        import logging
+        logging.getLogger('cryptolens').debug(f"NTFY client error for topic {topic}: {e}")
         return False
-    except Exception:
+    except Exception as e:
+        import logging
+        logging.getLogger('cryptolens').debug(f"NTFY notification error for topic {topic}: {e}")
         return False
 
 

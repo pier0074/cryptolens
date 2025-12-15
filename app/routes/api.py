@@ -179,8 +179,9 @@ def require_api_key(f: Callable[..., Any]) -> Callable[..., Any]:
                 method=request.method,
                 response_code=response_code
             )
-        except Exception:
-            pass  # Don't fail the request if usage recording fails
+        except Exception as e:
+            import logging
+            logging.getLogger('cryptolens').warning(f"Failed to record API usage: {e}")
 
         return result
 

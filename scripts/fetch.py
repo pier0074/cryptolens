@@ -31,7 +31,11 @@ import os
 import asyncio
 import time
 import traceback
+import fcntl
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Lock file path for preventing concurrent execution
+LOCK_FILE = '/tmp/cryptolens_fetch.lock'
 
 import ccxt.async_support as ccxt_async
 from datetime import datetime, timezone
@@ -375,12 +379,38 @@ def complete_cron_run(app, run_id, success=True, error_message=None,
             db.session.commit()
 
 
+def acquire_lock():
+    """Acquire file lock to prevent concurrent execution."""
+    try:
+        lock_file = open(LOCK_FILE, 'w')
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return lock_file
+    except IOError:
+        return None
+
+
+def release_lock(lock_file):
+    """Release file lock."""
+    if lock_file:
+        try:
+            fcntl.flock(lock_file, fcntl.LOCK_UN)
+            lock_file.close()
+        except Exception:
+            pass
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description='Candle fetcher with pattern detection')
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
     parser.add_argument('--gaps', action='store_true', help='Fill data gaps (hourly job)')
     args = parser.parse_args()
+
+    # Acquire lock to prevent concurrent execution
+    lock_file = acquire_lock()
+    if lock_file is None:
+        print("Another instance is already running, skipping")
+        return
 
     job_name = 'gaps' if args.gaps else 'fetch'
 
@@ -462,6 +492,10 @@ def main():
             success=False,
             error_message=error_msg
         )
+
+    finally:
+        # Always release the lock
+        release_lock(lock_file)
 
 
 if __name__ == '__main__':
