@@ -608,24 +608,35 @@ function patternChart() {
                 minMove: Math.pow(10, -this.precision),
             };
 
-            // Helper to create a line series from pattern time to far right
+            // Helper to create a line from pattern time to right axis
             const addLine = (startTime, price, color, lineWidth, lineStyle, title) => {
                 const effectiveStart = Math.max(startTime, firstTime);
+                // Use line series for the segment from start to visible area
                 const series = this.chart.addLineSeries({
                     color: color,
                     lineWidth: lineWidth,
                     lineStyle: lineStyle,
                     priceLineVisible: false,
-                    lastValueVisible: true,
+                    lastValueVisible: false,
                     crosshairMarkerVisible: false,
                     priceFormat,
-                    title: title,
                 });
                 series.setData([
                     { time: effectiveStart, value: price },
                     { time: farFuture, value: price }
                 ]);
                 this.patternSeries.push(series);
+
+                // Use price line on candlestick series for right axis label
+                const priceLine = this.candlestickSeries.createPriceLine({
+                    price: price,
+                    color: color,
+                    lineWidth: 0,  // Don't draw extra line (already have line series)
+                    lineStyle: lineStyle,
+                    axisLabelVisible: true,
+                    title: title,
+                });
+                this.priceLines.push(priceLine);
             };
 
             // Draw each selected pattern
@@ -657,6 +668,25 @@ function patternChart() {
                     { time: farFuture, value: zoneHigh }
                 ]);
                 this.patternSeries.push(zoneBand);
+
+                // Add price lines for zone bounds on right axis
+                const zoneHighPriceLine = this.candlestickSeries.createPriceLine({
+                    price: zoneHigh,
+                    color: zoneColor,
+                    lineWidth: 0,
+                    axisLabelVisible: true,
+                    title: 'Zone H',
+                });
+                this.priceLines.push(zoneHighPriceLine);
+
+                const zoneLowPriceLine = this.candlestickSeries.createPriceLine({
+                    price: zoneLow,
+                    color: zoneColor,
+                    lineWidth: 0,
+                    axisLabelVisible: true,
+                    title: 'Zone L',
+                });
+                this.priceLines.push(zoneLowPriceLine);
 
                 // Entry (blue dashed)
                 addLine(patternStartTime, entry, '#3b82f6', 1, 2, 'Entry');
