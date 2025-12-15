@@ -130,58 +130,30 @@
 
 ### Error Handling: Bare Exceptions
 
-- [ ] **Bare except handlers** - Multiple locations
-  - `app/jobs/notifications.py:76` - `except: pass`
-  - `app/services/notifier.py:184` - `except: pass`
-  - `app/services/notifier.py:506` - `except: pass`
-  - Replace with `except (json.JSONDecodeError, TypeError, ValueError):`
+- [x] **Bare except handlers** - Multiple locations ✅ FIXED
+  - `app/jobs/notifications.py:76` - Changed to specific exceptions
+  - `app/services/notifier.py:184` - Changed to specific exceptions
+  - `app/services/notifier.py:506` - Changed to specific exceptions
 
-- [ ] **Silent exception swallowing** - `scripts/fetch.py`
-  - Lines 105-111: Aggregation errors silently ignored
-  - Lines 129-134: Pattern detection errors silently ignored
-  - Lines 142-146: Pattern status update errors silently ignored
-  - Add logging: `logger.warning(f"Aggregation failed for {tf}: {e}")`
+- [x] **Silent exception swallowing** - `scripts/fetch.py` ✅ FIXED
+  - Added verbose logging for aggregation, pattern detection, and status update errors
 
 ### Database: Missing Indexes
 
-- [ ] **Add indexes to frequently queried fields**
-  ```python
-  # Symbol model
-  db.Index('idx_symbol_is_active', 'is_active')
-
-  # Pattern model
-  db.Index('idx_pattern_direction', 'direction')
-  db.Index('idx_pattern_type', 'pattern_type')
-
-  # User model
-  db.Index('idx_user_verified', 'is_verified')
-  db.Index('idx_user_admin', 'is_admin')
-
-  # Subscription model
-  db.Index('idx_subscription_user_status', 'user_id', 'status')
-
-  # Payment model
-  db.Index('idx_payment_user_status', 'user_id', 'status')
-
-  # Trade model
-  db.Index('idx_trade_signal', 'signal_id')
-
-  # Log model
-  db.Index('idx_log_timestamp', 'timestamp')
-  ```
+- [x] **Add indexes to frequently queried fields** ✅ FIXED
+  - Symbol: `idx_symbol_is_active`
+  - Pattern: `idx_pattern_direction`, `idx_pattern_type`
+  - User: `idx_user_admin`
+  - Subscription: `idx_subscription_user_status`
+  - Trade: `idx_trade_signal`
 
 ### Database: Transaction Issues
 
-- [ ] **Missing rollback in subscription operations** - `app/routes/admin.py:259-284`
-  ```python
-  cancel_subscription(user_id)   # Commits
-  extend_subscription(user_id)   # May fail - no rollback!
-  ```
-  - Wrap in try-except with `db.session.rollback()`
+- [x] **Missing rollback in subscription operations** - `app/routes/admin.py` ✅ FIXED
+  - Added try-except with `db.session.rollback()` for subscription operations
 
-- [ ] **Partial commits in bulk operations** - `app/routes/admin.py:183-210`
-  - No transaction wrapping for bulk user updates
-  - Add savepoints or single transaction
+- [x] **Partial commits in bulk operations** - `app/routes/admin.py` ✅ FIXED
+  - Added try-except with `db.session.rollback()` for bulk user actions
 
 ### API: Response Consistency
 
@@ -191,10 +163,8 @@
 
 ### Security: Rate Limiting
 
-- [ ] **Missing rate limits on admin operations** - `app/routes/admin.py`
-  - Line 109: `/users/<id>/verify` - no rate limit
-  - Line 120: `/users/<id>/unlock` - no rate limit
-  - Add `@limiter.limit("10 per minute")`
+- [x] **Missing rate limits on admin operations** - `app/routes/admin.py` ✅ FIXED
+  - Added rate limits to: bulk-action, make-admin, revoke-admin, subscription, create-user, broadcast, bulk-symbols
 
 ### Security: Email Enumeration
 
