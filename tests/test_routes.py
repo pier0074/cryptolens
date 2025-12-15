@@ -233,18 +233,25 @@ class TestPatternsRoutes:
         response = client.get('/patterns/?status=active')
         assert response.status_code == 200
 
-    def test_patterns_chart_valid_symbol(self, client, app, sample_candles_bullish_fvg):
-        """Test chart data for valid symbol"""
+    def test_patterns_chart_valid_symbol(self, client, app, sample_user, sample_candles_bullish_fvg):
+        """Test chart data for valid symbol (requires authentication)"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/patterns/chart/BTC-USDT/1h')
         assert response.status_code == 200
         data = response.get_json()
         assert 'candles' in data
         assert 'patterns' in data
 
-    def test_patterns_chart_invalid_symbol(self, client, app):
-        """Test chart data for invalid symbol"""
+    def test_patterns_chart_invalid_symbol(self, client, app, sample_user):
+        """Test chart data for invalid symbol (requires authentication)"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/patterns/chart/INVALID-PAIR/1h')
         assert response.status_code == 404
+
+    def test_patterns_chart_unauthenticated(self, client, app, sample_candles_bullish_fvg):
+        """Test chart data redirects unauthenticated users"""
+        response = client.get('/patterns/chart/BTC-USDT/1h')
+        assert response.status_code == 302  # Redirects to login
 
 
 class TestSignalsRoutes:

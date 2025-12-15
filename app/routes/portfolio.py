@@ -485,8 +485,13 @@ def open_trade(portfolio_id, trade_id):
         abort(400)
 
     data = request.form
-    trade.entry_price = float(data.get('entry_price'))
-    trade.entry_quantity = float(data.get('entry_quantity'))
+    try:
+        trade.entry_price = validate_positive_float(data.get('entry_price'), 'Entry price')
+        trade.entry_quantity = validate_positive_float(data.get('entry_quantity'), 'Entry quantity')
+    except ValidationError as e:
+        flash(str(e), 'error')
+        return redirect(url_for('portfolio.trade_detail', portfolio_id=portfolio_id, trade_id=trade_id))
+
     trade.status = 'open'
     trade.entry_time = datetime.now(timezone.utc)
 
@@ -534,7 +539,12 @@ def close_trade(portfolio_id, trade_id):
         abort(400)
 
     data = request.form
-    exit_price = float(data.get('exit_price'))
+    try:
+        exit_price = validate_positive_float(data.get('exit_price'), 'Exit price')
+    except ValidationError as e:
+        flash(str(e), 'error')
+        return redirect(url_for('portfolio.trade_detail', portfolio_id=portfolio_id, trade_id=trade_id))
+
     reason = data.get('reason', 'Manual')
 
     trade.close(exit_price, f"Closed: {reason}")
@@ -611,23 +621,27 @@ def edit_trade(portfolio_id, trade_id):
     if request.method == 'POST':
         data = request.form
 
-        trade.symbol = data.get('symbol', trade.symbol)
-        trade.direction = data.get('direction', trade.direction)
-        trade.timeframe = data.get('timeframe')
-        trade.pattern_type = data.get('pattern_type')
-        trade.stop_loss = float(data.get('stop_loss')) if data.get('stop_loss') else None
-        trade.take_profit = float(data.get('take_profit')) if data.get('take_profit') else None
-        trade.setup_notes = data.get('setup_notes')
-        trade.lessons_learned = data.get('lessons_learned')
+        try:
+            trade.symbol = data.get('symbol', trade.symbol)
+            trade.direction = data.get('direction', trade.direction)
+            trade.timeframe = data.get('timeframe')
+            trade.pattern_type = data.get('pattern_type')
+            trade.stop_loss = validate_optional_positive_float(data.get('stop_loss'), 'Stop loss')
+            trade.take_profit = validate_optional_positive_float(data.get('take_profit'), 'Take profit')
+            trade.setup_notes = data.get('setup_notes')
+            trade.lessons_learned = data.get('lessons_learned')
 
-        # Update entry details if provided
-        if data.get('entry_price'):
-            trade.entry_price = float(data.get('entry_price'))
-        if data.get('entry_quantity'):
-            trade.entry_quantity = float(data.get('entry_quantity'))
-        if data.get('risk_percent'):
-            trade.risk_percent = float(data.get('risk_percent'))
-            trade.risk_amount = portfolio.current_balance * (trade.risk_percent / 100)
+            # Update entry details if provided
+            if data.get('entry_price'):
+                trade.entry_price = validate_positive_float(data.get('entry_price'), 'Entry price')
+            if data.get('entry_quantity'):
+                trade.entry_quantity = validate_positive_float(data.get('entry_quantity'), 'Entry quantity')
+            if data.get('risk_percent'):
+                trade.risk_percent = validate_positive_float(data.get('risk_percent'), 'Risk percent', min_val=0.01, max_val=100)
+                trade.risk_amount = portfolio.current_balance * (trade.risk_percent / 100)
+        except ValidationError as e:
+            flash(str(e), 'error')
+            return redirect(url_for('portfolio.edit_trade', portfolio_id=portfolio_id, trade_id=trade_id))
 
         db.session.commit()
         return redirect(url_for('portfolio.trade_detail', portfolio_id=portfolio_id, trade_id=trade_id))
