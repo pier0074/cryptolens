@@ -1,7 +1,12 @@
 """
-Tests for Database Health Check Script (Incremental Verification)
+Tests for Database Health Check Script (Hierarchical Verification)
 
-Tests the candle verification functions and incremental verification logic.
+Tests the candle verification functions including:
+- OHLCV sanity checks
+- Timestamp alignment checks
+- Gap detection
+- Aggregation validation (recalculation from 1m)
+- Hierarchical verification (1m first, then aggregated)
 """
 import pytest
 import sys
@@ -9,15 +14,21 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import create_app, db
-from app.models import Symbol, Candle
+from app.models import Symbol, Candle, KnownGap
 from scripts.db_health import (
     check_candle_ohlcv,
     check_candle_alignment,
     check_gap,
-    check_continuity,
-    verify_candles_incremental,
+    get_1m_candles_for_aggregation,
+    calculate_aggregated_ohlcv,
+    validate_aggregated_candle,
+    verify_1m_candles,
+    verify_aggregated_candles,
     get_verification_stats,
-    reset_verification
+    reset_verification,
+    BATCH_SIZES,
+    TF_MS,
+    TF_1M_COUNT
 )
 
 
@@ -255,63 +266,158 @@ class TestGapCheck:
             assert missing == 9
 
 
-class TestContinuityCheck:
-    """Test continuity checks (open == prev close)."""
+class TestBatchSizes:
+    """Test batch size constants."""
 
-    def test_continuous(self, app, test_symbol):
-        """Open equals previous close - no issue."""
+    def test_day_batch_size(self):
+        """Day batch size is correct."""
+        assert BATCH_SIZES['day'] == 1440  # 60 * 24
+
+    def test_week_batch_size(self):
+        """Week batch size is correct."""
+        assert BATCH_SIZES['week'] == 10080  # 1440 * 7
+
+
+class TestAggregationCalculation:
+    """Test aggregation calculation from 1m candles."""
+
+    def test_calculate_ohlcv_from_1m(self, app, test_symbol):
+        """Calculate OHLCV from 1m candles correctly."""
         with app.app_context():
-            prev = Candle(
-                symbol_id=test_symbol, timeframe='1m',
-                timestamp=1700000000000,
-                open=100, high=101, low=99, close=100.5, volume=1000
-            )
-            curr = Candle(
-                symbol_id=test_symbol, timeframe='1m',
-                timestamp=1700000060000,
-                open=100.5, high=101, low=99, close=101, volume=1000
-            )
-            diff = check_continuity(prev, curr, threshold=0.001)
-            assert diff is None
+            # Create 5 1m candles for a 5m aggregation
+            candles_1m = []
+            for i in range(5):
+                candle = Candle(
+                    symbol_id=test_symbol, timeframe='1m',
+                    timestamp=1700000000000 + i * 60000,
+                    open=100 + i,    # 100, 101, 102, 103, 104
+                    high=105 + i,    # 105, 106, 107, 108, 109
+                    low=95 + i,      # 95, 96, 97, 98, 99
+                    close=101 + i,   # 101, 102, 103, 104, 105
+                    volume=1000 + i * 100  # 1000, 1100, 1200, 1300, 1400
+                )
+                candles_1m.append(candle)
 
-    def test_small_diff_within_threshold(self, app, test_symbol):
-        """Small diff within threshold passes."""
+            result = calculate_aggregated_ohlcv(candles_1m)
+
+            assert result['open'] == 100       # First candle open
+            assert result['high'] == 109       # Max high
+            assert result['low'] == 95         # Min low
+            assert result['close'] == 105      # Last candle close
+            assert result['volume'] == 6000    # Sum of volumes
+
+    def test_calculate_empty_returns_none(self):
+        """Empty candle list returns None."""
+        result = calculate_aggregated_ohlcv([])
+        assert result is None
+
+
+class TestAggregationValidation:
+    """Test aggregation validation (recalculation check)."""
+
+    def test_valid_aggregation(self, app, test_symbol):
+        """Valid aggregated candle passes validation."""
         with app.app_context():
-            prev = Candle(
-                symbol_id=test_symbol, timeframe='1m',
-                timestamp=1700000000000,
-                open=100, high=101, low=99, close=100, volume=1000
-            )
-            curr = Candle(
-                symbol_id=test_symbol, timeframe='1m',
-                timestamp=1700000060000,
-                open=100.05,  # 0.05% diff
-                high=101, low=99, close=101, volume=1000
-            )
-            diff = check_continuity(prev, curr, threshold=0.001)  # 0.1%
-            assert diff is None
+            # Create 5 1m candles
+            candles_1m = []
+            base_ts = 1700000000000
+            for i in range(5):
+                candle = Candle(
+                    symbol_id=test_symbol, timeframe='1m',
+                    timestamp=base_ts + i * 60000,
+                    open=100, high=105, low=95, close=100, volume=1000
+                )
+                candles_1m.append(candle)
 
-    def test_discontinuity_above_threshold(self, app, test_symbol):
-        """Diff above threshold returns percentage."""
+            # Create matching aggregated candle
+            agg_candle = Candle(
+                symbol_id=test_symbol, timeframe='5m',
+                timestamp=base_ts,
+                open=100, high=105, low=95, close=100, volume=5000
+            )
+
+            problems = validate_aggregated_candle(agg_candle, candles_1m)
+            assert problems == []
+
+    def test_mismatched_open(self, app, test_symbol):
+        """Aggregated candle with wrong open is detected."""
         with app.app_context():
-            prev = Candle(
-                symbol_id=test_symbol, timeframe='1m',
-                timestamp=1700000000000,
-                open=100, high=101, low=99, close=100, volume=1000
+            candles_1m = []
+            base_ts = 1700000000000
+            for i in range(5):
+                candle = Candle(
+                    symbol_id=test_symbol, timeframe='1m',
+                    timestamp=base_ts + i * 60000,
+                    open=100, high=105, low=95, close=100, volume=1000
+                )
+                candles_1m.append(candle)
+
+            # Wrong open
+            agg_candle = Candle(
+                symbol_id=test_symbol, timeframe='5m',
+                timestamp=base_ts,
+                open=110,  # Wrong!
+                high=105, low=95, close=100, volume=5000
             )
-            curr = Candle(
-                symbol_id=test_symbol, timeframe='1m',
-                timestamp=1700000060000,
-                open=105,  # 5% diff
-                high=106, low=104, close=105, volume=1000
+
+            problems = validate_aggregated_candle(agg_candle, candles_1m)
+            assert len(problems) > 0
+            assert any('open mismatch' in p for p in problems)
+
+    def test_mismatched_high(self, app, test_symbol):
+        """Aggregated candle with wrong high is detected."""
+        with app.app_context():
+            candles_1m = []
+            base_ts = 1700000000000
+            for i in range(5):
+                candle = Candle(
+                    symbol_id=test_symbol, timeframe='1m',
+                    timestamp=base_ts + i * 60000,
+                    open=100, high=105, low=95, close=100, volume=1000
+                )
+                candles_1m.append(candle)
+
+            # Wrong high
+            agg_candle = Candle(
+                symbol_id=test_symbol, timeframe='5m',
+                timestamp=base_ts,
+                open=100,
+                high=110,  # Wrong!
+                low=95, close=100, volume=5000
             )
-            diff = check_continuity(prev, curr, threshold=0.001)
-            assert diff is not None
-            assert diff == pytest.approx(0.05, rel=0.01)
+
+            problems = validate_aggregated_candle(agg_candle, candles_1m)
+            assert len(problems) > 0
+            assert any('high mismatch' in p for p in problems)
+
+    def test_mismatched_volume(self, app, test_symbol):
+        """Aggregated candle with wrong volume is detected."""
+        with app.app_context():
+            candles_1m = []
+            base_ts = 1700000000000
+            for i in range(5):
+                candle = Candle(
+                    symbol_id=test_symbol, timeframe='1m',
+                    timestamp=base_ts + i * 60000,
+                    open=100, high=105, low=95, close=100, volume=1000
+                )
+                candles_1m.append(candle)
+
+            # Wrong volume (>1% off)
+            agg_candle = Candle(
+                symbol_id=test_symbol, timeframe='5m',
+                timestamp=base_ts,
+                open=100, high=105, low=95, close=100,
+                volume=6000  # Wrong! Should be 5000
+            )
+
+            problems = validate_aggregated_candle(agg_candle, candles_1m)
+            assert len(problems) > 0
+            assert any('volume mismatch' in p for p in problems)
 
 
-class TestIncrementalVerification:
-    """Test the incremental verification process."""
+class TestVerify1mCandles:
+    """Test 1m candle verification."""
 
     def test_verify_valid_candles(self, app, test_symbol):
         """Valid candles should be verified."""
@@ -325,7 +431,8 @@ class TestIncrementalVerification:
                 ))
             db.session.commit()
 
-            result = verify_candles_incremental(test_symbol, '1m', fix=False)
+            symbol = Symbol.query.get(test_symbol)
+            result = verify_1m_candles(test_symbol, symbol, fix=False)
             assert result['verified'] == 10
             assert result['error'] is None
 
@@ -355,7 +462,8 @@ class TestIncrementalVerification:
                 ))
             db.session.commit()
 
-            result = verify_candles_incremental(test_symbol, '1m', fix=False)
+            symbol = Symbol.query.get(test_symbol)
+            result = verify_1m_candles(test_symbol, symbol, fix=False)
             assert result['verified'] == 5
             assert result['error'] is not None
             assert result['error']['type'] == 'ohlcv_invalid'
@@ -379,36 +487,12 @@ class TestIncrementalVerification:
             ))
             db.session.commit()
 
-            result = verify_candles_incremental(test_symbol, '1m', fix=False)
+            symbol = Symbol.query.get(test_symbol)
+            result = verify_1m_candles(test_symbol, symbol, fix=False)
             assert result['verified'] == 5
             assert result['error'] is not None
             assert result['error']['type'] == 'gap'
             assert result['error']['missing_candles'] == 5
-
-    def test_stop_on_misaligned(self, app, test_symbol):
-        """Verification should stop on misaligned candle."""
-        with app.app_context():
-            # 5m aligned timestamp
-            aligned_ts = 1699999800000  # Aligned to 5m
-            # 3 aligned candles
-            for i in range(3):
-                db.session.add(Candle(
-                    symbol_id=test_symbol, timeframe='5m',
-                    timestamp=aligned_ts + i * 300000,
-                    open=100, high=101, low=99, close=100, volume=1000
-                ))
-            # 1 misaligned candle
-            db.session.add(Candle(
-                symbol_id=test_symbol, timeframe='5m',
-                timestamp=aligned_ts + 3 * 300000 + 60000,  # +1 minute off
-                open=100, high=101, low=99, close=100, volume=1000
-            ))
-            db.session.commit()
-
-            result = verify_candles_incremental(test_symbol, '5m', fix=False)
-            assert result['verified'] == 3
-            assert result['error'] is not None
-            assert result['error']['type'] == 'misaligned'
 
     def test_fix_deletes_invalid(self, app, test_symbol):
         """Fix mode should delete invalid candle."""
@@ -428,7 +512,8 @@ class TestIncrementalVerification:
             ))
             db.session.commit()
 
-            result = verify_candles_incremental(test_symbol, '1m', fix=True)
+            symbol = Symbol.query.get(test_symbol)
+            result = verify_1m_candles(test_symbol, symbol, fix=True)
             assert result['verified'] == 2
             assert result['error']['action'] == 'deleted'
 
@@ -451,23 +536,184 @@ class TestIncrementalVerification:
                 ))
             db.session.commit()
 
+            symbol = Symbol.query.get(test_symbol)
+
             # First run with batch_size=5
-            result1 = verify_candles_incremental(
-                test_symbol, '1m', fix=False, batch_size=5
+            result1 = verify_1m_candles(
+                test_symbol, symbol, fix=False, batch_size=5
             )
             assert result1['verified'] == 5
 
             # Second run should verify remaining 5
-            result2 = verify_candles_incremental(
-                test_symbol, '1m', fix=False, batch_size=5
+            result2 = verify_1m_candles(
+                test_symbol, symbol, fix=False, batch_size=5
             )
             assert result2['verified'] == 5
 
             # Third run - all verified
-            result3 = verify_candles_incremental(
-                test_symbol, '1m', fix=False, batch_size=5
+            result3 = verify_1m_candles(
+                test_symbol, symbol, fix=False, batch_size=5
             )
             assert result3['verified'] == 0
+            assert result3['all_done'] is True
+
+
+class TestVerifyAggregatedCandles:
+    """Test aggregated candle verification."""
+
+    def test_verify_with_all_1m_verified(self, app, test_symbol):
+        """Aggregated candles verify when 1m are verified."""
+        with app.app_context():
+            # Use 5m-aligned timestamp: 28333330 * 60000 = 1699999800000
+            # 28333330 % 5 = 0, so this is properly 5m-aligned
+            base_ts = 1699999800000
+            now_ms = base_ts + 10 * 60000
+
+            # Create 5 verified 1m candles
+            for i in range(5):
+                db.session.add(Candle(
+                    symbol_id=test_symbol, timeframe='1m',
+                    timestamp=base_ts + i * 60000,
+                    open=100, high=105, low=95, close=100, volume=1000,
+                    verified_at=now_ms
+                ))
+
+            # Create matching 5m candle
+            db.session.add(Candle(
+                symbol_id=test_symbol, timeframe='5m',
+                timestamp=base_ts,
+                open=100, high=105, low=95, close=100, volume=5000
+            ))
+            db.session.commit()
+
+            result = verify_aggregated_candles(
+                test_symbol, 'TEST/USDT', '5m', fix=False
+            )
+            assert result['verified'] == 1
+            assert result['error'] is None
+
+    def test_skip_when_1m_not_verified(self, app, test_symbol):
+        """Aggregated candles skip when 1m are not verified."""
+        with app.app_context():
+            # Use 5m-aligned timestamp
+            base_ts = 1699999800000
+
+            # Create 5 UNVERIFIED 1m candles
+            for i in range(5):
+                db.session.add(Candle(
+                    symbol_id=test_symbol, timeframe='1m',
+                    timestamp=base_ts + i * 60000,
+                    open=100, high=105, low=95, close=100, volume=1000,
+                    verified_at=None  # Not verified
+                ))
+
+            # Create 5m candle
+            db.session.add(Candle(
+                symbol_id=test_symbol, timeframe='5m',
+                timestamp=base_ts,
+                open=100, high=105, low=95, close=100, volume=5000
+            ))
+            db.session.commit()
+
+            result = verify_aggregated_candles(
+                test_symbol, 'TEST/USDT', '5m', fix=False
+            )
+            assert result['verified'] == 0
+            assert result['skipped'] == 1  # Skipped due to unverified 1m
+
+    def test_detect_aggregation_mismatch(self, app, test_symbol):
+        """Detect mismatch between aggregated and 1m data."""
+        with app.app_context():
+            # Use 5m-aligned timestamp
+            base_ts = 1699999800000
+            now_ms = base_ts + 10 * 60000
+
+            # Create 5 verified 1m candles
+            for i in range(5):
+                db.session.add(Candle(
+                    symbol_id=test_symbol, timeframe='1m',
+                    timestamp=base_ts + i * 60000,
+                    open=100, high=105, low=95, close=100, volume=1000,
+                    verified_at=now_ms
+                ))
+
+            # Create MISMATCHED 5m candle
+            db.session.add(Candle(
+                symbol_id=test_symbol, timeframe='5m',
+                timestamp=base_ts,
+                open=100, high=110, low=95, close=100, volume=5000  # Wrong high!
+            ))
+            db.session.commit()
+
+            result = verify_aggregated_candles(
+                test_symbol, 'TEST/USDT', '5m', fix=False
+            )
+            assert result['error'] is not None
+            assert result['error']['type'] == 'aggregation_mismatch'
+
+
+class TestGet1mCandlesForAggregation:
+    """Test getting 1m candles for aggregation validation."""
+
+    def test_returns_candles_when_all_verified(self, app, test_symbol):
+        """Returns 1m candles when all are verified."""
+        with app.app_context():
+            # Use 5m-aligned timestamp
+            base_ts = 1699999800000
+            now_ms = base_ts + 10 * 60000
+
+            # Create 5 verified 1m candles
+            for i in range(5):
+                db.session.add(Candle(
+                    symbol_id=test_symbol, timeframe='1m',
+                    timestamp=base_ts + i * 60000,
+                    open=100, high=105, low=95, close=100, volume=1000,
+                    verified_at=now_ms
+                ))
+            db.session.commit()
+
+            candles = get_1m_candles_for_aggregation(test_symbol, '5m', base_ts)
+            assert candles is not None
+            assert len(candles) == 5
+
+    def test_returns_none_when_unverified(self, app, test_symbol):
+        """Returns None when 1m candles are not verified."""
+        with app.app_context():
+            # Use 5m-aligned timestamp
+            base_ts = 1699999800000
+
+            # Create 5 UNVERIFIED 1m candles
+            for i in range(5):
+                db.session.add(Candle(
+                    symbol_id=test_symbol, timeframe='1m',
+                    timestamp=base_ts + i * 60000,
+                    open=100, high=105, low=95, close=100, volume=1000,
+                    verified_at=None
+                ))
+            db.session.commit()
+
+            candles = get_1m_candles_for_aggregation(test_symbol, '5m', base_ts)
+            assert candles is None
+
+    def test_returns_none_when_missing_candles(self, app, test_symbol):
+        """Returns None when some 1m candles are missing."""
+        with app.app_context():
+            # Use 5m-aligned timestamp
+            base_ts = 1699999800000
+            now_ms = base_ts + 10 * 60000
+
+            # Create only 3 of the required 5 candles
+            for i in [0, 1, 2]:  # Missing 3 and 4
+                db.session.add(Candle(
+                    symbol_id=test_symbol, timeframe='1m',
+                    timestamp=base_ts + i * 60000,
+                    open=100, high=105, low=95, close=100, volume=1000,
+                    verified_at=now_ms
+                ))
+            db.session.commit()
+
+            candles = get_1m_candles_for_aggregation(test_symbol, '5m', base_ts)
+            assert candles is None
 
 
 class TestVerificationStats:
@@ -527,75 +773,88 @@ class TestVerificationStats:
             assert stats['unverified'] == 5
 
 
+class TestHierarchicalVerification:
+    """Test that aggregated candles are only verified after 1m."""
+
+    def test_1m_must_complete_before_aggregated(self, app, test_symbol):
+        """1m verification must complete before aggregated starts."""
+        with app.app_context():
+            # Use 5m-aligned timestamp
+            base_ts = 1699999800000
+
+            # Create 10 1m candles (unverified)
+            for i in range(10):
+                db.session.add(Candle(
+                    symbol_id=test_symbol, timeframe='1m',
+                    timestamp=base_ts + i * 60000,
+                    open=100, high=105, low=95, close=100, volume=1000
+                ))
+
+            # Create 2 5m candles (unverified)
+            for i in range(2):
+                db.session.add(Candle(
+                    symbol_id=test_symbol, timeframe='5m',
+                    timestamp=base_ts + i * 300000,
+                    open=100, high=105, low=95, close=100, volume=5000
+                ))
+            db.session.commit()
+
+            symbol = Symbol.query.get(test_symbol)
+
+            # Verify 1m first - should work
+            result_1m = verify_1m_candles(test_symbol, symbol, fix=False)
+            assert result_1m['verified'] == 10
+            assert result_1m['all_done'] is True
+
+            # Now 5m should verify
+            result_5m = verify_aggregated_candles(
+                test_symbol, 'TEST/USDT', '5m', fix=False
+            )
+            assert result_5m['verified'] == 2
+            assert result_5m['skipped'] == 0
+
+
 class TestIntegration:
-    """Integration tests with multiple error scenarios."""
+    """Integration tests with multiple scenarios."""
 
-    def test_error_stops_further_verification(self, app, test_symbol):
-        """Error in middle should leave subsequent candles unverified."""
+    def test_full_verification_workflow(self, app, test_symbol):
+        """Test complete verification from start to finish."""
         with app.app_context():
-            base_ts = 1700000000000
-            # 3 valid
-            for i in range(3):
+            # Use 5m-aligned timestamp
+            base_ts = 1699999800000
+
+            # Create 10 1m candles
+            for i in range(10):
                 db.session.add(Candle(
                     symbol_id=test_symbol, timeframe='1m',
                     timestamp=base_ts + i * 60000,
-                    open=100, high=101, low=99, close=100, volume=1000
+                    open=100, high=105, low=95, close=100, volume=1000
                 ))
-            # 1 invalid
-            db.session.add(Candle(
-                symbol_id=test_symbol, timeframe='1m',
-                timestamp=base_ts + 3 * 60000,
-                open=100, high=95, low=105, close=100, volume=1000
-            ))
-            # 3 more valid
-            for i in range(4, 7):
+
+            # Create 2 matching 5m candles
+            for i in range(2):
                 db.session.add(Candle(
-                    symbol_id=test_symbol, timeframe='1m',
-                    timestamp=base_ts + i * 60000,
-                    open=100, high=101, low=99, close=100, volume=1000
+                    symbol_id=test_symbol, timeframe='5m',
+                    timestamp=base_ts + i * 300000,
+                    open=100, high=105, low=95, close=100, volume=5000
                 ))
             db.session.commit()
 
-            result = verify_candles_incremental(test_symbol, '1m', fix=False)
-            assert result['verified'] == 3
-            assert result['error']['type'] == 'ohlcv_invalid'
+            symbol = Symbol.query.get(test_symbol)
 
-            # Check stats - 4 should be unverified (invalid + 3 after)
-            stats = get_verification_stats(test_symbol, '1m')
-            assert stats['verified'] == 3
-            assert stats['unverified'] == 4
+            # Step 1: Verify 1m
+            result_1m = verify_1m_candles(test_symbol, symbol, fix=False)
+            assert result_1m['all_done'] is True
 
-    def test_fix_and_continue(self, app, test_symbol):
-        """After fixing error, should be able to continue verification."""
-        with app.app_context():
-            base_ts = 1700000000000
-            # 3 valid
-            for i in range(3):
-                db.session.add(Candle(
-                    symbol_id=test_symbol, timeframe='1m',
-                    timestamp=base_ts + i * 60000,
-                    open=100, high=101, low=99, close=100, volume=1000
-                ))
-            # 1 invalid
-            db.session.add(Candle(
-                symbol_id=test_symbol, timeframe='1m',
-                timestamp=base_ts + 3 * 60000,
-                open=100, high=95, low=105, close=100, volume=1000
-            ))
-            # 3 more valid (but now minute 4 is missing after deletion!)
-            for i in range(4, 7):
-                db.session.add(Candle(
-                    symbol_id=test_symbol, timeframe='1m',
-                    timestamp=base_ts + i * 60000,
-                    open=100, high=101, low=99, close=100, volume=1000
-                ))
-            db.session.commit()
+            # Step 2: Verify 5m
+            result_5m = verify_aggregated_candles(
+                test_symbol, 'TEST/USDT', '5m', fix=False
+            )
+            assert result_5m['all_done'] is True
 
-            # First run with fix - deletes invalid, verifies first 3
-            result1 = verify_candles_incremental(test_symbol, '1m', fix=True)
-            assert result1['verified'] == 3
-            assert result1['error']['action'] == 'deleted'
+            # Check final stats
+            stats_1m = get_verification_stats(test_symbol, '1m')
+            assert stats_1m['verified'] == 10
 
-            # Second run - now there's a gap!
-            result2 = verify_candles_incremental(test_symbol, '1m', fix=False)
-            assert result2['error']['type'] == 'gap'
+            stats_5m = get_verification_stats(test_symbol, '5m')
+            assert stats_5m['verified'] == 2

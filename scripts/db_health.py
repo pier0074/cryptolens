@@ -1,43 +1,43 @@
 #!/usr/bin/env python
 """
-Database Health Check for Candle Data (Incremental Verification)
+Database Health Check for Candle Data (Hierarchical Verification)
 
-Checks candles sequentially from first unverified, marks them verified on success.
-When an error is found, stops - all subsequent candles remain unverified.
+VERIFICATION ORDER (Critical):
+1. First, verify ALL 1m candles - these are the source of truth
+2. Only after 1m candles are verified, verify aggregated timeframes
+3. Aggregated candles are recalculated from 1m and compared
 
 Checks:
 1. Gap detection - missing candles in sequence
 2. Timestamp alignment - higher TFs at correct boundaries
 3. OHLCV sanity - high >= low, high >= open/close, etc.
-4. Continuity - open should equal previous candle's close
+4. Aggregation accuracy - recalculate from 1m and compare
 
 Usage:
-  python scripts/db_health.py                    # Report only (incremental)
-  python scripts/db_health.py --fix              # Auto-fix: delete bad, fetch missing, re-aggregate
+  python scripts/db_health.py                    # Report only (one batch)
+  python scripts/db_health.py --fix              # Fix issues in one batch
+  python scripts/db_health.py --until-done       # Run until all verified or error
+  python scripts/db_health.py --until-done --fix # Run continuously with fixes
   python scripts/db_health.py --symbol BTC/USDT  # Check specific symbol
   python scripts/db_health.py --reset            # Reset all verification flags
-  python scripts/db_health.py --reset --fix      # Reset then re-verify everything with fix
-  python scripts/db_health.py --accept-gaps      # Mark current gaps as known (exchange had no data)
-  python scripts/db_health.py --show-gaps        # Show all known/accepted gaps
-  python scripts/db_health.py --clear-gaps       # Clear all known gaps (to re-check them)
-  python scripts/db_health.py --quiet            # Only show summary output
+  python scripts/db_health.py --batch-size week  # Use week-sized batches (default)
+  python scripts/db_health.py --batch-size day   # Use day-sized batches
 
 Options:
   --fix              Auto-fix issues (delete bad candles, fetch missing, re-aggregate)
+  --until-done       Run continuously until all candles verified or unfixable error
+  --max-iterations N Maximum iterations in until-done mode (default: unlimited)
+  --batch-size SIZE  Batch size: 'day' (1440) or 'week' (10080, default)
   --symbol, -s SYM   Check specific symbol only (e.g., BTC/USDT)
-  --reset            Reset all verification flags (mark all as unverified)
-  --accept-gaps      Mark all currently detected gaps as accepted
+  --reset            Reset all verification flags
+  --accept-gaps      Mark current gaps as accepted
   --show-gaps        Show all known/accepted gaps
-  --clear-gaps       Clear all known gaps (allows re-checking)
-  --quiet, -q        Only show summary (less verbose output)
+  --clear-gaps       Clear all known gaps
+  --quiet, -q        Only show summary
 
-Gap Handling:
-  --fix will attempt to fetch missing 1m candles from the exchange.
-  If the exchange returns no data, the gap is marked as "known" (legitimate).
-  Higher timeframes are re-aggregated after filling gaps.
-
-Cron (optional, daily):
-  0 3 * * * cd /path && venv/bin/python scripts/db_health.py --fix
+Batch Sizes:
+  day  = 1440 candles  (60 min * 24 hours)
+  week = 10080 candles (1440 * 7 days)
 """
 import sys
 import os
@@ -55,6 +55,12 @@ from app.models import Symbol, Candle, KnownGap
 
 # Import shared retry utilities
 from scripts.utils.retry import async_retry_call
+
+# Meaningful batch sizes
+BATCH_SIZES = {
+    'day': 1440,    # 60 minutes * 24 hours
+    'week': 10080,  # 1440 * 7 days
+}
 
 # Timeframe intervals in milliseconds
 TF_MS = {
@@ -78,6 +84,20 @@ TF_ALIGNMENT_MOD = {
     '4h': 240,
     '1d': 1440,
 }
+
+# Number of 1m candles per aggregated candle
+TF_1M_COUNT = {
+    '5m': 5,
+    '15m': 15,
+    '30m': 30,
+    '1h': 60,
+    '2h': 120,
+    '4h': 240,
+    '1d': 1440,
+}
+
+# Aggregated timeframes in order
+AGGREGATED_TFS = ['5m', '15m', '30m', '1h', '2h', '4h', '1d']
 
 
 def check_candle_ohlcv(candle):
@@ -122,15 +142,6 @@ def check_gap(prev_candle, curr_candle, interval_ms):
     return 0
 
 
-def check_continuity(prev_candle, curr_candle, threshold=0.001):
-    """Check if current open equals previous close. Returns diff % if exceeded."""
-    if prev_candle.close > 0:
-        diff_pct = abs(curr_candle.open - prev_candle.close) / prev_candle.close
-        if diff_pct > threshold:
-            return diff_pct
-    return None
-
-
 def is_known_gap(symbol_id, timeframe, gap_start, gap_end):
     """Check if a gap is already known/accepted."""
     return KnownGap.query.filter(
@@ -141,13 +152,92 @@ def is_known_gap(symbol_id, timeframe, gap_start, gap_end):
     ).first() is not None
 
 
-async def fetch_missing_candles(symbol_name, gap_start_ms, gap_end_ms, verbose=False):
+def get_1m_candles_for_aggregation(symbol_id, timeframe, agg_timestamp):
     """
-    Fetch missing 1m candles from exchange for a gap.
+    Get the 1m candles that should aggregate into a specific aggregated candle.
 
-    Returns:
-        list: OHLCV data if found, empty list if exchange has no data
+    Returns: list of Candle objects, or None if not all 1m candles are verified
     """
+    interval_ms = TF_MS[timeframe]
+    count = TF_1M_COUNT[timeframe]
+
+    # The aggregated candle timestamp marks the START of the period
+    start_ts = agg_timestamp
+    end_ts = agg_timestamp + interval_ms - 60000  # Last 1m candle in the period
+
+    # Get all 1m candles in this range
+    candles_1m = Candle.query.filter(
+        Candle.symbol_id == symbol_id,
+        Candle.timeframe == '1m',
+        Candle.timestamp >= start_ts,
+        Candle.timestamp <= end_ts
+    ).order_by(Candle.timestamp).all()
+
+    # Check if all are verified
+    if len(candles_1m) != count:
+        return None  # Missing 1m candles
+
+    for c in candles_1m:
+        if c.verified_at is None:
+            return None  # Unverified 1m candle
+
+    return candles_1m
+
+
+def calculate_aggregated_ohlcv(candles_1m):
+    """
+    Calculate what the aggregated OHLCV should be from 1m candles.
+
+    Returns: dict with open, high, low, close, volume
+    """
+    if not candles_1m:
+        return None
+
+    return {
+        'open': candles_1m[0].open,
+        'high': max(c.high for c in candles_1m),
+        'low': min(c.low for c in candles_1m),
+        'close': candles_1m[-1].close,
+        'volume': sum(c.volume for c in candles_1m),
+    }
+
+
+def validate_aggregated_candle(candle, candles_1m, tolerance=0.0001):
+    """
+    Validate an aggregated candle by recalculating from 1m data.
+
+    Returns: list of problems, empty if valid
+    """
+    expected = calculate_aggregated_ohlcv(candles_1m)
+    if not expected:
+        return ['cannot_calculate']
+
+    problems = []
+
+    # Compare with tolerance for floating point
+    if abs(candle.open - expected['open']) / max(expected['open'], 0.0001) > tolerance:
+        problems.append(f"open mismatch: {candle.open} vs {expected['open']}")
+
+    if abs(candle.high - expected['high']) / max(expected['high'], 0.0001) > tolerance:
+        problems.append(f"high mismatch: {candle.high} vs {expected['high']}")
+
+    if abs(candle.low - expected['low']) / max(expected['low'], 0.0001) > tolerance:
+        problems.append(f"low mismatch: {candle.low} vs {expected['low']}")
+
+    if abs(candle.close - expected['close']) / max(expected['close'], 0.0001) > tolerance:
+        problems.append(f"close mismatch: {candle.close} vs {expected['close']}")
+
+    # Volume can have larger variance
+    if expected['volume'] > 0:
+        vol_diff = abs(candle.volume - expected['volume']) / expected['volume']
+        if vol_diff > 0.01:  # 1% tolerance for volume
+            problems.append(f"volume mismatch: {candle.volume} vs {expected['volume']}")
+
+    return problems
+
+
+async def fetch_missing_candles(symbol_name, gap_start_ms, gap_end_ms, verbose=False):
+    """Fetch missing 1m candles from exchange for a gap."""
     exchange = ccxt_async.binance({
         'enableRateLimit': True,
         'options': {'defaultType': 'spot'}
@@ -169,18 +259,15 @@ async def fetch_missing_candles(symbol_name, gap_start_ms, gap_end_ms, verbose=F
             if not batch:
                 break
 
-            # Filter to only include candles within our gap range
             for candle in batch:
                 if gap_start_ms <= candle[0] <= gap_end_ms:
                     all_ohlcv.append(candle)
 
-            # Move to next batch
             if batch:
                 since = batch[-1][0] + 60000
             else:
                 break
 
-            # Small delay between batches
             if len(batch) == 1000:
                 await asyncio.sleep(0.2)
 
@@ -191,12 +278,7 @@ async def fetch_missing_candles(symbol_name, gap_start_ms, gap_end_ms, verbose=F
 
 
 def save_fetched_candles(symbol_id, ohlcv, verbose=False):
-    """
-    Save fetched candles to database.
-
-    Returns:
-        int: Number of new candles saved
-    """
+    """Save fetched candles to database."""
     if not ohlcv:
         return 0
 
@@ -241,13 +323,11 @@ def record_known_gap(symbol_id, timeframe, gap_start, gap_end, missing_candles,
     ).first()
 
     if existing:
-        # Update existing
         existing.gap_end = gap_end
         existing.missing_candles = missing_candles
         existing.reason = reason
         existing.verified_empty = verified_empty
     else:
-        # Create new
         db.session.add(KnownGap(
             symbol_id=symbol_id,
             timeframe=timeframe,
@@ -261,58 +341,65 @@ def record_known_gap(symbol_id, timeframe, gap_start, gap_end, missing_candles,
     db.session.commit()
 
 
-def reaggregate_timeframes(symbol_name, verbose=False):
-    """Re-aggregate all higher timeframes for a symbol."""
-    from app.services.aggregator import aggregate_candles
+def reaggregate_candle(symbol_id, symbol_name, timeframe, timestamp, candles_1m):
+    """Re-aggregate a single candle from 1m data."""
+    expected = calculate_aggregated_ohlcv(candles_1m)
+    if not expected:
+        return False
 
-    timeframes = ['5m', '15m', '30m', '1h', '2h', '4h', '1d']
-    for tf in timeframes:
-        try:
-            aggregate_candles(symbol_name, '1m', tf)
-            if verbose:
-                print(f"    Re-aggregated {tf}")
-        except Exception as e:
-            if verbose:
-                print(f"    Failed to aggregate {tf}: {e}")
+    # Find and update or create the aggregated candle
+    candle = Candle.query.filter_by(
+        symbol_id=symbol_id,
+        timeframe=timeframe,
+        timestamp=timestamp
+    ).first()
+
+    if candle:
+        candle.open = expected['open']
+        candle.high = expected['high']
+        candle.low = expected['low']
+        candle.close = expected['close']
+        candle.volume = expected['volume']
+        candle.verified_at = None  # Will be re-verified
+    else:
+        db.session.add(Candle(
+            symbol_id=symbol_id,
+            timeframe=timeframe,
+            timestamp=timestamp,
+            open=expected['open'],
+            high=expected['high'],
+            low=expected['low'],
+            close=expected['close'],
+            volume=expected['volume']
+        ))
+
+    db.session.commit()
+    return True
 
 
 async def fix_gap(symbol, gap_start, gap_end, missing_candles, verbose=False):
-    """
-    Attempt to fix a gap by fetching from exchange.
-
-    Returns:
-        dict with 'action' ('filled', 'marked_empty', 'error') and details
-    """
+    """Attempt to fix a gap by fetching from exchange."""
     if verbose:
         print(f"    Attempting to fetch {missing_candles} missing candles...")
 
     try:
-        # Fetch missing data
         ohlcv = await fetch_missing_candles(symbol.symbol, gap_start, gap_end, verbose)
 
         if ohlcv:
-            # Save fetched candles
             saved = save_fetched_candles(symbol.id, ohlcv, verbose)
 
             if saved > 0:
-                # Re-aggregate higher timeframes
-                if verbose:
-                    print(f"    Re-aggregating higher timeframes...")
-                reaggregate_timeframes(symbol.symbol, verbose)
-
                 return {
                     'action': 'filled',
                     'candles_fetched': len(ohlcv),
                     'candles_saved': saved
                 }
             else:
-                # All fetched candles already existed
                 return {
                     'action': 'already_exists',
                     'candles_fetched': len(ohlcv)
                 }
         else:
-            # Exchange has no data - mark as known gap
             record_known_gap(
                 symbol.id, '1m', gap_start, gap_end, missing_candles,
                 reason='no_exchange_data', verified_empty=True
@@ -331,50 +418,56 @@ async def fix_gap(symbol, gap_start, gap_end, missing_candles, verbose=False):
         }
 
 
-def verify_candles_incremental(symbol_id, timeframe, fix=False, batch_size=10000, verbose=True, symbol=None):
+def verify_1m_candles(symbol_id, symbol, fix=False, batch_size=10080, verbose=True):
     """
-    Verify candles incrementally for a symbol/timeframe.
+    Verify 1m candles only.
 
     Returns dict with:
         - verified: number of newly verified candles
         - error: dict describing first error found (or None)
-        - stopped_at: timestamp where verification stopped (or None)
+        - remaining: number of unverified candles remaining
+        - all_done: True if all 1m candles are verified
     """
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-    interval_ms = TF_MS.get(timeframe, 60000)
+    interval_ms = TF_MS['1m']
 
-    # Get the last verified candle timestamp to find where to start
+    # Get the last verified 1m candle
     last_verified = Candle.query.filter(
         Candle.symbol_id == symbol_id,
-        Candle.timeframe == timeframe,
+        Candle.timeframe == '1m',
         Candle.verified_at.isnot(None)
     ).order_by(Candle.timestamp.desc()).first()
 
-    # Start from after last verified, or from the beginning
     start_ts = last_verified.timestamp if last_verified else 0
 
-    # Get unverified candles in order
+    # Get unverified 1m candles
     unverified = Candle.query.filter(
         Candle.symbol_id == symbol_id,
-        Candle.timeframe == timeframe,
+        Candle.timeframe == '1m',
         Candle.timestamp > start_ts,
         Candle.verified_at.is_(None)
     ).order_by(Candle.timestamp).limit(batch_size).all()
 
     if not unverified:
-        return {'verified': 0, 'error': None, 'stopped_at': None}
+        # Check total remaining
+        total_remaining = Candle.query.filter(
+            Candle.symbol_id == symbol_id,
+            Candle.timeframe == '1m',
+            Candle.verified_at.is_(None)
+        ).count()
+        return {
+            'verified': 0,
+            'error': None,
+            'remaining': total_remaining,
+            'all_done': total_remaining == 0
+        }
 
-    # Need previous candle for gap/continuity checks
     prev_candle = last_verified
-    if not prev_candle and start_ts == 0:
-        # First candle - can't check gap/continuity, but can check OHLCV/alignment
-        pass
-
     verified_count = 0
     error_found = None
     candles_to_verify = []
 
-    for i, candle in enumerate(unverified):
+    for candle in unverified:
         # 1. Check OHLCV sanity
         ohlcv_problems = check_candle_ohlcv(candle)
         if ohlcv_problems:
@@ -390,30 +483,15 @@ def verify_candles_incremental(symbol_id, timeframe, fix=False, batch_size=10000
                 error_found['action'] = 'deleted'
             break
 
-        # 2. Check alignment (for non-1m timeframes)
-        if not check_candle_alignment(candle):
-            error_found = {
-                'type': 'misaligned',
-                'timestamp': candle.timestamp,
-                'expected_mod': TF_ALIGNMENT_MOD.get(timeframe),
-                'candle_id': candle.id
-            }
-            if fix:
-                db.session.delete(candle)
-                db.session.commit()
-                error_found['action'] = 'deleted'
-            break
-
-        # 3. Check gap (if we have a previous candle)
+        # 2. Check gap (if we have a previous candle)
         if prev_candle:
             missing = check_gap(prev_candle, candle, interval_ms)
             if missing > 0:
                 gap_start = prev_candle.timestamp + interval_ms
                 gap_end = candle.timestamp - interval_ms
 
-                # Check if this is a known gap
-                if is_known_gap(symbol_id, timeframe, gap_start, gap_end):
-                    # Known gap - skip and continue verification
+                # Check if known gap
+                if is_known_gap(symbol_id, '1m', gap_start, gap_end):
                     candles_to_verify.append(candle)
                     prev_candle = candle
                     continue
@@ -427,36 +505,22 @@ def verify_candles_incremental(symbol_id, timeframe, fix=False, batch_size=10000
                     'missing_candles': missing
                 }
 
-                # For 1m gaps with fix=True, try to fetch from exchange
-                if fix and timeframe == '1m' and symbol:
+                if fix and symbol:
                     fix_result = asyncio.run(fix_gap(symbol, gap_start, gap_end, missing, verbose))
                     error_found['fix_result'] = fix_result
 
                     if fix_result['action'] == 'filled':
-                        # Gap was filled - continue verification from this point
-                        # (need to re-run to pick up new candles)
                         error_found['action'] = 'filled'
                     elif fix_result['action'] == 'marked_empty':
-                        # Gap is legitimate - skip and continue
                         candles_to_verify.append(candle)
                         prev_candle = candle
-                        error_found = None  # Clear error since we handled it
+                        error_found = None
                         continue
                     elif fix_result['action'] == 'already_exists':
-                        # Candles exist but weren't found in our query - re-run needed
                         error_found['action'] = 'needs_rerun'
 
                 break
 
-        # 4. Check continuity (if we have a previous consecutive candle)
-        if prev_candle and candle.timestamp - prev_candle.timestamp == interval_ms:
-            diff_pct = check_continuity(prev_candle, candle)
-            if diff_pct is not None:
-                # Continuity errors are informational (crypto can gap)
-                # We don't stop for these, just note them
-                pass  # Could log if verbose
-
-        # Candle passed all checks - mark for verification
         candles_to_verify.append(candle)
         prev_candle = candle
 
@@ -467,11 +531,135 @@ def verify_candles_incremental(symbol_id, timeframe, fix=False, batch_size=10000
         db.session.commit()
         verified_count = len(candles_to_verify)
 
+    # Get remaining count
+    remaining = Candle.query.filter(
+        Candle.symbol_id == symbol_id,
+        Candle.timeframe == '1m',
+        Candle.verified_at.is_(None)
+    ).count()
+
     return {
         'verified': verified_count,
         'error': error_found,
-        'stopped_at': error_found['timestamp'] if error_found and 'timestamp' in error_found else None,
-        'remaining': len(unverified) - verified_count - (1 if error_found else 0)
+        'remaining': remaining,
+        'all_done': remaining == 0 and error_found is None
+    }
+
+
+def verify_aggregated_candles(symbol_id, symbol_name, timeframe, fix=False, batch_size=1000, verbose=True):
+    """
+    Verify aggregated candles by recalculating from 1m data.
+
+    Only verifies candles where ALL underlying 1m candles are verified.
+    """
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # Get unverified aggregated candles
+    unverified = Candle.query.filter(
+        Candle.symbol_id == symbol_id,
+        Candle.timeframe == timeframe,
+        Candle.verified_at.is_(None)
+    ).order_by(Candle.timestamp).limit(batch_size).all()
+
+    if not unverified:
+        remaining = Candle.query.filter(
+            Candle.symbol_id == symbol_id,
+            Candle.timeframe == timeframe,
+            Candle.verified_at.is_(None)
+        ).count()
+        return {
+            'verified': 0,
+            'skipped': 0,
+            'error': None,
+            'remaining': remaining,
+            'all_done': remaining == 0
+        }
+
+    verified_count = 0
+    skipped_count = 0
+    error_found = None
+    candles_to_verify = []
+
+    for candle in unverified:
+        # Get underlying 1m candles
+        candles_1m = get_1m_candles_for_aggregation(symbol_id, timeframe, candle.timestamp)
+
+        if candles_1m is None:
+            # 1m candles not ready yet - skip
+            skipped_count += 1
+            continue
+
+        # Validate OHLCV sanity first
+        ohlcv_problems = check_candle_ohlcv(candle)
+        if ohlcv_problems:
+            error_found = {
+                'type': 'ohlcv_invalid',
+                'timestamp': candle.timestamp,
+                'problems': ohlcv_problems,
+                'candle_id': candle.id
+            }
+            if fix:
+                # Re-aggregate from 1m
+                if reaggregate_candle(symbol_id, symbol_name, timeframe, candle.timestamp, candles_1m):
+                    error_found['action'] = 'reaggregated'
+                else:
+                    db.session.delete(candle)
+                    db.session.commit()
+                    error_found['action'] = 'deleted'
+            break
+
+        # Validate aggregation accuracy
+        agg_problems = validate_aggregated_candle(candle, candles_1m)
+        if agg_problems:
+            error_found = {
+                'type': 'aggregation_mismatch',
+                'timestamp': candle.timestamp,
+                'problems': agg_problems,
+                'candle_id': candle.id
+            }
+            if fix:
+                # Re-aggregate from 1m
+                if reaggregate_candle(symbol_id, symbol_name, timeframe, candle.timestamp, candles_1m):
+                    error_found['action'] = 'reaggregated'
+                    error_found = None  # Fixed, continue
+                    continue
+            break
+
+        # Check alignment
+        if not check_candle_alignment(candle):
+            error_found = {
+                'type': 'misaligned',
+                'timestamp': candle.timestamp,
+                'expected_mod': TF_ALIGNMENT_MOD.get(timeframe),
+                'candle_id': candle.id
+            }
+            if fix:
+                db.session.delete(candle)
+                db.session.commit()
+                error_found['action'] = 'deleted'
+            break
+
+        candles_to_verify.append(candle)
+
+    # Mark verified
+    if candles_to_verify:
+        for candle in candles_to_verify:
+            candle.verified_at = now_ms
+        db.session.commit()
+        verified_count = len(candles_to_verify)
+
+    remaining = Candle.query.filter(
+        Candle.symbol_id == symbol_id,
+        Candle.timeframe == timeframe,
+        Candle.verified_at.is_(None)
+    ).count()
+
+    return {
+        'verified': verified_count,
+        'skipped': skipped_count,
+        'error': error_found,
+        'remaining': remaining,
+        'all_done': remaining == 0 and error_found is None
     }
 
 
@@ -504,24 +692,21 @@ def reset_verification(symbol_id=None, timeframe=None):
     return count
 
 
-def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False, app=None):
+def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False,
+                     until_done=False, max_iterations=None, batch_size='week', app=None):
     """
-    Run incremental health checks.
+    Run hierarchical health checks.
 
-    Args:
-        symbol_filter: Check only this symbol (e.g., 'BTC/USDT')
-        fix: Auto-fix issues (delete bad candles)
-        verbose: Print detailed output
-        reset: Reset all verification flags
-        app: Optional Flask app instance. If None, creates a new app.
-             Pass existing app when calling from within app context.
+    Order:
+    1. Verify all 1m candles first
+    2. Only then verify aggregated timeframes
     """
-    # Create app only if not provided (avoids nested contexts)
+    batch_count = BATCH_SIZES.get(batch_size, 10080)
+
     if app is None:
         app = create_app()
         context_manager = app.app_context()
     else:
-        # Use a null context manager when app is provided
         from contextlib import nullcontext
         context_manager = nullcontext()
 
@@ -535,120 +720,137 @@ def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False, a
             print(f"No symbols found{' matching ' + symbol_filter if symbol_filter else ''}")
             return
 
-        # Handle reset flag
         if reset:
             print("Resetting all verification flags...")
             total_reset = reset_verification()
             print(f"Reset {total_reset} candles.")
-            if not fix:
-                # If only reset (no fix), return here
+            if not fix and not until_done:
                 return
-            print()  # Blank line before continuing with fix
+            print()
 
-        print(f"\n{'='*60}")
-        print(f"  DATABASE HEALTH CHECK - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
-        print(f"  Mode: {'FIX' if fix else 'REPORT ONLY'} (Incremental)")
-        print(f"{'='*60}\n")
-
+        iteration = 0
         total_verified = 0
-        total_errors = defaultdict(int)
-        symbols_with_errors = []
 
-        for symbol in symbols:
-            symbol_output = []
-            symbol_has_error = False
+        while True:
+            iteration += 1
 
-            for tf in ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']:
-                stats = get_verification_stats(symbol.id, tf)
+            if max_iterations and iteration > max_iterations:
+                print(f"\nMax iterations ({max_iterations}) reached.")
+                break
 
-                if stats['total'] == 0:
-                    continue
+            print(f"\n{'='*60}")
+            print(f"  DATABASE HEALTH CHECK - Iteration {iteration}")
+            print(f"  {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
+            print(f"  Mode: {'FIX' if fix else 'REPORT'} | Batch: {batch_size} ({batch_count})")
+            print(f"{'='*60}\n")
 
-                # Run incremental verification (pass symbol for gap fixing)
-                result = verify_candles_incremental(symbol.id, tf, fix=fix, verbose=verbose, symbol=symbol)
+            iteration_verified = 0
+            all_symbols_done = True
+            total_errors = defaultdict(int)
 
-                total_verified += result['verified']
-
-                # Build output line
-                line_parts = []
-
-                if result['verified'] > 0:
-                    line_parts.append(f"verified: {result['verified']}")
-
-                if result['error']:
-                    symbol_has_error = True
-                    err = result['error']
-                    err_type = err['type']
-                    total_errors[err_type] += 1
-
-                    if err_type == 'gap':
-                        gap_msg = f"GAP: {err['missing_candles']} missing after {err['after_timestamp']}"
-                        if 'action' in err:
-                            gap_msg += f" ({err['action']})"
-                        elif 'fix_result' in err:
-                            gap_msg += f" ({err['fix_result'].get('action', 'unknown')})"
-                        line_parts.append(gap_msg)
-                    elif err_type == 'ohlcv_invalid':
-                        action = f" ({err.get('action', 'found')})" if fix else ""
-                        line_parts.append(f"OHLCV: {', '.join(err['problems'])}{action}")
-                    elif err_type == 'misaligned':
-                        action = f" ({err.get('action', 'found')})" if fix else ""
-                        line_parts.append(f"MISALIGNED: ts={err['timestamp']}{action}")
-
-                # Show remaining unverified
-                new_stats = get_verification_stats(symbol.id, tf)
-                if new_stats['unverified'] > 0:
-                    line_parts.append(f"remaining: {new_stats['unverified']}")
-
-                if line_parts:
-                    symbol_output.append(f"  {tf}: {', '.join(line_parts)}")
-
-            if symbol_output and verbose:
-                print(f"{symbol.symbol}:")
-                for line in symbol_output:
-                    print(line)
-                print()
-
-            if symbol_has_error:
-                symbols_with_errors.append(symbol.symbol)
-
-        # Summary
-        print(f"{'='*60}")
-        print("  SUMMARY")
-        print(f"{'='*60}")
-
-        if total_verified > 0:
-            print(f"  Newly verified: {total_verified} candles")
-
-        if total_errors:
-            print(f"  Errors found:")
-            for err_type, count in total_errors.items():
-                print(f"    - {err_type}: {count}")
-            print(f"  Symbols with errors: {', '.join(symbols_with_errors)}")
-        elif total_verified == 0:
-            # Check if everything is already verified
-            total_unverified = 0
             for symbol in symbols:
-                for tf in ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']:
-                    stats = get_verification_stats(symbol.id, tf)
-                    total_unverified += stats['unverified']
+                symbol_output = []
 
-            if total_unverified == 0:
-                print("  All candles verified - no issues found!")
-            else:
-                print(f"  {total_unverified} candles still unverified (run with --fix to continue)")
-        else:
-            print("  No errors found in this batch!")
+                # STEP 1: Verify 1m candles first
+                stats_1m = get_verification_stats(symbol.id, '1m')
+                if stats_1m['total'] > 0:
+                    result_1m = verify_1m_candles(
+                        symbol.id, symbol, fix=fix,
+                        batch_size=batch_count, verbose=verbose
+                    )
+
+                    iteration_verified += result_1m['verified']
+
+                    if result_1m['verified'] > 0 or result_1m['error'] or result_1m['remaining'] > 0:
+                        line = f"  1m: verified {result_1m['verified']}"
+                        if result_1m['remaining'] > 0:
+                            line += f", remaining {result_1m['remaining']}"
+                            all_symbols_done = False
+                        if result_1m['error']:
+                            err = result_1m['error']
+                            total_errors[err['type']] += 1
+                            line += f" | ERROR: {err['type']}"
+                            if 'action' in err:
+                                line += f" ({err['action']})"
+                            all_symbols_done = False
+                        symbol_output.append(line)
+
+                    # Only proceed to aggregated TFs if 1m is fully verified
+                    if not result_1m['all_done']:
+                        if verbose and symbol_output:
+                            print(f"{symbol.symbol}:")
+                            for line in symbol_output:
+                                print(line)
+                            print()
+                        continue
+
+                # STEP 2: Verify aggregated timeframes (only if 1m is done)
+                for tf in AGGREGATED_TFS:
+                    stats = get_verification_stats(symbol.id, tf)
+                    if stats['total'] == 0:
+                        continue
+
+                    result = verify_aggregated_candles(
+                        symbol.id, symbol.symbol, tf, fix=fix,
+                        batch_size=1000, verbose=verbose
+                    )
+
+                    iteration_verified += result['verified']
+
+                    if result['verified'] > 0 or result['skipped'] > 0 or result['error'] or result['remaining'] > 0:
+                        line = f"  {tf}: verified {result['verified']}"
+                        if result['skipped'] > 0:
+                            line += f", skipped {result['skipped']} (1m pending)"
+                        if result['remaining'] > 0:
+                            line += f", remaining {result['remaining']}"
+                            all_symbols_done = False
+                        if result['error']:
+                            err = result['error']
+                            total_errors[err['type']] += 1
+                            line += f" | ERROR: {err['type']}"
+                            if 'action' in err:
+                                line += f" ({err['action']})"
+                        symbol_output.append(line)
+
+                if verbose and symbol_output:
+                    print(f"{symbol.symbol}:")
+                    for line in symbol_output:
+                        print(line)
+                    print()
+
+            total_verified += iteration_verified
+
+            # Summary for this iteration
+            print(f"{'='*60}")
+            print(f"  ITERATION {iteration} SUMMARY")
+            print(f"{'='*60}")
+            print(f"  Verified this iteration: {iteration_verified}")
+            print(f"  Total verified: {total_verified}")
+
+            if total_errors:
+                print(f"  Errors: {dict(total_errors)}")
+
+            if all_symbols_done:
+                print("\n  ALL CANDLES VERIFIED!")
+                break
+
+            if not until_done:
+                remaining_1m = sum(
+                    get_verification_stats(s.id, '1m')['unverified']
+                    for s in symbols
+                )
+                print(f"\n  Remaining 1m candles: {remaining_1m}")
+                print(f"  Run with --until-done to continue automatically")
+                break
+
+            print(f"\n  Continuing to next iteration...")
 
         print()
-        return {'verified': total_verified, 'errors': dict(total_errors)}
+        return {'verified': total_verified, 'iterations': iteration}
 
 
 def accept_current_gaps(symbol_filter=None, verbose=True):
-    """
-    Mark all currently detected gaps as accepted/known.
-    Use this when you've verified the exchange has no data for those periods.
-    """
+    """Mark all currently detected gaps as accepted/known."""
     app = create_app()
 
     with app.app_context():
@@ -668,10 +870,9 @@ def accept_current_gaps(symbol_filter=None, verbose=True):
         total_gaps = 0
 
         for symbol in symbols:
-            for tf in ['1m', '5m', '15m', '30m', '1h', '2h', '4h', '1d']:
+            for tf in ['1m'] + AGGREGATED_TFS:
                 interval_ms = TF_MS.get(tf, 60000)
 
-                # Get all candles in order
                 candles = Candle.query.filter_by(
                     symbol_id=symbol.id,
                     timeframe=tf
@@ -680,7 +881,6 @@ def accept_current_gaps(symbol_filter=None, verbose=True):
                 if len(candles) < 2:
                     continue
 
-                # Find gaps
                 for i in range(1, len(candles)):
                     prev = candles[i - 1]
                     curr = candles[i]
@@ -690,7 +890,6 @@ def accept_current_gaps(symbol_filter=None, verbose=True):
                         gap_start = prev.timestamp + interval_ms
                         gap_end = curr.timestamp - interval_ms
 
-                        # Check if already known
                         if not is_known_gap(symbol.id, tf, gap_start, gap_end):
                             record_known_gap(
                                 symbol.id, tf, gap_start, gap_end, missing,
@@ -698,8 +897,7 @@ def accept_current_gaps(symbol_filter=None, verbose=True):
                             )
                             total_gaps += 1
                             if verbose:
-                                print(f"  {symbol.symbol} {tf}: Accepted gap of {missing} candles "
-                                      f"({datetime.fromtimestamp(gap_start/1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')})")
+                                print(f"  {symbol.symbol} {tf}: Accepted gap of {missing} candles")
 
         print(f"\n{'='*60}")
         print(f"  Accepted {total_gaps} new gaps")
@@ -765,16 +963,37 @@ def clear_known_gaps(symbol_filter=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Database health check for candle data')
+    parser = argparse.ArgumentParser(
+        description='Database health check for candle data (hierarchical verification)',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  python scripts/db_health.py                        # Report one batch
+  python scripts/db_health.py --fix                  # Fix one batch
+  python scripts/db_health.py --until-done --fix     # Fix everything
+  python scripts/db_health.py --reset --until-done --fix  # Full re-verify
+        """
+    )
     parser.add_argument('--fix', action='store_true',
-                        help='Auto-fix: delete bad candles, fetch missing 1m data, re-aggregate')
-    parser.add_argument('--symbol', '-s', type=str, help='Check specific symbol (e.g., BTC/USDT)')
-    parser.add_argument('--quiet', '-q', action='store_true', help='Only show summary')
-    parser.add_argument('--reset', action='store_true', help='Reset all verification flags')
+                        help='Auto-fix: delete bad candles, fetch missing, re-aggregate')
+    parser.add_argument('--until-done', action='store_true',
+                        help='Run continuously until all verified or unfixable error')
+    parser.add_argument('--max-iterations', type=int, default=None,
+                        help='Max iterations in until-done mode')
+    parser.add_argument('--batch-size', choices=['day', 'week'], default='week',
+                        help='Batch size: day (1440) or week (10080, default)')
+    parser.add_argument('--symbol', '-s', type=str,
+                        help='Check specific symbol (e.g., BTC/USDT)')
+    parser.add_argument('--quiet', '-q', action='store_true',
+                        help='Only show summary')
+    parser.add_argument('--reset', action='store_true',
+                        help='Reset all verification flags')
     parser.add_argument('--accept-gaps', action='store_true',
-                        help='Mark current gaps as accepted (exchange has no data)')
-    parser.add_argument('--show-gaps', action='store_true', help='Show all known/accepted gaps')
-    parser.add_argument('--clear-gaps', action='store_true', help='Clear all known gaps')
+                        help='Mark current gaps as accepted')
+    parser.add_argument('--show-gaps', action='store_true',
+                        help='Show all known/accepted gaps')
+    parser.add_argument('--clear-gaps', action='store_true',
+                        help='Clear all known gaps')
     args = parser.parse_args()
 
     if args.show_gaps:
@@ -788,7 +1007,10 @@ def main():
             symbol_filter=args.symbol,
             fix=args.fix,
             verbose=not args.quiet,
-            reset=args.reset
+            reset=args.reset,
+            until_done=args.until_done,
+            max_iterations=args.max_iterations,
+            batch_size=args.batch_size
         )
 
 
