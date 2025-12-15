@@ -222,8 +222,9 @@ class Signal(db.Model):
     timeframes_aligned = db.Column(db.Text, nullable=True)  # JSON array of aligned TFs
     pattern_id = db.Column(db.Integer, db.ForeignKey('patterns.id', ondelete='CASCADE'), nullable=True)
     status = db.Column(db.String(15), default='pending')  # 'pending', 'notified', 'filled', 'stopped', 'tp_hit'
-    created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
-    notified_at = db.Column(db.DateTime, nullable=True)
+    # Timestamps in milliseconds (consistent with Candle.timestamp and Pattern.detected_at)
+    created_at = db.Column(db.BigInteger, default=lambda: int(datetime.now(timezone.utc).timestamp() * 1000))
+    notified_at = db.Column(db.BigInteger, nullable=True)  # Timestamp when notification sent (ms)
 
     # Relationship - signals are deleted when pattern is deleted
     pattern = db.relationship('Pattern', backref=db.backref('signals', cascade='all, delete-orphan',
@@ -231,10 +232,32 @@ class Signal(db.Model):
 
     __table_args__ = (
         db.Index('idx_signal_symbol', 'symbol_id'),
+        db.Index('idx_signal_created', 'created_at'),
     )
 
     def __repr__(self):
         return f'<Signal {self.direction} {self.symbol_id}>'
+
+    @property
+    def created_at_formatted(self):
+        """Return human-readable created_at timestamp."""
+        if self.created_at:
+            return datetime.fromtimestamp(self.created_at / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')
+        return None
+
+    @property
+    def created_at_datetime(self):
+        """Return created_at as datetime object (for comparisons)."""
+        if self.created_at:
+            return datetime.fromtimestamp(self.created_at / 1000, tz=timezone.utc)
+        return None
+
+    @property
+    def notified_at_formatted(self):
+        """Return human-readable notified_at timestamp."""
+        if self.notified_at:
+            return datetime.fromtimestamp(self.notified_at / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')
+        return None
 
     def to_dict(self):
         return {
@@ -249,7 +272,8 @@ class Signal(db.Model):
             'risk_reward': self.risk_reward,
             'confluence_score': self.confluence_score,
             'status': self.status,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'created_at': self.created_at,
+            'created_at_formatted': self.created_at_formatted
         }
 
 

@@ -259,7 +259,7 @@ def notify_signal(signal: Signal, test_mode: bool = False, current_price: float 
     # Update signal status
     if success:
         signal.status = 'notified'
-        signal.notified_at = datetime.now(timezone.utc)
+        signal.notified_at = int(datetime.now(timezone.utc).timestamp() * 1000)
         log_notify(
             f"Sent {direction_text} signal: {pattern_type} [{pattern_tf}] Entry ${entry:,.4f}{entry_pct}",
             symbol=symbol_name,
@@ -591,7 +591,7 @@ def notify_all_subscribers(signal: Signal, test_mode: bool = False,
     # Update signal status
     if success_count > 0:
         signal.status = 'notified'
-        signal.notified_at = datetime.now(timezone.utc)
+        signal.notified_at = int(datetime.now(timezone.utc).timestamp() * 1000)
         log_notify(
             f"Sent {direction_text} signal to {success_count}/{len(subscribers)} subscribers: "
             f"{pattern_type} [{pattern_tf}] Entry ${entry:,.4f}{entry_pct}",

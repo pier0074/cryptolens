@@ -242,7 +242,19 @@ def readiness_check():
 @api_bp.route('/symbols')
 @require_api_key
 def get_symbols():
-    """Get all symbols."""
+    """
+    Get all trading symbols.
+
+    Returns a list of all configured trading pairs with their settings.
+    Requires scope: read:symbols
+
+    Query Parameters:
+        active (bool): If true (default), return only active symbols.
+                       If false, return all symbols including inactive.
+
+    Returns:
+        List of symbol objects with id, symbol, exchange, is_active, notify_enabled.
+    """
     active_only = request.args.get('active', 'true').lower() == 'true'
 
     query = Symbol.query
@@ -260,7 +272,22 @@ def get_symbols():
 @api_bp.route('/candles/<symbol>/<timeframe>')
 @require_api_key
 def get_candles(symbol: str, timeframe: str):
-    """Get candles for a symbol/timeframe."""
+    """
+    Get OHLCV candle data for a symbol/timeframe.
+
+    Returns historical price data in chronological order (oldest first).
+    Requires scope: read:candles
+
+    Args:
+        symbol: Trading pair (e.g., 'BTC-USDT' or 'BTC/USDT')
+        timeframe: Candle timeframe (5m, 15m, 30m, 1h, 2h, 4h, 1d)
+
+    Query Parameters:
+        limit (int): Number of candles to return (default: 200, max: 2000)
+
+    Returns:
+        List of candle objects with timestamp, open, high, low, close, volume.
+    """
     # Normalize symbol format
     symbol_normalized = symbol.replace('-', '/')
 
@@ -297,7 +324,21 @@ def get_candles(symbol: str, timeframe: str):
 @api_bp.route('/patterns')
 @require_api_key
 def get_patterns():
-    """Get patterns with optional filters."""
+    """
+    Get detected patterns with optional filters.
+
+    Returns Fair Value Gaps (FVG), Order Blocks, and other pattern types.
+    Requires scope: read:patterns
+
+    Query Parameters:
+        symbol (str): Filter by trading pair (e.g., 'BTC/USDT')
+        timeframe (str): Filter by timeframe (e.g., '1h', '4h')
+        status (str): Filter by status - 'active' (default), 'filled', 'expired'
+        limit (int): Number of patterns to return (default: 100, max: 1000)
+
+    Returns:
+        List of pattern objects with zone_high, zone_low, direction, etc.
+    """
     symbol = request.args.get('symbol')
     timeframe = request.args.get('timeframe')
     status = request.args.get('status', 'active')
@@ -339,7 +380,20 @@ def get_patterns():
 @api_bp.route('/signals')
 @require_api_key
 def get_signals():
-    """Get signals with optional filters."""
+    """
+    Get trade signals with optional filters.
+
+    Returns generated trade signals with entry, stop loss, and take profit levels.
+    Requires scope: read:signals
+
+    Query Parameters:
+        status (str): Filter by status - 'pending', 'notified', 'filled', 'stopped', 'tp_hit'
+        direction (str): Filter by direction - 'long' or 'short'
+        limit (int): Number of signals to return (default: 50, max: 500)
+
+    Returns:
+        List of signal objects with entry_price, stop_loss, take_profit levels, etc.
+    """
     status = request.args.get('status')
     direction = request.args.get('direction')
     limit = min(max(request.args.get('limit', 50, type=int), 1), 500)
@@ -379,7 +433,20 @@ def get_signals():
 @require_api_key
 @cache.cached(timeout=Config.CACHE_TTL_PATTERN_MATRIX, key_prefix='pattern_matrix')
 def get_matrix():
-    """Get the symbol/timeframe pattern matrix (optimized: 1 query instead of 180)."""
+    """
+    Get the symbol/timeframe pattern direction matrix.
+
+    Returns a grid showing the most recent pattern direction for each
+    symbol/timeframe combination. Used for the dashboard heatmap.
+    Requires scope: read:matrix
+
+    Returns:
+        Dict mapping symbol -> timeframe -> direction ('bullish', 'bearish', 'neutral')
+        Meta includes symbol count and available timeframes.
+
+    Note:
+        Results are cached for performance. Cache TTL configured in Config.
+    """
     from sqlalchemy import func
 
     symbols = Symbol.query.filter_by(is_active=True).all()
@@ -432,7 +499,16 @@ def get_matrix():
 @limiter.limit("1 per minute")
 @require_api_key
 def trigger_scan():
-    """Manually trigger a pattern scan."""
+    """
+    Manually trigger a pattern scan across all symbols.
+
+    Scans all active symbols and timeframes for new patterns.
+    Requires scope: write:scan
+    Rate limited: 1 request per minute.
+
+    Returns:
+        Scan results with counts of patterns found/updated.
+    """
     from app.services.patterns import scan_all_patterns
 
     result = scan_all_patterns()
@@ -447,7 +523,20 @@ def trigger_scan():
 @limiter.limit("5 per minute")
 @require_api_key
 def trigger_fetch():
-    """Manually trigger data fetch for a specific symbol/timeframe."""
+    """
+    Manually trigger candle data fetch for a specific symbol/timeframe.
+
+    Fetches the latest candle data from the exchange API.
+    Requires scope: write:fetch
+    Rate limited: 5 requests per minute.
+
+    Request Body (JSON):
+        symbol (str): Trading pair (e.g., 'BTC/USDT') - required
+        timeframe (str): Candle timeframe (e.g., '1h') - required
+
+    Returns:
+        Object with 'candles_fetched' count.
+    """
     data = request.get_json() or {}
     symbol = data.get('symbol')
     timeframe = data.get('timeframe')
@@ -487,7 +576,15 @@ def trigger_fetch():
 @api_bp.route('/scheduler/status')
 @require_api_key
 def scheduler_status():
-    """Get current scheduler status."""
+    """
+    Get current scheduler/cron status.
+
+    Returns information about the background job scheduler configuration.
+    Requires scope: admin:scheduler
+
+    Returns:
+        Object with scheduler mode, status, and cron configuration details.
+    """
     from app.services.scheduler import get_scheduler_status
 
     return ApiResponse.success(get_scheduler_status())
@@ -497,7 +594,16 @@ def scheduler_status():
 @limiter.limit("2 per minute")
 @require_api_key
 def scheduler_start():
-    """Start the background scheduler."""
+    """
+    Start the background scheduler.
+
+    Starts the APScheduler-based background job scheduler.
+    Requires scope: admin:scheduler
+    Rate limited: 2 requests per minute.
+
+    Returns:
+        Updated scheduler status after starting.
+    """
     from app.services.scheduler import start_scheduler, get_scheduler_status
     from flask import current_app
 
@@ -513,7 +619,16 @@ def scheduler_start():
 @limiter.limit("2 per minute")
 @require_api_key
 def scheduler_stop():
-    """Stop the background scheduler."""
+    """
+    Stop the background scheduler.
+
+    Stops the APScheduler-based background job scheduler.
+    Requires scope: admin:scheduler
+    Rate limited: 2 requests per minute.
+
+    Returns:
+        Updated scheduler status after stopping.
+    """
     from app.services.scheduler import stop_scheduler, get_scheduler_status
 
     stop_scheduler()
@@ -528,7 +643,16 @@ def scheduler_stop():
 @limiter.limit("2 per minute")
 @require_api_key
 def scheduler_toggle():
-    """Legacy endpoint - scheduler is now cron-based."""
+    """
+    Legacy endpoint - scheduler is now cron-based.
+
+    This endpoint is deprecated. The scheduler is now managed via system cron.
+    Use POST /api/scan/run to trigger a manual scan instead.
+    Requires scope: admin:scheduler
+
+    Returns:
+        Current scheduler status with deprecation notice.
+    """
     from app.services.scheduler import get_scheduler_status
 
     status = get_scheduler_status()
@@ -541,7 +665,16 @@ def scheduler_toggle():
 @limiter.limit("1 per minute")
 @require_api_key
 def run_scan_now():
-    """Trigger a manual scan."""
+    """
+    Trigger a manual full scan immediately.
+
+    Executes a complete data fetch and pattern scan cycle.
+    Requires scope: write:scan
+    Rate limited: 1 request per minute.
+
+    Returns:
+        Scan execution results with timing and pattern counts.
+    """
     from app.services.scheduler import run_once
 
     result = run_once()

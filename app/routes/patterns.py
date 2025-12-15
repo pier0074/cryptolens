@@ -1,3 +1,8 @@
+"""
+Pattern routes for viewing and analyzing detected patterns.
+
+Provides paginated pattern list with filtering and chart data for visualization.
+"""
 from flask import Blueprint, render_template, request, jsonify
 import json
 from app.models import Symbol, Pattern, Candle, StatsCache
@@ -25,7 +30,21 @@ PATTERNS_PER_PAGE = 50
 @login_required
 @feature_required('patterns_page')
 def index():
-    """Pattern list and visualization with pagination (Pro+ required)"""
+    """
+    Pattern list page with filtering and pagination.
+
+    Displays all detected patterns with support for filtering by symbol,
+    timeframe, and status. Results are paginated and limited by user tier.
+
+    Query Parameters:
+        symbol: Filter by symbol name (e.g., 'BTC/USDT')
+        timeframe: Filter by timeframe (e.g., '1h', '4h')
+        status: Filter by pattern status ('active', 'filled', 'expired')
+        page: Page number for pagination
+
+    Returns:
+        Rendered patterns.html template with filtered, paginated patterns.
+    """
     user = get_current_user()
     symbol_filter = request.args.get('symbol', None)
     timeframe_filter = request.args.get('timeframe', None)
@@ -136,11 +155,23 @@ def index():
 
 @patterns_bp.route('/chart/<symbol>/<timeframe>')
 def chart(symbol, timeframe):
-    """Get chart data with patterns for a specific symbol/timeframe.
+    """
+    Get chart data with patterns for a specific symbol/timeframe.
 
-    Query params:
-        before: timestamp (ms) - fetch candles before this time (for lazy loading)
-        limit: int - override default limit
+    Returns OHLC candle data and active patterns for charting.
+    Supports lazy loading via 'before' parameter for infinite scroll.
+
+    Args:
+        symbol: Trading pair (e.g., 'BTC-USDT' or 'BTC/USDT')
+        timeframe: Candle timeframe (e.g., '1h', '4h', '1d')
+
+    Query Parameters:
+        before: Unix timestamp in ms - fetch candles before this time (lazy loading)
+        limit: Number of candles to return (default varies by timeframe, max 2000)
+
+    Returns:
+        JSON with 'candles' (OHLC data), 'patterns' (active zones),
+        and 'has_more' (boolean for lazy loading indicator)
     """
     sym = Symbol.query.filter_by(symbol=symbol.replace('-', '/')).first()
     if not sym:

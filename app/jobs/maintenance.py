@@ -111,7 +111,7 @@ def update_stats_cache_job() -> Dict[str, Any]:
             'active_patterns': Pattern.query.filter_by(status='active').count(),
             'total_signals': Signal.query.count(),
             'signals_24h': Signal.query.filter(
-                Signal.created_at >= datetime.now(timezone.utc) - timedelta(hours=24)
+                Signal.created_at >= int((datetime.now(timezone.utc) - timedelta(hours=24)).timestamp() * 1000)
             ).count(),
             'total_users': User.query.filter_by(is_active=True, is_verified=True).count(),
             'active_subscriptions': Subscription.query.filter_by(status='active').count(),
@@ -144,7 +144,7 @@ def update_stats_cache_job() -> Dict[str, Any]:
                 'total_signals': Signal.query.filter_by(symbol_id=symbol.id).count(),
                 'signals_24h': Signal.query.filter(
                     Signal.symbol_id == symbol.id,
-                    Signal.created_at >= datetime.now(timezone.utc) - timedelta(hours=24)
+                    Signal.created_at >= int((datetime.now(timezone.utc) - timedelta(hours=24)).timestamp() * 1000)
                 ).count(),
                 'computed_at': start_time.isoformat()
             }

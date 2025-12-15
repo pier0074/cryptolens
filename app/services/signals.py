@@ -199,11 +199,11 @@ def generate_confluence_signal(symbol: str) -> Optional[Signal]:
         return None  # Skip if no higher timeframe confirmation
 
     # Check for recent signal on same symbol/direction (cooldown)
-    cooldown_time = datetime.now(timezone.utc) - timedelta(hours=cooldown_hours)
+    cooldown_time_ms = int((datetime.now(timezone.utc) - timedelta(hours=cooldown_hours)).timestamp() * 1000)
     recent_signal = Signal.query.filter(
         Signal.symbol_id == sym.id,
         Signal.direction == ('long' if confluence['dominant'] == 'bullish' else 'short'),
-        Signal.created_at >= cooldown_time
+        Signal.created_at >= cooldown_time_ms
     ).first()
 
     if recent_signal:

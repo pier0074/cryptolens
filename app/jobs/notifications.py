@@ -153,7 +153,7 @@ def send_signal_notification_job(
         # Update signal status
         if result['success'] > 0:
             signal.status = 'notified'
-            signal.notified_at = datetime.now(timezone.utc)
+            signal.notified_at = int(datetime.now(timezone.utc).timestamp() * 1000)
 
         db.session.commit()
 

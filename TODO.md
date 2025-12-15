@@ -1,32 +1,16 @@
 # CryptoLens - Remaining Issues & Future Enhancements
 
 > **Last Updated**: December 15, 2025
-> **Current Version**: v2.1.0
+> **Current Version**: v2.2.0
 
 ---
 
-## LOW SEVERITY (Nice to Have)
+## Recently Completed
 
-### Performance
-
-- [ ] **Dashboard matrix building** - `app/routes/dashboard.py:43-57`
-  - 30 queries (5 symbols × 6 timeframes)
-  - Consider batch query with single JOIN (low priority)
-
-### Documentation
-
-- [ ] **Add docstrings to undocumented endpoints**
-  - `app/routes/api.py` - 5 GET endpoints
-  - `app/routes/patterns.py` - chart endpoint
-  - `app/routes/dashboard.py` - analytics endpoint
-
-### Code Quality
-
-- [ ] **Timestamp field inconsistency**
-  - `Candle.timestamp` - BigInteger (ms)
-  - `Pattern.detected_at` - BigInteger (ms)
-  - `Signal.created_at` - DateTime object
-  - Consider standardizing (low priority)
+- [x] **Dashboard matrix optimization** - Reduced from 30 queries to 1
+- [x] **API endpoint docstrings** - All endpoints documented
+- [x] **Timestamp standardization** - All models now use BigInteger (ms)
+- [x] **API key system redesign** - Per-key rate limits, IP rules, scopes
 
 ---
 

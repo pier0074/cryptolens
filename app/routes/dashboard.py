@@ -1,3 +1,8 @@
+"""
+Dashboard routes for the main application interface.
+
+Provides the main dashboard with symbol/timeframe matrix and analytics views.
+"""
 from flask import Blueprint, render_template, jsonify
 from app.models import Symbol, Pattern, Signal, Candle, SUBSCRIPTION_TIERS
 from app.config import Config
@@ -5,7 +10,9 @@ from app.services.patterns import PATTERN_TYPES
 from app.decorators import login_required, feature_required, get_current_user, get_effective_tier, filter_symbols_by_tier
 from app import db
 from sqlalchemy import func
+from sqlalchemy.orm import joinedload
 from datetime import datetime, timedelta, timezone
+from collections import defaultdict
 
 
 def get_allowed_pattern_types(user):
@@ -20,13 +27,87 @@ def get_allowed_pattern_types(user):
         return None  # All types allowed
     return allowed
 
+
+def build_pattern_matrix(symbols, timeframes, allowed_pattern_types=None):
+    """
+    Build the pattern matrix with a single optimized query.
+
+    Instead of N*M queries (symbols × timeframes), fetches all patterns in one query
+    and builds the matrix in Python.
+
+    Args:
+        symbols: List of Symbol objects to include
+        timeframes: List of timeframe strings
+        allowed_pattern_types: Optional list of pattern types to filter by
+
+    Returns:
+        dict: Matrix mapping symbol -> timeframe -> pattern data
+    """
+    symbol_ids = [s.id for s in symbols]
+    symbol_map = {s.id: s.symbol for s in symbols}
+
+    # Initialize empty matrix
+    matrix = {s.symbol: {tf: None for tf in timeframes} for s in symbols}
+
+    if not symbol_ids:
+        return matrix
+
+    # Single query to get all active patterns for allowed symbols
+    query = Pattern.query.filter(
+        Pattern.symbol_id.in_(symbol_ids),
+        Pattern.timeframe.in_(timeframes),
+        Pattern.status == 'active'
+    )
+
+    # Filter by allowed pattern types if specified
+    if allowed_pattern_types:
+        query = query.filter(Pattern.pattern_type.in_(allowed_pattern_types))
+
+    # Order by detected_at desc so first pattern per group is most recent
+    all_patterns = query.order_by(Pattern.detected_at.desc()).all()
+
+    # Group patterns by (symbol_id, timeframe)
+    grouped = defaultdict(list)
+    for p in all_patterns:
+        key = (p.symbol_id, p.timeframe)
+        grouped[key].append(p)
+
+    # Build matrix from grouped results
+    for (symbol_id, tf), patterns in grouped.items():
+        symbol_name = symbol_map.get(symbol_id)
+        if not symbol_name:
+            continue
+
+        # Group by pattern type (first occurrence wins due to desc order)
+        by_type = {}
+        for p in patterns:
+            if p.pattern_type not in by_type:
+                by_type[p.pattern_type] = p
+
+        matrix[symbol_name][tf] = {
+            'patterns': by_type,
+            'count': len(patterns),
+            'direction': patterns[0].direction,
+            'pattern_type': patterns[0].pattern_type,
+            'zone_high': patterns[0].zone_high,
+            'zone_low': patterns[0].zone_low
+        }
+
+    return matrix
+
+
 dashboard_bp = Blueprint('dashboard', __name__)
 
 
 @dashboard_bp.route('/')
 @login_required
 def index():
-    """Main dashboard with symbol/timeframe matrix"""
+    """
+    Main dashboard with symbol/timeframe pattern matrix.
+
+    Displays a grid of symbols vs timeframes showing active patterns,
+    filtered by user's subscription tier.
+    """
     user = get_current_user()
     all_symbols = Symbol.query.filter_by(is_active=True).all()
 
@@ -38,41 +119,8 @@ def index():
 
     timeframes = Config.TIMEFRAMES
 
-    # Build matrix data with tier-filtered pattern types
-    matrix = {}
-    for symbol in symbols:
-        matrix[symbol.symbol] = {}
-        for tf in timeframes:
-            # Get all active patterns for this symbol/timeframe
-            query = Pattern.query.filter_by(
-                symbol_id=symbol.id,
-                timeframe=tf,
-                status='active'
-            )
-
-            # Filter by allowed pattern types for user tier
-            if allowed_pattern_types:
-                query = query.filter(Pattern.pattern_type.in_(allowed_pattern_types))
-
-            patterns = query.order_by(Pattern.detected_at.desc()).all()
-
-            if patterns:
-                # Group by pattern type
-                by_type = {}
-                for p in patterns:
-                    if p.pattern_type not in by_type:
-                        by_type[p.pattern_type] = p
-
-                matrix[symbol.symbol][tf] = {
-                    'patterns': by_type,
-                    'count': len(patterns),
-                    'direction': patterns[0].direction if patterns else None,
-                    'pattern_type': patterns[0].pattern_type if patterns else None,
-                    'zone_high': patterns[0].zone_high if patterns else None,
-                    'zone_low': patterns[0].zone_low if patterns else None
-                }
-            else:
-                matrix[symbol.symbol][tf] = None
+    # Build matrix with single optimized query (was 30 queries, now 1)
+    matrix = build_pattern_matrix(symbols, timeframes, allowed_pattern_types)
 
     # Get recent signals with tier-based restrictions
     symbol_ids = [s.id for s in symbols]
@@ -116,7 +164,16 @@ def index():
 @login_required
 @feature_required('analytics_page')
 def analytics():
-    """Performance analytics dashboard - Pro+ required"""
+    """
+    Performance analytics dashboard.
+
+    Displays aggregate statistics about patterns, signals, and symbol performance.
+    Requires Pro or Premium subscription.
+
+    Returns:
+        Rendered analytics.html template with stats, pattern breakdowns,
+        and top performing symbols.
+    """
     # Get statistics
     stats = {
         'total_symbols': Symbol.query.filter_by(is_active=True).count(),
