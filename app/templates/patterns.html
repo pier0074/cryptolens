@@ -76,16 +76,21 @@
         <div class="flex items-center justify-between mb-4">
             <div class="flex items-center space-x-4">
                 <h2 class="text-lg font-bold">{{ current_symbol }} - {{ current_timeframe or '1h' }}</h2>
-                <button @click="clearAllSelections()"
+                <button x-show="selectedPatternIds.length > 0" @click="clearAllSelections()"
                         class="px-3 py-1 rounded text-sm bg-gray-700 hover:bg-gray-600 transition-colors">
-                    Reset Chart
+                    Clear
                 </button>
-                <span x-show="selectedPatternIds.length > 0" class="text-sm text-blue-400">
-                    <span x-text="selectedPatternIds.length"></span> pattern(s) selected
-                </span>
                 <span x-show="selectedPatternIds.length === 0" class="text-sm text-muted">
-                    Click patterns below to show levels on chart
+                    Click a pattern below to show levels
                 </span>
+                <!-- Legend when pattern selected -->
+                <div x-show="selectedPatternIds.length > 0" class="flex items-center space-x-3 text-xs">
+                    <span class="flex items-center"><span class="w-3 h-0.5 bg-green-500 mr-1"></span><span class="w-3 h-0.5 bg-red-500 mr-1"></span>Zone</span>
+                    <span class="flex items-center"><span class="w-3 h-0.5 bg-blue-500 mr-1 border-dashed"></span>Entry</span>
+                    <span class="flex items-center"><span class="w-3 h-0.5 bg-red-400 mr-1"></span>SL</span>
+                    <span class="flex items-center"><span class="w-3 h-0.5 bg-green-400 mr-1"></span>TP1</span>
+                    <span class="flex items-center"><span class="w-3 h-0.5 bg-green-500 mr-1"></span>TP2</span>
+                </div>
             </div>
             <div class="flex space-x-2">
                 {% for tf in timeframes %}
@@ -407,6 +412,7 @@ function patternChart() {
         chart: null,
         candlestickSeries: null,
         patternSeries: [],
+        priceLines: [],          // Store price line references for cleanup
         chartData: null,
         precision: 2,
 
@@ -440,10 +446,19 @@ function patternChart() {
         },
 
         clearPatternSeries() {
+            // Remove line series
             this.patternSeries.forEach(series => {
                 try { this.chart.removeSeries(series); } catch(e) {}
             });
             this.patternSeries = [];
+
+            // Remove price lines from candlestick series
+            this.priceLines.forEach(priceLine => {
+                try { this.candlestickSeries.removePriceLine(priceLine); } catch(e) {}
+            });
+            this.priceLines = [];
+
+            // Clear markers
             this.candlestickSeries.setMarkers([]);
         },
 
@@ -592,95 +607,95 @@ function patternChart() {
                 minMove: Math.pow(10, -this.precision),
             };
 
+            // Helper to create price line with label on right axis
+            const createPriceLine = (series, price, color, title) => {
+                series.createPriceLine({
+                    price: price,
+                    color: color,
+                    lineWidth: 1,
+                    lineStyle: 2, // Dashed
+                    axisLabelVisible: true,
+                    title: title,
+                });
+            };
+
             // Draw each selected pattern
             Object.values(this.selectedPatterns).forEach(pattern => {
                 const { zoneLow, zoneHigh, direction, entry, sl, tp1, tp2, detectedAt } = pattern;
-                const lineColor = direction === 'bullish' ? '#22c55e' : '#ef4444';
+                const zoneColor = direction === 'bullish' ? '#22c55e' : '#ef4444';
                 const patternStartTime = detectedAt / 1000;
-                const visibleStartTime = Math.max(patternStartTime, firstTime);
 
-                // Zone high line
-                const highLine = this.chart.addLineSeries({
-                    color: lineColor, lineWidth: 2,
-                    priceLineVisible: false, lastValueVisible: true,
-                    crosshairMarkerVisible: false, priceFormat
-                });
-                highLine.setData([
-                    { time: visibleStartTime, value: zoneHigh },
-                    { time: lastTime, value: zoneHigh }
-                ]);
-                this.patternSeries.push(highLine);
+                // Use price lines on the candlestick series for clean display on right axis
+                // Zone High
+                this.priceLines.push(this.candlestickSeries.createPriceLine({
+                    price: zoneHigh,
+                    color: zoneColor,
+                    lineWidth: 2,
+                    lineStyle: 0, // Solid
+                    axisLabelVisible: true,
+                    title: 'Zone H',
+                }));
 
-                // Zone low line
-                const lowLine = this.chart.addLineSeries({
-                    color: lineColor, lineWidth: 2,
-                    priceLineVisible: false, lastValueVisible: true,
-                    crosshairMarkerVisible: false, priceFormat
-                });
-                lowLine.setData([
-                    { time: visibleStartTime, value: zoneLow },
-                    { time: lastTime, value: zoneLow }
-                ]);
-                this.patternSeries.push(lowLine);
+                // Zone Low
+                this.priceLines.push(this.candlestickSeries.createPriceLine({
+                    price: zoneLow,
+                    color: zoneColor,
+                    lineWidth: 2,
+                    lineStyle: 0, // Solid
+                    axisLabelVisible: true,
+                    title: 'Zone L',
+                }));
 
-                // Entry line (dashed blue)
-                const entryLine = this.chart.addLineSeries({
-                    color: '#3b82f6', lineWidth: 1, lineStyle: 2,
-                    priceLineVisible: false, lastValueVisible: true,
-                    crosshairMarkerVisible: false, priceFormat
-                });
-                entryLine.setData([
-                    { time: visibleStartTime, value: entry },
-                    { time: lastTime, value: entry }
-                ]);
-                this.patternSeries.push(entryLine);
+                // Entry (blue dashed)
+                this.priceLines.push(this.candlestickSeries.createPriceLine({
+                    price: entry,
+                    color: '#3b82f6',
+                    lineWidth: 1,
+                    lineStyle: 2, // Dashed
+                    axisLabelVisible: true,
+                    title: 'Entry',
+                }));
 
-                // Stop Loss line (red)
-                const slLine = this.chart.addLineSeries({
-                    color: 'rgba(239, 68, 68, 0.8)', lineWidth: 1, lineStyle: 2,
-                    priceLineVisible: false, lastValueVisible: true,
-                    crosshairMarkerVisible: false, priceFormat
-                });
-                slLine.setData([
-                    { time: visibleStartTime, value: sl },
-                    { time: lastTime, value: sl }
-                ]);
-                this.patternSeries.push(slLine);
+                // Stop Loss (red)
+                this.priceLines.push(this.candlestickSeries.createPriceLine({
+                    price: sl,
+                    color: '#f87171',
+                    lineWidth: 1,
+                    lineStyle: 2,
+                    axisLabelVisible: true,
+                    title: 'SL',
+                }));
 
-                // TP1 line (light green)
+                // TP1 (light green)
                 if (tp1) {
-                    const tp1Line = this.chart.addLineSeries({
-                        color: 'rgba(34, 197, 94, 0.6)', lineWidth: 1, lineStyle: 2,
-                        priceLineVisible: false, lastValueVisible: true,
-                        crosshairMarkerVisible: false, priceFormat
-                    });
-                    tp1Line.setData([
-                        { time: visibleStartTime, value: tp1 },
-                        { time: lastTime, value: tp1 }
-                    ]);
-                    this.patternSeries.push(tp1Line);
+                    this.priceLines.push(this.candlestickSeries.createPriceLine({
+                        price: tp1,
+                        color: '#4ade80',
+                        lineWidth: 1,
+                        lineStyle: 2,
+                        axisLabelVisible: true,
+                        title: 'TP1',
+                    }));
                 }
 
-                // TP2 line (green)
+                // TP2 (green)
                 if (tp2) {
-                    const tp2Line = this.chart.addLineSeries({
-                        color: 'rgba(34, 197, 94, 0.8)', lineWidth: 1, lineStyle: 2,
-                        priceLineVisible: false, lastValueVisible: true,
-                        crosshairMarkerVisible: false, priceFormat
-                    });
-                    tp2Line.setData([
-                        { time: visibleStartTime, value: tp2 },
-                        { time: lastTime, value: tp2 }
-                    ]);
-                    this.patternSeries.push(tp2Line);
+                    this.priceLines.push(this.candlestickSeries.createPriceLine({
+                        price: tp2,
+                        color: '#22c55e',
+                        lineWidth: 1,
+                        lineStyle: 2,
+                        axisLabelVisible: true,
+                        title: 'TP2',
+                    }));
                 }
 
-                // Add marker
+                // Add marker at pattern detection time
                 if (patternStartTime >= firstTime && patternStartTime <= lastTime) {
                     markers.push({
                         time: patternStartTime,
                         position: direction === 'bullish' ? 'belowBar' : 'aboveBar',
-                        color: lineColor,
+                        color: zoneColor,
                         shape: direction === 'bullish' ? 'arrowUp' : 'arrowDown',
                         text: ''
                     });
@@ -920,8 +935,8 @@ document.addEventListener('DOMContentLoaded', async function() {
                 alpineComponent.chartData = data;
                 alpineComponent.precision = precision;
 
-                // Draw all patterns initially
-                alpineComponent.drawAllPatterns();
+                // Don't draw patterns by default - let user select which ones to see
+                // alpineComponent.drawAllPatterns();
             }
 
             // Subscribe to visible range changes for lazy loading
