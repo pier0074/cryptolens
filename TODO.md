@@ -24,12 +24,21 @@
 - [x] **API endpoint docstrings** - All endpoints documented
 - [x] **Timestamp standardization** - All models now use BigInteger (ms)
 - [x] **API key system redesign** - Per-key rate limits, IP rules, scopes
+- [x] **Chart endpoint auth** - Added `@login_required` to `/patterns/chart/`
+- [x] **Cron overlap protection** - Added file locking to fetch scripts
+- [x] **SMTP timeout** - Added 30-second timeout to email service
+- [x] **Nested asyncio.run() fix** - ThreadPoolExecutor fallback in notifications
+- [x] **N+1 query fixes** - Admin symbols (150→1 query), Dashboard signals (bulk fetch)
+- [x] **NTFY_URL configurable** - Now reads from environment variable
+- [x] **Swallowed exceptions** - Added logging to 10 exception handlers
 
 ---
 
 ## Critical Issues
 
-### [CRITICAL] Security: Unauthenticated Chart Endpoint
+> **All critical issues have been fixed** (commit `a159b86`)
+
+### ~~[CRITICAL] Security: Unauthenticated Chart Endpoint~~ ✅ FIXED
 
 **Category**: Security
 **File**: `app/routes/patterns.py`
@@ -50,7 +59,7 @@ def chart_data(symbol, timeframe):
 
 ---
 
-### [CRITICAL] Reliability: No Cron Overlap Protection
+### ~~[CRITICAL] Reliability: No Cron Overlap Protection~~ ✅ FIXED
 
 **Category**: Operational
 **Files**: `scripts/fetch.py`, `scripts/fetch_historical.py`
@@ -75,7 +84,7 @@ except IOError:
 
 ---
 
-### [CRITICAL] Async: Nested asyncio.run() Will Crash
+### ~~[CRITICAL] Async: Nested asyncio.run() Will Crash~~ ✅ FIXED
 
 **Category**: Code Correctness
 **File**: `app/jobs/notifications.py:198`
@@ -89,7 +98,7 @@ results = asyncio.run(send_batch_notifications_async(notifications))
 
 ---
 
-### [CRITICAL] N+1 Query: Admin Symbols Page
+### ~~[CRITICAL] N+1 Query: Admin Symbols Page~~ ✅ FIXED
 
 **Category**: Database
 **File**: `app/routes/admin.py:1093-1112`
@@ -106,7 +115,7 @@ FROM candles WHERE timeframe = '1m' GROUP BY symbol_id
 
 ## High Priority Issues
 
-### [HIGH] Error Handling: Swallowed Exceptions (10 instances)
+### ~~[HIGH] Error Handling: Swallowed Exceptions (10 instances)~~ ✅ FIXED
 
 **Category**: Code Correctness
 **Impact**: Silent failures, incomplete data, hard-to-debug issues
@@ -138,7 +147,7 @@ FROM candles WHERE timeframe = '1m' GROUP BY symbol_id
 
 ---
 
-### [HIGH] Reliability: SMTP Connection No Timeout
+### ~~[HIGH] Reliability: SMTP Connection No Timeout~~ ✅ FIXED
 
 **Category**: External Dependencies
 **File**: `app/services/email.py:44-48`
@@ -148,7 +157,7 @@ FROM candles WHERE timeframe = '1m' GROUP BY symbol_id
 
 ---
 
-### [HIGH] N+1 Query: Dashboard Signal Enrichment
+### ~~[HIGH] N+1 Query: Dashboard Signal Enrichment~~ ✅ FIXED
 
 **Category**: Database
 **File**: `app/routes/dashboard.py:145-150`
@@ -195,7 +204,7 @@ FROM candles WHERE timeframe = '1m' GROUP BY symbol_id
 
 ---
 
-### [HIGH] Config: NTFY_URL Hardcoded
+### ~~[HIGH] Config: NTFY_URL Hardcoded~~ ✅ FIXED
 
 **Category**: Configuration
 **File**: `app/config.py:123`
