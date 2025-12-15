@@ -1,9 +1,15 @@
 """
 Test Configuration and Fixtures
+
+Uses MySQL test database. Set environment variables:
+- TEST_DB_HOST (default: localhost)
+- TEST_DB_USER (default: root)
+- TEST_DB_PASS (default: empty)
+- TEST_DB_NAME (default: cryptolens_test)
+- TEST_DB_PORT (default: 3306)
 """
 import pytest
 import os
-import tempfile
 from datetime import datetime, timezone, timedelta
 
 # Set test environment before importing app
@@ -15,14 +21,10 @@ from app.models import Symbol, Candle, Pattern, Signal, User, Subscription, SUBS
 
 @pytest.fixture(scope='function')
 def app():
-    """Create application for testing"""
-    # Create a temporary database file
-    db_fd, db_path = tempfile.mkstemp(suffix='.db')
-
+    """Create application for testing with MySQL"""
     app = create_app('testing')
     app.config.update({
         'TESTING': True,
-        'SQLALCHEMY_DATABASE_URI': f'sqlite:///{db_path}',
         'WTF_CSRF_ENABLED': False,
         'SECRET_KEY': 'test-secret-key'
     })
@@ -32,10 +34,6 @@ def app():
         yield app
         db.session.remove()
         db.drop_all()
-
-    # Cleanup
-    os.close(db_fd)
-    os.unlink(db_path)
 
 
 @pytest.fixture(scope='function')

@@ -229,9 +229,7 @@ def compute_stats():
         if row and row[0]:
             db_size = int(row[0])
     except Exception:
-        # Fallback: try SQLite file (legacy)
-        db_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data', 'cryptolens.db')
-        db_size = os.path.getsize(db_path) if os.path.exists(db_path) else 0
+        db_size = 0
 
     # Verification stats
     verified_count = db.session.query(func.count(Candle.id)).filter(

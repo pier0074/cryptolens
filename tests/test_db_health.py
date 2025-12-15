@@ -23,14 +23,14 @@ from scripts.db_health import (
 
 @pytest.fixture
 def app():
-    """Create test app with in-memory database."""
-    app = create_app()
-    app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///:memory:'
+    """Create test app with MySQL test database."""
+    app = create_app('testing')
     app.config['TESTING'] = True
 
     with app.app_context():
         db.create_all()
         yield app
+        db.session.remove()
         db.drop_all()
 
 

@@ -1,4 +1,4 @@
-.PHONY: help install dev db-create db-drop db-reset db-init db-user db-shell db-migrate-sqlite test test-fast run
+.PHONY: help install dev db-create db-drop db-reset db-init db-user db-shell db-test-create test test-fast run
 
 help:
 	@echo "CryptoLens Development Commands"
@@ -14,7 +14,7 @@ help:
 	@echo "  make db-drop     - Drop database (WARNING: deletes data)"
 	@echo "  make db-reset    - Drop and recreate database + users"
 	@echo "  make db-shell    - Open MySQL shell"
-	@echo "  make db-migrate-sqlite - Migrate from SQLite to MySQL"
+	@echo "  make db-test-create - Create test database"
 	@echo ""
 	@echo "Development:"
 	@echo "  make test        - Run test suite"
@@ -45,8 +45,8 @@ db-shell:
 	@python -c "from dotenv import load_dotenv; import os; load_dotenv(); print(f\"mysql -h {os.getenv('DB_HOST', 'localhost')} -P {os.getenv('DB_PORT', '3306')} -u {os.getenv('DB_USER', 'root')} -p {os.getenv('DB_NAME', 'cryptolens')}\")"
 	@python -c "from dotenv import load_dotenv; import os; load_dotenv(); os.system(f\"mysql -h {os.getenv('DB_HOST', 'localhost')} -P {os.getenv('DB_PORT', '3306')} -u {os.getenv('DB_USER', 'root')} -p{os.getenv('DB_PASS', '')} {os.getenv('DB_NAME', 'cryptolens')}\")"
 
-db-migrate-sqlite:
-	python scripts/init_db.py --migrate data/cryptolens.db
+db-test-create:
+	@python -c "from dotenv import load_dotenv; import os; load_dotenv(); os.system(f\"mysql -h {os.getenv('TEST_DB_HOST', 'localhost')} -P {os.getenv('TEST_DB_PORT', '3306')} -u {os.getenv('TEST_DB_USER', 'root')} -p{os.getenv('TEST_DB_PASS', '')} -e 'CREATE DATABASE IF NOT EXISTS {os.getenv('TEST_DB_NAME', 'cryptolens_test')}'\")"
 
 dev:
 	flask run --debug

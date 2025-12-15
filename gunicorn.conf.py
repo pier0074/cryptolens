@@ -9,8 +9,8 @@ bind = os.getenv('GUNICORN_BIND', '0.0.0.0:5000')
 backlog = 2048
 
 # Worker processes
-# Capped at 4 for SQLite compatibility (WAL mode helps but still limited)
-workers = min(int(os.getenv('GUNICORN_WORKERS', multiprocessing.cpu_count() * 2 + 1)), 4)
+# Formula: 2 * CPU cores + 1, capped at 8 for moderate loads
+workers = min(int(os.getenv('GUNICORN_WORKERS', multiprocessing.cpu_count() * 2 + 1)), 8)
 worker_class = 'sync'
 threads = 2
 worker_connections = 1000

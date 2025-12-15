@@ -8,8 +8,7 @@ from app import db
 def _ensure_utc_naive(dt):
     """
     Ensure datetime is naive UTC for consistent comparisons.
-    SQLite stores datetimes without timezone info, so we normalize all
-    datetimes to naive UTC for comparison.
+    Normalizes all datetimes to naive UTC.
     """
     if dt is None:
         return None
@@ -20,7 +19,7 @@ def _ensure_utc_naive(dt):
 
 
 def _utc_now_naive():
-    """Get current UTC time as a naive datetime (for SQLite compatibility)"""
+    """Get current UTC time as a naive datetime"""
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 

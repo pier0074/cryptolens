@@ -461,60 +461,6 @@ class TestProductionConfigEnforcement:
                 warning_messages = [str(warning.message) for warning in w]
                 assert any('SECRET_KEY' in msg for msg in warning_messages)
 
-    def test_sqlite_rejected_with_multiple_workers_in_production(self):
-        """Test that SQLite is rejected with multiple workers in production"""
-        import os
-        from unittest.mock import patch
-
-        with patch.dict(os.environ, {
-            'FLASK_ENV': 'production',
-            'SECRET_KEY': 'test-secret-key-for-testing-only',
-            'DATABASE_URL': 'sqlite:///test.db',
-            'WEB_CONCURRENCY': '4'
-        }):
-            import importlib
-            import app.config as config_module
-            importlib.reload(config_module)
-
-            with pytest.raises(ValueError) as excinfo:
-                # Instantiate production config to trigger check
-                config_module.ProductionConfig()
-
-            assert 'SQLite' in str(excinfo.value)
-            assert 'multiple workers' in str(excinfo.value).lower()
-
-            # Cleanup
-            with patch.dict(os.environ, {'FLASK_ENV': 'development'}):
-                importlib.reload(config_module)
-
-    def test_sqlite_allowed_single_worker_in_production_with_warning(self):
-        """Test that SQLite is allowed with single worker but warns"""
-        import os
-        import warnings
-        from unittest.mock import patch
-
-        with patch.dict(os.environ, {
-            'FLASK_ENV': 'production',
-            'SECRET_KEY': 'test-secret-key-for-testing-only',
-            'DATABASE_URL': 'sqlite:///test.db',
-            'WEB_CONCURRENCY': '1'
-        }):
-            import importlib
-            import app.config as config_module
-            importlib.reload(config_module)
-
-            with warnings.catch_warnings(record=True) as w:
-                warnings.simplefilter("always")
-                # Should not raise, but should warn
-                config_module.ProductionConfig()
-
-                warning_messages = [str(warning.message) for warning in w]
-                assert any('SQLite' in msg and 'production' in msg.lower() for msg in warning_messages)
-
-            # Cleanup
-            with patch.dict(os.environ, {'FLASK_ENV': 'development'}):
-                importlib.reload(config_module)
-
     def test_allow_unauthenticated_api_ignored_in_production(self, app):
         """Test that ALLOW_UNAUTHENTICATED_API is ignored in production"""
         import os

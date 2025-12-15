@@ -2,7 +2,7 @@
 Self-Hosted Error Tracking Service
 
 A simple, self-hosted alternative to Sentry.
-Uses PostgreSQL for storage and existing email service for alerts.
+Uses MySQL for storage and existing email service for alerts.
 No Docker or external services required.
 
 Usage:

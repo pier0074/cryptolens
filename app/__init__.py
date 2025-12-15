@@ -135,7 +135,7 @@ def create_app(config_name=None):
     app.config.from_object(config[config_name])
 
     # Error tracking is enabled by default using built-in tracker
-    # No external services required - uses PostgreSQL for storage
+    # No external services required - uses MySQL for storage
     app.config['ERROR_TRACKING_ENABLED'] = os.getenv('ERROR_TRACKING_ENABLED', 'true').lower() == 'true'
     if app.config['ERROR_TRACKING_ENABLED']:
         logging.getLogger('cryptolens').info("Logging system active")
@@ -149,15 +149,6 @@ def create_app(config_name=None):
         PERMANENT_SESSION_LIFETIME=timedelta(days=7),  # Session expires after 7 days
         SESSION_REFRESH_EACH_REQUEST=True,  # Refresh session on each request
     )
-
-    # Ensure data directory exists
-    data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'data')
-    os.makedirs(data_dir, exist_ok=True)
-
-    # Fix database path to be absolute
-    if app.config['SQLALCHEMY_DATABASE_URI'].startswith('sqlite:///data/'):
-        db_path = os.path.join(data_dir, 'cryptolens.db')
-        app.config['SQLALCHEMY_DATABASE_URI'] = f'sqlite:///{db_path}'
 
     # Initialize extensions
     db.init_app(app)
@@ -310,13 +301,9 @@ def create_app(config_name=None):
     csrf.exempt(api_bp)
     csrf.exempt(metrics_bp)  # Metrics endpoint is scraped by Prometheus
 
-    # Create database tables and enable WAL mode for better concurrency
+    # Create database tables
     with app.app_context():
         db.create_all()
-        # Enable WAL mode - allows concurrent reads/writes
-        if 'sqlite' in app.config['SQLALCHEMY_DATABASE_URI']:
-            db.session.execute(db.text('PRAGMA journal_mode=WAL'))
-            db.session.commit()
 
         # Setup logging (after DB is ready, so we can read settings)
         from app.models import Setting

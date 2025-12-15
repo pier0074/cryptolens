@@ -24,8 +24,7 @@ class TestUnlockLockedAccounts:
     def locked_user(self, app):
         """Create a locked user"""
         with app.app_context():
-            # Use naive UTC for SQLite compatibility
-            locked_until = (datetime.now(timezone.utc) + timedelta(hours=1)).replace(tzinfo=None)
+            locked_until = datetime.now(timezone.utc) + timedelta(hours=1)
             user = User(
                 email='locked@test.com',
                 username='lockeduser',

@@ -38,7 +38,7 @@ def is_production() -> bool:
 
 def get_database_url() -> str:
     """
-    Build database URL from environment variables.
+    Build MySQL database URL from environment variables.
 
     Supports two modes:
     1. Direct URL: DATABASE_URL env var (takes precedence)
@@ -61,16 +61,6 @@ def get_database_url() -> str:
     db_pass = os.getenv(f'{prefix}_PASS', os.getenv('DB_PASS', ''))
     db_name = os.getenv(f'{prefix}_NAME', os.getenv('DB_NAME', 'cryptolens'))
     db_port = os.getenv(f'{prefix}_PORT', os.getenv('DB_PORT', '3306'))
-
-    # If no host configured, fall back to SQLite for development
-    if not db_host or db_host == 'localhost' and not db_pass:
-        if is_production():
-            raise ValueError(
-                "CRITICAL: Database not configured for production.\n"
-                "Set either DATABASE_URL or PROD_DB_HOST, PROD_DB_USER, PROD_DB_PASS, PROD_DB_NAME"
-            )
-        # Development fallback to SQLite
-        return 'sqlite:///data/cryptolens.db'
 
     # Build MySQL connection URL
     # Format: mysql+pymysql://user:pass@host:port/database
@@ -108,22 +98,13 @@ def get_secret_key() -> str:
 
 
 def get_engine_options() -> dict:
-    """Get database engine options based on database type."""
-    db_url = get_database_url()
-
-    if db_url.startswith('sqlite'):
-        return {
-            'connect_args': {'timeout': 30},
-            'pool_pre_ping': True,
-        }
-    else:
-        # MySQL/PostgreSQL connection pooling
-        return {
-            'pool_size': 10,
-            'pool_recycle': 300,
-            'pool_pre_ping': True,
-            'max_overflow': 20,
-        }
+    """Get MySQL database engine options."""
+    return {
+        'pool_size': 10,
+        'pool_recycle': 300,
+        'pool_pre_ping': True,
+        'max_overflow': 20,
+    }
 
 
 class Config:
@@ -270,44 +251,17 @@ class ProductionConfig(Config):
     """Production configuration"""
     DEBUG = False
 
-    def __init__(self):
-        # SECRET_KEY and database checks are now handled in get_secret_key()
-        # and get_database_url() which raise ValueError if not properly configured
-
-        # Additional check: Refuse SQLite in production with multiple workers
-        db_url = get_database_url()
-        if db_url.startswith('sqlite'):
-            workers = os.getenv('WEB_CONCURRENCY', os.getenv('GUNICORN_WORKERS', '1'))
-            try:
-                worker_count = int(workers)
-            except ValueError:
-                worker_count = 1
-
-            if worker_count > 1:
-                raise ValueError(
-                    f"CRITICAL: SQLite cannot be used with multiple workers (WEB_CONCURRENCY={worker_count}).\n"
-                    "Configure MySQL: DB_HOST, DB_USER, DB_PASS, DB_NAME\n"
-                    "Or set DATABASE_URL directly."
-                )
-
-            import warnings
-            warnings.warn(
-                "SQLite is not recommended for production. "
-                "Set DB_HOST, DB_USER, DB_PASS, DB_NAME for MySQL.",
-                UserWarning
-            )
-
 
 class TestingConfig(Config):
-    """Testing configuration"""
+    """Testing configuration - uses MySQL test database"""
     TESTING = True
     DEBUG = True
     WTF_CSRF_ENABLED = False
-    SQLALCHEMY_DATABASE_URI = 'sqlite:///:memory:'
-    # SQLite in-memory doesn't support pool_size/max_overflow
-    SQLALCHEMY_ENGINE_OPTIONS = {
-        'pool_pre_ping': True,
-    }
+    # Test database: uses TEST_DB_* env vars or defaults to cryptolens_test on localhost
+    SQLALCHEMY_DATABASE_URI = os.getenv(
+        'TEST_DATABASE_URL',
+        f"mysql+pymysql://{os.getenv('TEST_DB_USER', 'root')}:{os.getenv('TEST_DB_PASS', '')}@{os.getenv('TEST_DB_HOST', 'localhost')}:{os.getenv('TEST_DB_PORT', '3306')}/{os.getenv('TEST_DB_NAME', 'cryptolens_test')}"
+    )
 
 
 config = {

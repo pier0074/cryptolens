@@ -1,7 +1,7 @@
 """
 Error Tracking Models
 
-Self-hosted error tracking using PostgreSQL.
+Self-hosted error tracking using MySQL.
 No external dependencies required.
 """
 from datetime import datetime, timezone

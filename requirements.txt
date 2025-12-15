@@ -31,7 +31,7 @@ rq>=1.16.0  # Redis Queue for background task processing
 
 # Monitoring
 prometheus-client>=0.20.0  # Prometheus metrics
-# Error tracking is self-hosted (uses PostgreSQL + email alerts)
+# Error tracking is self-hosted (uses MySQL + email alerts)
 
 # Scheduler
 APScheduler>=3.10.4

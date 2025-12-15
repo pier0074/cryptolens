@@ -45,15 +45,14 @@
 - [x] **SQL injection in migration script** - `scripts/init_db.py` ✅ FIXED
   - Added `ALLOWED_TABLES` frozenset whitelist
   - Added `validate_table_name()` function
-  - Using parameterized query for SQLite table existence check
 
 ### Documentation: CLI Scripts
 
 - [x] **fetch.py has no documented arguments** ✅ FIXED
   - Added Usage and Options sections documenting `--verbose` and `--gaps`
 
-- [x] **init_db.py --migrate missing path argument** ✅ FIXED
-  - Updated to show: `python scripts/init_db.py --migrate /path/to/db.sqlite`
+- [x] **init_db.py documentation** ✅ FIXED
+  - Updated with proper usage examples
 
 - [x] **compute_stats.py has no argparse** ✅ FIXED
   - Added argparse with `--verbose` option

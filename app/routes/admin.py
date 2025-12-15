@@ -61,13 +61,11 @@ def users():
     elif status == 'admin':
         query = query.filter(User.is_admin == True)
     elif status == 'locked':
-        # Use naive UTC for SQLite comparison
         query = query.filter(User.locked_until > datetime.now(timezone.utc).replace(tzinfo=None))
 
     query = query.order_by(User.created_at.desc())
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
 
-    # Use naive UTC for SQLite datetime comparison in templates
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     return render_template('admin/users.html',
                            users=pagination.items,
@@ -96,7 +94,6 @@ def user_detail(user_id):
         UserNotification.sent_at.desc()
     ).limit(10).all()
 
-    # Use naive UTC for SQLite datetime comparison in templates
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     return render_template('admin/user_detail.html',
                            user=user,
