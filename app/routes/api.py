@@ -1,36 +1,65 @@
+"""
+API Routes with standardized responses and proper API key authentication.
+
+All endpoints return responses in the format:
+{
+    "success": true/false,
+    "data": <payload>,
+    "error": null or {"code": "...", "message": "..."},
+    "meta": {"timestamp": "...", "request_id": "...", ...}
+}
+"""
 import os
 from functools import wraps
-from typing import Callable, Tuple, Any
-from flask import Blueprint, request, jsonify, Response, session
+from typing import Callable, Any
+from flask import Blueprint, request, Response, session, g
 from sqlalchemy.orm import joinedload
-from app.models import Symbol, Candle, Pattern, Signal, Setting, User
+from app.models import (
+    Symbol, Candle, Pattern, Signal, Setting, User,
+    ApiKey, ApiResponse
+)
 from app.config import Config
 from app import db, csrf, limiter, cache
-from app.services.auth import verify_api_key
 
 api_bp = Blueprint('api', __name__)
 
-# Type alias for Flask route responses
-JsonResponse = Tuple[Response, int] | Response
-
 # Exempt API from CSRF (uses API key authentication instead)
 csrf.exempt(api_bp)
+
+# Scope mappings for endpoints
+ENDPOINT_SCOPES = {
+    'get_symbols': 'read:symbols',
+    'get_candles': 'read:candles',
+    'get_patterns': 'read:patterns',
+    'get_signals': 'read:signals',
+    'get_matrix': 'read:matrix',
+    'trigger_scan': 'write:scan',
+    'trigger_fetch': 'write:fetch',
+    'scheduler_status': 'admin:scheduler',
+    'scheduler_start': 'admin:scheduler',
+    'scheduler_stop': 'admin:scheduler',
+    'scheduler_toggle': 'admin:scheduler',
+    'run_scan_now': 'write:scan',
+}
 
 
 def require_api_key(f: Callable[..., Any]) -> Callable[..., Any]:
     """
     Decorator to require API key OR Premium user session for API endpoints.
 
+    Features:
+    - API key authentication with new ApiKey model
+    - User session fallback (admin/premium users)
+    - Per-key rate limiting
+    - IP whitelist/blacklist
+    - Scope-based permissions
+    - Usage tracking
+
     Security: DENY by default. To allow unauthenticated access (dev only),
     set environment variable: ALLOW_UNAUTHENTICATED_API=true
-
-    Accepts:
-    - API key via X-API-Key header or api_key query param
-    - Admin user session (full access)
-    - Premium user session (API access enabled in tier)
     """
     @wraps(f)
-    def decorated(*args: Any, **kwargs: Any) -> JsonResponse:
+    def decorated(*args: Any, **kwargs: Any):
         # Check if auth is explicitly disabled (development only)
         allow_unauth = os.getenv('ALLOW_UNAUTHENTICATED_API', 'false').lower() == 'true'
         flask_env = os.getenv('FLASK_ENV', 'development')
@@ -53,58 +82,117 @@ def require_api_key(f: Callable[..., Any]) -> Callable[..., Any]:
                 )
                 return f(*args, **kwargs)
 
-        # Check for user session
+        # Check for user session first
         user_id = session.get('user_id')
         if user_id:
             user = db.session.get(User, user_id)
             if user:
                 # Admins always have full API access
                 if user.is_admin:
+                    g.api_user = user
+                    g.api_key = None
                     return f(*args, **kwargs)
 
                 # Check if user's tier has API access (Premium only)
                 if user.can_access_feature('api_access'):
+                    g.api_user = user
+                    g.api_key = None
                     return f(*args, **kwargs)
 
                 # User exists but doesn't have API access
-                return jsonify({
-                    'error': 'Forbidden',
-                    'message': 'API access requires Premium subscription'
-                }), 403
+                return ApiResponse.forbidden('API access requires Premium subscription')
 
-        # Get API key hash from settings
-        api_key_hash = Setting.get('api_key_hash')
-        if not api_key_hash:
-            # No API key configured - DENY access (secure default)
-            return jsonify({
-                'error': 'API not configured',
-                'message': 'Set an API key in Settings, or set ALLOW_UNAUTHENTICATED_API=true for development'
-            }), 503
-
-        # Check header first, then query param
+        # Get API key from header or query param
         provided_key = request.headers.get('X-API-Key')
         if not provided_key:
             provided_key = request.args.get('api_key')
 
         if not provided_key:
-            return jsonify({
-                'error': 'Unauthorized',
-                'message': 'API key required. Provide via X-API-Key header or api_key query param'
-            }), 401
+            # Check if any API keys exist (new system or legacy)
+            legacy_hash = Setting.get('api_key_hash')
+            has_new_keys = ApiKey.query.filter_by(status='active').first() is not None
 
-        # Verify API key against stored hash
-        if not verify_api_key(provided_key, api_key_hash):
-            return jsonify({
-                'error': 'Unauthorized',
-                'message': 'Invalid API key'
-            }), 401
+            if legacy_hash or has_new_keys:
+                return ApiResponse.unauthorized(
+                    'API key required. Provide via X-API-Key header or api_key query param'
+                )
+            # No API keys configured at all
+            return ApiResponse.service_unavailable(
+                'API not configured. Create an API key in admin settings.'
+            )
 
-        return f(*args, **kwargs)
+        # Look up API key in new table
+        api_key = ApiKey.find_by_key(provided_key)
+
+        # Fallback: check legacy setting-based key
+        if not api_key:
+            from app.services.auth import verify_api_key as legacy_verify
+            legacy_hash = Setting.get('api_key_hash')
+            if legacy_hash and legacy_verify(provided_key, legacy_hash):
+                # Legacy key valid - allow but don't track
+                g.api_user = None
+                g.api_key = None
+                return f(*args, **kwargs)
+
+            return ApiResponse.unauthorized('Invalid API key')
+
+        # Check if key is valid (status and expiry)
+        if not api_key.is_valid:
+            if api_key.status == 'revoked':
+                return ApiResponse.unauthorized('API key has been revoked')
+            if api_key.is_expired:
+                return ApiResponse.unauthorized('API key has expired')
+            return ApiResponse.unauthorized('API key is inactive')
+
+        # Check IP restrictions
+        client_ip = request.remote_addr or '0.0.0.0'
+        ip_allowed, ip_reason = api_key.check_ip_allowed(client_ip)
+        if not ip_allowed:
+            return ApiResponse.forbidden(ip_reason)
+
+        # Check rate limits
+        is_limited, limit_reason = api_key.is_rate_limited()
+        if is_limited:
+            return ApiResponse.rate_limited(limit_reason)
+
+        # Check scope for this endpoint
+        endpoint_name = f.__name__
+        required_scope = ENDPOINT_SCOPES.get(endpoint_name)
+        if required_scope and not api_key.has_scope(required_scope):
+            return ApiResponse.forbidden(
+                f'API key lacks required scope: {required_scope}'
+            )
+
+        # Store in g for access in endpoint
+        g.api_user = api_key.user
+        g.api_key = api_key
+
+        # Execute the endpoint
+        result = f(*args, **kwargs)
+
+        # Record usage (after successful execution)
+        try:
+            response_code = result[1] if isinstance(result, tuple) else 200
+            api_key.record_usage(
+                ip_address=client_ip,
+                endpoint=request.path,
+                method=request.method,
+                response_code=response_code
+            )
+        except Exception:
+            pass  # Don't fail the request if usage recording fails
+
+        return result
+
     return decorated
 
 
+# =============================================================================
+# HEALTH CHECK ENDPOINTS (No auth required)
+# =============================================================================
+
 @api_bp.route('/health')
-def health_check() -> JsonResponse:
+def health_check():
     """
     Health check endpoint for monitoring and load balancers.
 
@@ -113,93 +201,103 @@ def health_check() -> JsonResponse:
     - timestamp: current UTC timestamp
     - version: application version
     - dependencies: status of all external dependencies
-
-    Query params:
-    - full=true: Include slow checks (exchange API, NTFY) - default for /health
-    - quick=true: Only check database (for liveness probes)
     """
-    from flask import request as flask_request
     from app.services.health import get_liveness_status, get_readiness_status
 
-    # Quick liveness check or full readiness check
-    quick_mode = flask_request.args.get('quick', 'false').lower() == 'true'
+    quick_mode = request.args.get('quick', 'false').lower() == 'true'
 
     if quick_mode:
         health = get_liveness_status()
     else:
         health = get_readiness_status()
 
-    # Return appropriate status code
-    if health['status'] == 'unhealthy':
-        return jsonify(health), 503
-    return jsonify(health), 200
+    status_code = 503 if health['status'] == 'unhealthy' else 200
+    return ApiResponse.success(health, status_code=status_code)
 
 
 @api_bp.route('/health/live')
-def liveness_check() -> JsonResponse:
-    """
-    Kubernetes liveness probe - quick check if app is running.
-    Only checks database connectivity.
-    """
+def liveness_check():
+    """Kubernetes liveness probe - quick check if app is running."""
     from app.services.health import get_liveness_status
 
     health = get_liveness_status()
-    if health['status'] == 'unhealthy':
-        return jsonify(health), 503
-    return jsonify(health), 200
+    status_code = 503 if health['status'] == 'unhealthy' else 200
+    return ApiResponse.success(health, status_code=status_code)
 
 
 @api_bp.route('/health/ready')
-def readiness_check() -> JsonResponse:
-    """
-    Kubernetes readiness probe - full check if app is ready for traffic.
-    Includes all dependency checks (database, cache, exchange, NTFY).
-    """
+def readiness_check():
+    """Kubernetes readiness probe - full check if app is ready for traffic."""
     from app.services.health import get_readiness_status
 
     health = get_readiness_status()
-    if health['status'] == 'unhealthy':
-        return jsonify(health), 503
-    return jsonify(health), 200
+    status_code = 503 if health['status'] == 'unhealthy' else 200
+    return ApiResponse.success(health, status_code=status_code)
 
+
+# =============================================================================
+# DATA ENDPOINTS (Read operations)
+# =============================================================================
 
 @api_bp.route('/symbols')
 @require_api_key
-def get_symbols() -> Response:
-    """Get all symbols"""
-    active_only = request.args.get('active', 'true') == 'true'
+def get_symbols():
+    """Get all symbols."""
+    active_only = request.args.get('active', 'true').lower() == 'true'
+
     query = Symbol.query
     if active_only:
         query = query.filter_by(is_active=True)
+
     symbols = query.all()
-    return jsonify([s.to_dict() for s in symbols])
+
+    return ApiResponse.success(
+        [s.to_dict() for s in symbols],
+        meta={'count': len(symbols), 'active_only': active_only}
+    )
 
 
 @api_bp.route('/candles/<symbol>/<timeframe>')
 @require_api_key
-def get_candles(symbol: str, timeframe: str) -> JsonResponse:
-    """Get candles for a symbol/timeframe"""
-    sym = Symbol.query.filter_by(symbol=symbol.replace('-', '/')).first()
-    if not sym:
-        return jsonify({
-            'error': 'Not found',
-            'message': f'Symbol {symbol} not found'
-        }), 404
+def get_candles(symbol: str, timeframe: str):
+    """Get candles for a symbol/timeframe."""
+    # Normalize symbol format
+    symbol_normalized = symbol.replace('-', '/')
 
-    limit = min(max(request.args.get('limit', 200, type=int), 1), 2000)
+    sym = Symbol.query.filter_by(symbol=symbol_normalized).first()
+    if not sym:
+        return ApiResponse.not_found(f'Symbol {symbol} not found')
+
+    # Validate timeframe
+    if timeframe not in Config.TIMEFRAMES:
+        return ApiResponse.bad_request(
+            f'Invalid timeframe. Valid options: {", ".join(Config.TIMEFRAMES)}'
+        )
+
+    # Parse limit with bounds
+    limit = request.args.get('limit', 200, type=int)
+    limit = min(max(limit, 1), 2000)
 
     candles = Candle.query.filter_by(
         symbol_id=sym.id,
         timeframe=timeframe
     ).order_by(Candle.timestamp.desc()).limit(limit).all()
 
-    return jsonify([c.to_dict() for c in reversed(candles)])
+    return ApiResponse.success(
+        [c.to_dict() for c in reversed(candles)],
+        meta={
+            'symbol': symbol_normalized,
+            'timeframe': timeframe,
+            'count': len(candles),
+            'limit': limit
+        }
+    )
 
 
 @api_bp.route('/patterns')
 @require_api_key
-def get_patterns() -> Response:
-    """Get patterns with optional filters"""
+def get_patterns():
+    """Get patterns with optional filters."""
     symbol = request.args.get('symbol')
     timeframe = request.args.get('timeframe')
     status = request.args.get('status', 'active')
@@ -213,22 +311,38 @@ def get_patterns() -> Response:
             query = query.filter_by(symbol_id=sym.id)
 
     if timeframe:
+        if timeframe not in Config.TIMEFRAMES:
+            return ApiResponse.bad_request(
+                f'Invalid timeframe. Valid options: {", ".join(Config.TIMEFRAMES)}'
+            )
         query = query.filter_by(timeframe=timeframe)
 
     if status:
         query = query.filter_by(status=status)
 
     patterns = query.order_by(Pattern.detected_at.desc()).limit(limit).all()
-    return jsonify([p.to_dict() for p in patterns])
+
+    return ApiResponse.success(
+        [p.to_dict() for p in patterns],
+        meta={
+            'count': len(patterns),
+            'limit': limit,
+            'filters': {
+                'symbol': symbol,
+                'timeframe': timeframe,
+                'status': status
+            }
+        }
+    )
 
 
 @api_bp.route('/signals')
 @require_api_key
-def get_signals() -> Response:
-    """Get signals with optional filters"""
+def get_signals():
+    """Get signals with optional filters."""
     status = request.args.get('status')
     direction = request.args.get('direction')
-    limit = request.args.get('limit', 50, type=int)
+    limit = min(max(request.args.get('limit', 50, type=int), 1), 500)
 
     query = Signal.query.options(joinedload(Signal.symbol))
 
@@ -236,6 +350,8 @@ def get_signals() -> Response:
         query = query.filter_by(status=status)
 
     if direction:
+        if direction not in ['long', 'short']:
+            return ApiResponse.bad_request('Invalid direction. Use "long" or "short"')
         query = query.filter_by(direction=direction)
 
     signals = query.order_by(Signal.created_at.desc()).limit(limit).all()
@@ -246,14 +362,24 @@ def get_signals() -> Response:
         data['symbol'] = signal.symbol.symbol if signal.symbol else None
         result.append(data)
 
-    return jsonify(result)
+    return ApiResponse.success(
+        result,
+        meta={
+            'count': len(result),
+            'limit': limit,
+            'filters': {
+                'status': status,
+                'direction': direction
+            }
+        }
+    )
 
 
 @api_bp.route('/matrix')
 @require_api_key
 @cache.cached(timeout=Config.CACHE_TTL_PATTERN_MATRIX, key_prefix='pattern_matrix')
-def get_matrix() -> Response:
-    """Get the symbol/timeframe pattern matrix (optimized: 1 query instead of 180)"""
+def get_matrix():
+    """Get the symbol/timeframe pattern matrix (optimized: 1 query instead of 180)."""
     from sqlalchemy import func
 
     symbols = Symbol.query.filter_by(is_active=True).all()
@@ -263,7 +389,6 @@ def get_matrix() -> Response:
     matrix = {s.symbol: {tf: 'neutral' for tf in timeframes} for s in symbols}
 
     # Get all active patterns with their symbol in a single query
-    # Subquery to get max detected_at per symbol/timeframe
     subq = db.session.query(
         Pattern.symbol_id,
         Pattern.timeframe,
@@ -275,7 +400,6 @@ def get_matrix() -> Response:
         Pattern.timeframe
     ).subquery()
 
-    # Join to get the actual pattern data
     patterns = db.session.query(Pattern).join(
         subq,
         db.and_(
@@ -291,89 +415,138 @@ def get_matrix() -> Response:
         if pattern.symbol and pattern.symbol.symbol in matrix:
             matrix[pattern.symbol.symbol][pattern.timeframe] = pattern.direction
 
-    return jsonify(matrix)
+    return ApiResponse.success(
+        matrix,
+        meta={
+            'symbols': len(symbols),
+            'timeframes': timeframes
+        }
+    )
 
+
+# =============================================================================
+# ACTION ENDPOINTS (Write operations)
+# =============================================================================
 
 @api_bp.route('/scan', methods=['POST'])
 @limiter.limit("1 per minute")
 @require_api_key
 def trigger_scan():
-    """Manually trigger a pattern scan"""
+    """Manually trigger a pattern scan."""
     from app.services.patterns import scan_all_patterns
 
     result = scan_all_patterns()
-    return jsonify(result)
+
+    return ApiResponse.success(
+        result,
+        meta={'action': 'scan_triggered'}
+    )
 
 
 @api_bp.route('/fetch', methods=['POST'])
 @limiter.limit("5 per minute")
 @require_api_key
 def trigger_fetch():
-    """Manually trigger data fetch"""
+    """Manually trigger data fetch for a specific symbol/timeframe."""
     data = request.get_json() or {}
     symbol = data.get('symbol')
     timeframe = data.get('timeframe')
 
+    if not symbol or not timeframe:
+        return ApiResponse.bad_request('Symbol and timeframe are required')
+
+    # Validate symbol exists
+    sym = Symbol.query.filter_by(symbol=symbol.replace('-', '/')).first()
+    if not sym:
+        return ApiResponse.not_found(f'Symbol {symbol} not found')
+
+    # Validate timeframe
+    if timeframe not in Config.TIMEFRAMES:
+        return ApiResponse.bad_request(
+            f'Invalid timeframe. Valid options: {", ".join(Config.TIMEFRAMES)}'
+        )
+
     from app.services.data_fetcher import fetch_candles
 
-    if symbol and timeframe:
-        new_count, _ = fetch_candles(symbol, timeframe)
-        return jsonify({'success': True, 'candles_fetched': new_count})
+    new_count, _ = fetch_candles(symbol.replace('-', '/'), timeframe)
 
-    return jsonify({
-        'error': 'Bad request',
-        'message': 'Symbol and timeframe are required'
-    }), 400
+    return ApiResponse.success(
+        {'candles_fetched': new_count},
+        meta={
+            'action': 'fetch_triggered',
+            'symbol': symbol,
+            'timeframe': timeframe
+        }
+    )
 
+
+# =============================================================================
+# SCHEDULER ENDPOINTS (Admin operations)
+# =============================================================================
 
 @api_bp.route('/scheduler/status')
 @require_api_key
 def scheduler_status():
-    """Get current scheduler status"""
+    """Get current scheduler status."""
     from app.services.scheduler import get_scheduler_status
-    return jsonify(get_scheduler_status())
+
+    return ApiResponse.success(get_scheduler_status())
 
 
 @api_bp.route('/scheduler/start', methods=['POST'])
 @limiter.limit("2 per minute")
 @require_api_key
 def scheduler_start():
-    """Start the background scheduler"""
+    """Start the background scheduler."""
     from app.services.scheduler import start_scheduler, get_scheduler_status
     from flask import current_app
 
     start_scheduler(current_app)
-    return jsonify(get_scheduler_status())
+
+    return ApiResponse.success(
+        get_scheduler_status(),
+        meta={'action': 'scheduler_started'}
+    )
 
 
 @api_bp.route('/scheduler/stop', methods=['POST'])
 @limiter.limit("2 per minute")
 @require_api_key
 def scheduler_stop():
-    """Stop the background scheduler"""
+    """Stop the background scheduler."""
     from app.services.scheduler import stop_scheduler, get_scheduler_status
 
     stop_scheduler()
-    return jsonify(get_scheduler_status())
+
+    return ApiResponse.success(
+        get_scheduler_status(),
+        meta={'action': 'scheduler_stopped'}
+    )
 
 
 @api_bp.route('/scheduler/toggle', methods=['POST'])
 @limiter.limit("2 per minute")
 @require_api_key
 def scheduler_toggle():
-    """Legacy endpoint - scheduler is now cron-based"""
+    """Legacy endpoint - scheduler is now cron-based."""
     from app.services.scheduler import get_scheduler_status
-    return jsonify({
-        **get_scheduler_status(),
-        'note': 'Scheduler is now managed via cron. Use /api/scan/run to trigger a manual scan.'
-    })
+
+    status = get_scheduler_status()
+    status['note'] = 'Scheduler is now managed via cron. Use /api/scan/run to trigger a manual scan.'
+
+    return ApiResponse.success(status)
 
 
 @api_bp.route('/scan/run', methods=['POST'])
 @limiter.limit("1 per minute")
 @require_api_key
 def run_scan_now():
-    """Trigger a manual scan"""
+    """Trigger a manual scan."""
     from app.services.scheduler import run_once
+
     result = run_once()
-    return jsonify(result)
+
+    return ApiResponse.success(
+        result,
+        meta={'action': 'manual_scan_executed'}
+    )

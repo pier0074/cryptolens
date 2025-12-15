@@ -40,7 +40,9 @@ class TestHealthEndpoint:
         """Test health response contains all required fields"""
         with app.app_context():
             response = client.get('/api/health?quick=true')
-            data = response.json
+            # Response is wrapped in standardized envelope
+            assert response.json['success'] is True
+            data = response.json['data']
             assert 'status' in data
             assert 'dependencies' in data
             assert 'database' in data['dependencies']
@@ -51,7 +53,7 @@ class TestHealthEndpoint:
         """Test health status is 'healthy' when DB is connected"""
         with app.app_context():
             response = client.get('/api/health?quick=true')
-            data = response.json
+            data = response.json['data']
             assert data['status'] == 'healthy'
             assert data['dependencies']['database']['status'] == 'healthy'
 
@@ -76,14 +78,15 @@ class TestSymbolsEndpoint:
         with app.app_context():
             response = client.get('/api/symbols', headers=api_key_headers)
             assert response.status_code == 200
-            assert response.json == []
+            assert response.json['success'] is True
+            assert response.json['data'] == []
 
     def test_get_symbols(self, client, app, sample_symbol, api_key_headers):
         """Test getting all active symbols"""
         with app.app_context():
             response = client.get('/api/symbols', headers=api_key_headers)
             assert response.status_code == 200
-            data = response.json
+            data = response.json['data']
             assert len(data) == 1
             assert data[0]['symbol'] == 'BTC/USDT'
             assert data[0]['is_active'] is True
@@ -98,11 +101,11 @@ class TestSymbolsEndpoint:
 
             # Default: only active
             response = client.get('/api/symbols', headers=api_key_headers)
-            assert len(response.json) == 1
+            assert len(response.json['data']) == 1
 
             # Include all
             response = client.get('/api/symbols?active=false', headers=api_key_headers)
-            assert len(response.json) == 2
+            assert len(response.json['data']) == 2
 
 
 class TestCandlesEndpoint:
@@ -124,7 +127,7 @@ class TestCandlesEndpoint:
 
             response = client.get('/api/candles/BTC-USDT/1h', headers=api_key_headers)
             assert response.status_code == 200
-            data = response.json
+            data = response.json['data']
             assert len(data) == 5
             assert 'open' in data[0]
             assert 'high' in data[0]
@@ -146,14 +149,15 @@ class TestCandlesEndpoint:
 
             response = client.get('/api/candles/BTC-USDT/1h?limit=3', headers=api_key_headers)
             assert response.status_code == 200
-            assert len(response.json) == 3
+            assert len(response.json['data']) == 3
 
     def test_get_candles_unknown_symbol(self, client, app, api_key_headers):
         """Test 404 for unknown symbol"""
         with app.app_context():
             response = client.get('/api/candles/UNKNOWN-PAIR/1h', headers=api_key_headers)
             assert response.status_code == 404
-            assert 'error' in response.json
+            assert response.json['success'] is False
+            assert response.json['error'] is not None
 
     def test_get_candles_slash_format(self, client, app, sample_symbol, api_key_headers):
         """Test symbol with dash is converted to slash"""
@@ -170,7 +174,7 @@ class TestCandlesEndpoint:
             # Using dash format in URL
             response = client.get('/api/candles/BTC-USDT/1h', headers=api_key_headers)
             assert response.status_code == 200
-            assert len(response.json) == 1
+            assert len(response.json['data']) == 1
 
 
 class TestPatternsEndpoint:
@@ -181,7 +185,7 @@ class TestPatternsEndpoint:
         with app.app_context():
             response = client.get('/api/patterns', headers=api_key_headers)
             assert response.status_code == 200
-            data = response.json
+            data = response.json['data']
             assert len(data) >= 1
             assert data[0]['pattern_type'] == 'imbalance'
 
@@ -215,11 +219,11 @@ class TestPatternsEndpoint:
 
             # Default filter: active
             response = client.get('/api/patterns?status=active', headers=api_key_headers)
-            assert all(p['status'] == 'active' for p in response.json)
+            assert all(p['status'] == 'active' for p in response.json['data'])
 
             # Filter: filled
             response = client.get('/api/patterns?status=filled', headers=api_key_headers)
-            assert all(p['status'] == 'filled' for p in response.json)
+            assert all(p['status'] == 'filled' for p in response.json['data'])
 
     def test_get_patterns_filter_timeframe(self, client, app, sample_symbol, api_key_headers):
         """Test filtering patterns by timeframe"""
@@ -240,14 +244,14 @@ class TestPatternsEndpoint:
 
             response = client.get('/api/patterns?timeframe=4h', headers=api_key_headers)
             assert response.status_code == 200
-            assert all(p['timeframe'] == '4h' for p in response.json)
+            assert all(p['timeframe'] == '4h' for p in response.json['data'])
 
     def test_get_patterns_empty(self, client, app, api_key_headers):
         """Test getting patterns when none exist"""
         with app.app_context():
             response = client.get('/api/patterns', headers=api_key_headers)
             assert response.status_code == 200
-            assert response.json == []
+            assert response.json['data'] == []
 
 
 class TestSignalsEndpoint:
@@ -258,7 +262,7 @@ class TestSignalsEndpoint:
         with app.app_context():
             response = client.get('/api/signals', headers=api_key_headers)
             assert response.status_code == 200
-            data = response.json
+            data = response.json['data']
             assert len(data) >= 1
             assert 'direction' in data[0]
             assert 'entry_price' in data[0]
@@ -299,17 +303,17 @@ class TestSignalsEndpoint:
             db.session.commit()
 
             response = client.get('/api/signals?direction=long', headers=api_key_headers)
-            assert all(s['direction'] == 'long' for s in response.json)
+            assert all(s['direction'] == 'long' for s in response.json['data'])
 
             response = client.get('/api/signals?direction=short', headers=api_key_headers)
-            assert all(s['direction'] == 'short' for s in response.json)
+            assert all(s['direction'] == 'short' for s in response.json['data'])
 
     def test_get_signals_empty(self, client, app, api_key_headers):
         """Test getting signals when none exist"""
         with app.app_context():
             response = client.get('/api/signals', headers=api_key_headers)
             assert response.status_code == 200
-            assert response.json == []
+            assert response.json['data'] == []
 
 
 class TestMatrixEndpoint:
@@ -320,7 +324,7 @@ class TestMatrixEndpoint:
         with app.app_context():
             response = client.get('/api/matrix', headers=api_key_headers)
             assert response.status_code == 200
-            data = response.json
+            data = response.json['data']
 
             # Should have the symbol
             assert 'BTC/USDT' in data
@@ -356,7 +360,7 @@ class TestMatrixEndpoint:
 
             response = client.get('/api/matrix', headers=api_key_headers)
             assert response.status_code == 200
-            data = response.json
+            data = response.json['data']
 
             assert data['BTC/USDT']['1h'] == 'bullish'
             assert data['BTC/USDT']['4h'] == 'bearish'
@@ -372,7 +376,8 @@ class TestAPIAuthentication:
             # No API key set - should return 503 (secure default)
             response = client.post('/api/scan')
             assert response.status_code == 503
-            assert 'API not configured' in response.json['error']
+            assert response.json['success'] is False
+            assert 'API not configured' in response.json['error']['message']
 
     def test_scan_with_api_key_required(self, client, app):
         """Test scan endpoint requires API key when configured"""
@@ -383,7 +388,8 @@ class TestAPIAuthentication:
             # No key provided - should be 401
             response = client.post('/api/scan')
             assert response.status_code == 401
-            assert 'Unauthorized' in response.json['error']
+            assert response.json['success'] is False
+            assert response.json['error']['code'] == 'UNAUTHORIZED'
 
     def test_scan_with_valid_api_key_header(self, client, app):
         """Test scan endpoint accepts valid API key in header"""
@@ -431,7 +437,7 @@ class TestAPIAuthentication:
             assert client.post('/api/scheduler/toggle').status_code == 401
 
     def test_scheduler_status_no_auth(self, client, app):
-        """Test scheduler status endpoint doesn't require auth"""
+        """Test scheduler status endpoint requires auth"""
         with app.app_context():
             Setting.set('api_key_hash', hash_api_key('test-secret-key'))
             db.session.commit()
@@ -439,7 +445,8 @@ class TestAPIAuthentication:
             # Status endpoint now requires auth (security fix)
             response = client.get('/api/scheduler/status')
             assert response.status_code == 401
-            assert 'Unauthorized' in response.json['error']
+            assert response.json['success'] is False
+            assert response.json['error']['code'] == 'UNAUTHORIZED'
 
             # With auth, should work
             response = client.get('/api/scheduler/status',
@@ -460,7 +467,8 @@ class TestFetchEndpoint:
                 data=json.dumps({})
             )
             assert response.status_code == 503
-            assert 'API not configured' in response.json['error']
+            assert response.json['success'] is False
+            assert 'API not configured' in response.json['error']['message']
 
     def test_fetch_missing_params(self, client, app):
         """Test fetch endpoint requires symbol and timeframe"""
@@ -475,7 +483,8 @@ class TestFetchEndpoint:
                 data=json.dumps({})
             )
             assert response.status_code == 400
-            assert 'error' in response.json
+            assert response.json['success'] is False
+            assert response.json['error'] is not None
 
     def test_fetch_with_params(self, client, app, sample_symbol):
         """Test fetch endpoint with valid parameters"""
@@ -502,7 +511,7 @@ class TestSchedulerEndpoint:
         with app.app_context():
             response = client.get('/api/scheduler/status', headers=api_key_headers)
             assert response.status_code == 200
-            data = response.json
+            data = response.json['data']
             assert data['mode'] == 'cron'
             assert 'cron_setup' in data
 
@@ -551,7 +560,8 @@ class TestJSONResponses:
             response = client.get('/api/candles/UNKNOWN-PAIR/1h', headers=api_key_headers)
             assert response.status_code == 404
             assert response.content_type == 'application/json'
-            assert 'error' in response.json
+            assert response.json['success'] is False
+            assert response.json['error'] is not None
 
 
 class TestMetricsEndpoint:

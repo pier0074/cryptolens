@@ -72,6 +72,17 @@ from app.models.errors import (
     ErrorStats,
 )
 
+# API models
+from app.models.api import (
+    ApiKey,
+    IpRule,
+    ApiKeyUsage,
+    ApiResponse,
+    API_KEY_STATUS,
+    API_KEY_SCOPES,
+    IP_RULE_TYPES,
+)
+
 # Export all for 'from app.models import *'
 __all__ = [
     # Utilities
@@ -123,4 +134,12 @@ __all__ = [
     # Error tracking models
     'ErrorLog',
     'ErrorStats',
+    # API models
+    'ApiKey',
+    'IpRule',
+    'ApiKeyUsage',
+    'ApiResponse',
+    'API_KEY_STATUS',
+    'API_KEY_SCOPES',
+    'IP_RULE_TYPES',
 ]
