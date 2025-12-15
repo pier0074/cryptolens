@@ -626,7 +626,6 @@ class TestConcurrentDatabaseAccess:
         with app.app_context():
             sub = db.session.get(Subscription, sub_id)
             # Expected: Jan 8 + 1 + 2 + 3 = Jan 14 (13 days from Jan 1)
-            # Compare date parts only (SQLite doesn't preserve timezone)
             assert sub.expires_at.year == 2024
             assert sub.expires_at.month == 1
             assert sub.expires_at.day == 14
