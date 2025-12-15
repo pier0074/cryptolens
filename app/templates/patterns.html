@@ -609,20 +609,30 @@ function patternChart() {
 
             // Helper to create a line series starting from pattern time
             const addLine = (startTime, price, color, lineWidth, lineStyle, title) => {
+                const effectiveStart = Math.max(startTime, firstTime);
                 const series = this.chart.addLineSeries({
                     color: color,
                     lineWidth: lineWidth,
                     lineStyle: lineStyle,
-                    priceLineVisible: true,  // Show price on right axis
-                    lastValueVisible: true,
+                    priceLineVisible: false,  // Don't extend line across entire chart
+                    lastValueVisible: true,   // Show price label on right axis
                     crosshairMarkerVisible: false,
                     priceFormat,
                     title: title,
                 });
+                // Line from pattern start to chart end
                 series.setData([
-                    { time: Math.max(startTime, firstTime), value: price },
+                    { time: effectiveStart, value: price },
                     { time: lastTime, value: price }
                 ]);
+                // Add a marker at the start of the line
+                series.setMarkers([{
+                    time: effectiveStart,
+                    position: 'inBar',
+                    color: color,
+                    shape: 'circle',
+                    size: 0.5,
+                }]);
                 this.patternSeries.push(series);
             };
 
