@@ -72,7 +72,7 @@
 
     <!-- Chart Container -->
     {% if current_symbol %}
-    <div class="bg-card rounded-lg p-4">
+    <div class="bg-card rounded-lg p-4" x-ref="chartContainer">
         <div class="flex items-center justify-between mb-4">
             <div class="flex items-center space-x-4">
                 <h2 class="text-lg font-bold">{{ current_symbol }} - {{ current_timeframe or '1h' }}</h2>
@@ -862,9 +862,14 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }));
                 candlestickSeries.setData(chartCandles);
 
-                // Update Alpine component data
-                const alpineComponent = Alpine.$data(document.querySelector('[x-data]'));
-                alpineComponent.chartData.candles = allCandles;
+                // Update Alpine component data (patternChart, not patternsPage)
+                const patternTabEl = document.querySelector('[x-data="patternChart()"]');
+                if (patternTabEl) {
+                    const alpineComponent = Alpine.$data(patternTabEl);
+                    if (alpineComponent.chartData) {
+                        alpineComponent.chartData.candles = allCandles;
+                    }
+                }
 
                 console.log(`Loaded ${data.candles.length} more candles (total: ${allCandles.length})`);
             } else {
@@ -905,15 +910,19 @@ document.addEventListener('DOMContentLoaded', async function() {
                 }
             });
 
-            // Store in Alpine component
-            const alpineComponent = Alpine.$data(document.querySelector('[x-data]'));
-            alpineComponent.chart = chart;
-            alpineComponent.candlestickSeries = candlestickSeries;
-            alpineComponent.chartData = data;
-            alpineComponent.precision = precision;
+            // Store in Alpine component (patternChart, not patternsPage)
+            // Find the element with patternChart() x-data
+            const patternTabEl = document.querySelector('[x-data="patternChart()"]');
+            if (patternTabEl) {
+                const alpineComponent = Alpine.$data(patternTabEl);
+                alpineComponent.chart = chart;
+                alpineComponent.candlestickSeries = candlestickSeries;
+                alpineComponent.chartData = data;
+                alpineComponent.precision = precision;
 
-            // Draw all patterns initially
-            alpineComponent.drawAllPatterns();
+                // Draw all patterns initially
+                alpineComponent.drawAllPatterns();
+            }
 
             // Subscribe to visible range changes for lazy loading
             chart.timeScale().subscribeVisibleLogicalRangeChange((logicalRange) => {
