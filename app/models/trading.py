@@ -21,6 +21,10 @@ class Symbol(db.Model):
     patterns = db.relationship('Pattern', backref='symbol', lazy='dynamic')
     signals = db.relationship('Signal', backref='symbol', lazy='dynamic')
 
+    __table_args__ = (
+        db.Index('idx_symbol_is_active', 'is_active'),
+    )
+
     def __repr__(self):
         return f'<Symbol {self.symbol}>'
 
@@ -103,6 +107,8 @@ class Pattern(db.Model):
         db.Index('idx_pattern_active', 'symbol_id', 'timeframe', 'status'),
         db.Index('idx_pattern_detected', 'detected_at'),
         db.Index('idx_pattern_list', 'status', 'detected_at'),  # For pattern list page queries
+        db.Index('idx_pattern_direction', 'direction'),
+        db.Index('idx_pattern_type', 'pattern_type'),
     )
 
     def __repr__(self):

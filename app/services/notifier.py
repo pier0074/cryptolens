@@ -181,7 +181,7 @@ def notify_signal(signal: Signal, test_mode: bool = False, current_price: float 
     if signal.timeframes_aligned:
         try:
             aligned_tfs = json.loads(signal.timeframes_aligned)
-        except:
+        except (json.JSONDecodeError, TypeError, ValueError):
             pass
     tfs_str = ', '.join(aligned_tfs) if aligned_tfs else pattern_tf
 
@@ -503,7 +503,7 @@ def notify_all_subscribers(signal: Signal, test_mode: bool = False,
     if signal.timeframes_aligned:
         try:
             aligned_tfs = json.loads(signal.timeframes_aligned)
-        except:
+        except (json.JSONDecodeError, TypeError, ValueError):
             pass
     tfs_str = ', '.join(aligned_tfs) if aligned_tfs else pattern_tf
 

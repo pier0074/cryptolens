@@ -116,8 +116,9 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
                     aggregate_candles(symbol_name, '1m', tf)
                 else:
                     aggregate_candles_realtime(symbol_name, '1m', tf)
-            except Exception:
-                pass
+            except Exception as e:
+                if verbose:
+                    print(f"  Warning: Aggregation failed for {tf}: {e}")
 
         # 3. Detect patterns on all timeframes
         # Scan limit = number of candles fetched + context buffer
@@ -139,8 +140,9 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
                         patterns = detector.detect(symbol_name, tf, limit=tf_limit)
                         if patterns:
                             patterns_found += len(patterns)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        if verbose:
+                            print(f"  Warning: Pattern detection failed for {detector.__class__.__name__} on {tf}: {e}")
 
         # 4. Update pattern status with current price
         if ohlcv:
@@ -151,8 +153,9 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
                     for tf in ['1m'] + ALL_TIMEFRAMES:
                         try:
                             detector.update_pattern_status(symbol_name, tf, current_price)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            if verbose:
+                                print(f"  Warning: Pattern status update failed for {detector.__class__.__name__} on {tf}: {e}")
 
         _elapsed = _time.time() - _t0
         if verbose and (new_count > 0 or patterns_found > 0):

@@ -69,6 +69,7 @@ class User(db.Model):
     __table_args__ = (
         db.Index('idx_user_email', 'email'),
         db.Index('idx_user_active', 'is_active', 'is_verified'),
+        db.Index('idx_user_admin', 'is_admin'),
     )
 
     def __repr__(self):
@@ -340,6 +341,7 @@ class Subscription(db.Model):
     __table_args__ = (
         db.Index('idx_subscription_status', 'status'),
         db.Index('idx_subscription_expires', 'expires_at'),
+        db.Index('idx_subscription_user_status', 'user_id', 'status'),
     )
 
     def __repr__(self):

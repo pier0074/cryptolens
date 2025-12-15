@@ -14,7 +14,7 @@ from app.services.subscription import (
     SubscriptionError
 )
 from app.models import User, Subscription, SUBSCRIPTION_PLANS, CronJob, CronRun, CRON_JOB_TYPES, CRON_CATEGORIES
-from app import db
+from app import db, limiter
 from datetime import datetime, timezone, timedelta
 
 admin_bp = Blueprint('admin', __name__)
@@ -162,6 +162,7 @@ def unlock_user_route(user_id):
 
 
 @admin_bp.route('/users/bulk-action', methods=['POST'])
+@limiter.limit("30 per minute")
 @admin_required
 def bulk_user_action():
     """Perform bulk actions on multiple users"""
@@ -180,43 +181,48 @@ def bulk_user_action():
     success_count = 0
     skip_count = 0
 
-    for user_id in user_ids:
-        # Prevent self-modification for destructive actions
-        if user_id == current.id and action in ['deactivate']:
-            skip_count += 1
-            continue
+    try:
+        for user_id in user_ids:
+            # Prevent self-modification for destructive actions
+            if user_id == current.id and action in ['deactivate']:
+                skip_count += 1
+                continue
 
-        user = db.session.get(User, user_id)
-        if not user:
-            continue
+            user = db.session.get(User, user_id)
+            if not user:
+                continue
 
-        if action == 'activate':
-            user.is_active = True
-            success_count += 1
-        elif action == 'deactivate':
-            user.is_active = False
-            success_count += 1
-        elif action == 'verify':
-            user.is_verified = True
-            user.email_verification_token = None
-            user.email_verification_expires = None
-            success_count += 1
-        elif action == 'unlock':
-            user.failed_attempts = 0
-            user.locked_until = None
-            success_count += 1
+            if action == 'activate':
+                user.is_active = True
+                success_count += 1
+            elif action == 'deactivate':
+                user.is_active = False
+                success_count += 1
+            elif action == 'verify':
+                user.is_verified = True
+                user.email_verification_token = None
+                user.email_verification_expires = None
+                success_count += 1
+            elif action == 'unlock':
+                user.failed_attempts = 0
+                user.locked_until = None
+                success_count += 1
 
-    db.session.commit()
+        db.session.commit()
 
-    if success_count > 0:
-        flash(f'Successfully applied {action} to {success_count} user(s).', 'success')
-    if skip_count > 0:
-        flash(f'Skipped {skip_count} user(s) (cannot modify yourself).', 'warning')
+        if success_count > 0:
+            flash(f'Successfully applied {action} to {success_count} user(s).', 'success')
+        if skip_count > 0:
+            flash(f'Skipped {skip_count} user(s) (cannot modify yourself).', 'warning')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Bulk operation failed: {str(e)}', 'error')
 
     return redirect(url_for('admin.users'))
 
 
 @admin_bp.route('/users/<int:user_id>/make-admin', methods=['POST'])
+@limiter.limit("10 per minute")
 @admin_required
 def make_admin_route(user_id):
     """Grant admin privileges"""
@@ -228,6 +234,7 @@ def make_admin_route(user_id):
 
 
 @admin_bp.route('/users/<int:user_id>/revoke-admin', methods=['POST'])
+@limiter.limit("10 per minute")
 @admin_required
 def revoke_admin_route(user_id):
     """Revoke admin privileges"""
@@ -245,6 +252,7 @@ def revoke_admin_route(user_id):
 
 
 @admin_bp.route('/users/<int:user_id>/subscription', methods=['POST'])
+@limiter.limit("30 per minute")
 @admin_required
 def modify_subscription(user_id):
     """Modify user subscription"""
@@ -278,14 +286,20 @@ def modify_subscription(user_id):
         else:
             flash('Invalid action.', 'error')
     except SubscriptionError as e:
+        db.session.rollback()
         flash(str(e), 'error')
     except ValueError as e:
+        db.session.rollback()
         flash(f'Invalid custom days value: {e}', 'error')
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Subscription operation failed: {str(e)}', 'error')
 
     return redirect(url_for('admin.user_detail', user_id=user_id))
 
 
 @admin_bp.route('/users/create', methods=['GET', 'POST'])
+@limiter.limit("10 per minute")
 @admin_required
 def create_user():
     """Create a new user (admin)"""
@@ -854,6 +868,7 @@ def delete_template(template_id):
 # ----- BROADCAST -----
 
 @admin_bp.route('/notifications/broadcast', methods=['GET', 'POST'])
+@limiter.limit("5 per minute")
 @admin_required
 def broadcast():
     """Send a broadcast notification"""
@@ -1252,6 +1267,7 @@ def api_toggle_symbol():
 
 
 @admin_bp.route('/api/symbols/bulk', methods=['POST'])
+@limiter.limit("10 per minute")
 @admin_required
 def api_bulk_symbols():
     """Bulk enable/disable symbols"""

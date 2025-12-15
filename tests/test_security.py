@@ -533,12 +533,6 @@ class TestProductionConfigEnforcement:
                 assert response.status_code in [401, 503]
 
 
-import sys
-
-@pytest.mark.skipif(
-    sys.version_info >= (3, 14),
-    reason="SQLite threading causes segfaults on Python 3.14+"
-)
 class TestConcurrentDatabaseAccess:
     """Tests for concurrent database access safety"""
 

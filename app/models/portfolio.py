@@ -152,6 +152,7 @@ class Trade(db.Model):
     __table_args__ = (
         db.Index('idx_trade_portfolio_status', 'portfolio_id', 'status'),
         db.Index('idx_trade_symbol', 'symbol'),
+        db.Index('idx_trade_signal', 'signal_id'),
     )
 
     def __repr__(self):
