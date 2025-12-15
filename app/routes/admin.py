@@ -651,7 +651,9 @@ def resolve_error(error_id):
     error = ErrorLog.query.get_or_404(error_id)
     error.status = 'resolved'
     error.resolved_at = datetime.now(timezone.utc)
-    error.resolved_by = session.get('user_id')
+    # Use the authenticated user from decorator; session.get() could theoretically be None
+    current_user = get_current_user()
+    error.resolved_by = current_user.id if current_user else session.get('user_id')
     error.notes = request.form.get('notes', '')
     db.session.commit()
     flash('Error resolved.', 'success')

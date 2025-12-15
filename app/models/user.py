@@ -476,6 +476,8 @@ class UserNotification(db.Model):
     __table_args__ = (
         db.Index('idx_user_notification_lookup', 'user_id', 'signal_id'),
         db.Index('idx_user_notification_sent', 'sent_at'),
+        # Composite index for daily notification count queries (user_id, sent_at, success)
+        db.Index('idx_user_notif_daily', 'user_id', 'sent_at', 'success'),
     )
 
     def __repr__(self):

@@ -6,6 +6,7 @@ from typing import Tuple, List, Dict, Any, Optional, Callable
 import ccxt
 import time
 import logging
+import threading
 from datetime import datetime, timedelta, timezone
 from app import db
 from app.models import Symbol, Candle
@@ -13,48 +14,51 @@ from app.config import Config
 
 logger = logging.getLogger(__name__)
 
-# Singleton exchange instance cache
+# Singleton exchange instance cache with thread safety
 _exchange_instance = None
 _exchange_id = None
+_exchange_lock = threading.Lock()
 
 
 def get_exchange():
-    """Get configured exchange instance (singleton pattern)"""
+    """Get configured exchange instance (thread-safe singleton pattern)"""
     global _exchange_instance, _exchange_id
 
     exchange_id = getattr(Config, 'EXCHANGE', 'binance')
 
-    # Return cached instance if same exchange
+    # Fast path: Return cached instance if same exchange (no lock needed for read)
     if _exchange_instance is not None and _exchange_id == exchange_id:
         return _exchange_instance
 
-    # Clean up existing instance before creating new one
-    if _exchange_instance is not None:
-        cleanup_exchange()
+    # Slow path: Need to create or replace instance
+    with _exchange_lock:
+        # Double-check after acquiring lock (another thread may have created it)
+        if _exchange_instance is not None and _exchange_id == exchange_id:
+            return _exchange_instance
 
-    # Create new instance
-    exchange_class = getattr(ccxt, exchange_id, ccxt.binance)
-    _exchange_instance = exchange_class({
-        'enableRateLimit': True,
-        'options': {
-            'defaultType': 'spot'
-        }
-    })
-    _exchange_id = exchange_id
+        # Clean up existing instance before creating new one
+        if _exchange_instance is not None:
+            _cleanup_exchange_unsafe()
 
-    return _exchange_instance
+        # Create new instance
+        exchange_class = getattr(ccxt, exchange_id, ccxt.binance)
+        _exchange_instance = exchange_class({
+            'enableRateLimit': True,
+            'options': {
+                'defaultType': 'spot'
+            }
+        })
+        _exchange_id = exchange_id
+
+        return _exchange_instance
 
 
-def cleanup_exchange():
-    """
-    Clean up the exchange singleton instance.
-    Should be called during application shutdown or test teardown.
-    """
+def _cleanup_exchange_unsafe():
+    """Internal cleanup without lock - caller must hold _exchange_lock"""
     global _exchange_instance, _exchange_id
 
     if _exchange_instance is not None:
         try:
-            # Close any open connections if the exchange supports it
             if hasattr(_exchange_instance, 'close'):
                 _exchange_instance.close()
         except Exception as e:
@@ -62,6 +66,15 @@ def cleanup_exchange():
         finally:
             _exchange_instance = None
             _exchange_id = None
+
+
+def cleanup_exchange():
+    """
+    Clean up the exchange singleton instance (thread-safe).
+    Should be called during application shutdown or test teardown.
+    """
+    with _exchange_lock:
+        _cleanup_exchange_unsafe()
 
 
 def fetch_candles(symbol: str, timeframe: str, limit: int = None, since: int = None) -> Tuple[int, int]:

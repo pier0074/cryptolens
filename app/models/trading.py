@@ -379,13 +379,26 @@ class UserSymbolPreference(db.Model):
 
     @classmethod
     def get_or_create(cls, user_id, symbol_id):
-        """Get or create a preference, defaulting to notify_enabled=True"""
+        """Get or create a preference, defaulting to notify_enabled=True.
+
+        Uses database-level upsert semantics to avoid race conditions.
+        """
+        from sqlalchemy.exc import IntegrityError
+
         pref = cls.query.filter_by(user_id=user_id, symbol_id=symbol_id).first()
-        if not pref:
+        if pref:
+            return pref
+
+        # Try to create new preference
+        try:
             pref = cls(user_id=user_id, symbol_id=symbol_id, notify_enabled=True)
             db.session.add(pref)
             db.session.commit()
-        return pref
+            return pref
+        except IntegrityError:
+            # Race condition: another request created it first
+            db.session.rollback()
+            return cls.query.filter_by(user_id=user_id, symbol_id=symbol_id).first()
 
     @classmethod
     def is_notify_enabled(cls, user_id, symbol_id):
