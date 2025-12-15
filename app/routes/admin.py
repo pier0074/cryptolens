@@ -162,7 +162,7 @@ def unlock_user_route(user_id):
 
 
 @admin_bp.route('/users/bulk-action', methods=['POST'])
-@limiter.limit("30 per minute")
+@limiter.limit("100 per minute")
 @admin_required
 def bulk_user_action():
     """Perform bulk actions on multiple users"""
@@ -222,7 +222,7 @@ def bulk_user_action():
 
 
 @admin_bp.route('/users/<int:user_id>/make-admin', methods=['POST'])
-@limiter.limit("10 per minute")
+@limiter.limit("60 per minute")
 @admin_required
 def make_admin_route(user_id):
     """Grant admin privileges"""
@@ -234,7 +234,7 @@ def make_admin_route(user_id):
 
 
 @admin_bp.route('/users/<int:user_id>/revoke-admin', methods=['POST'])
-@limiter.limit("10 per minute")
+@limiter.limit("60 per minute")
 @admin_required
 def revoke_admin_route(user_id):
     """Revoke admin privileges"""
@@ -252,7 +252,7 @@ def revoke_admin_route(user_id):
 
 
 @admin_bp.route('/users/<int:user_id>/subscription', methods=['POST'])
-@limiter.limit("30 per minute")
+@limiter.limit("100 per minute")
 @admin_required
 def modify_subscription(user_id):
     """Modify user subscription"""
@@ -299,7 +299,7 @@ def modify_subscription(user_id):
 
 
 @admin_bp.route('/users/create', methods=['GET', 'POST'])
-@limiter.limit("10 per minute")
+@limiter.limit("60 per minute")
 @admin_required
 def create_user():
     """Create a new user (admin)"""
@@ -868,7 +868,7 @@ def delete_template(template_id):
 # ----- BROADCAST -----
 
 @admin_bp.route('/notifications/broadcast', methods=['GET', 'POST'])
-@limiter.limit("5 per minute")
+@limiter.limit("30 per minute")
 @admin_required
 def broadcast():
     """Send a broadcast notification"""
@@ -1267,7 +1267,7 @@ def api_toggle_symbol():
 
 
 @admin_bp.route('/api/symbols/bulk', methods=['POST'])
-@limiter.limit("10 per minute")
+@limiter.limit("60 per minute")
 @admin_required
 def api_bulk_symbols():
     """Bulk enable/disable symbols"""

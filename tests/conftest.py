@@ -22,9 +22,8 @@ def app():
     app = create_app('testing')
     app.config.update({
         'TESTING': True,
-        # Use check_same_thread=False for SQLite to allow multi-threaded access
-        'SQLALCHEMY_DATABASE_URI': f'sqlite:///{db_path}?check_same_thread=False',
-        'WTF_CSRF_ENABLED': False,  # Disable CSRF for testing
+        'SQLALCHEMY_DATABASE_URI': f'sqlite:///{db_path}',
+        'WTF_CSRF_ENABLED': False,
         'SECRET_KEY': 'test-secret-key'
     })
 
