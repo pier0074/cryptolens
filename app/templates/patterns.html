@@ -85,11 +85,10 @@
                 </span>
                 <!-- Legend when pattern selected -->
                 <div x-show="selectedPatternIds.length > 0" class="flex items-center space-x-3 text-xs">
-                    <span class="flex items-center"><span class="w-3 h-0.5 bg-green-500 mr-1"></span><span class="w-3 h-0.5 bg-red-500 mr-1"></span>Zone</span>
-                    <span class="flex items-center"><span class="w-3 h-0.5 bg-blue-500 mr-1 border-dashed"></span>Entry</span>
+                    <span class="flex items-center"><span class="w-3 h-3 bg-green-500/20 border border-green-500 mr-1"></span>Zone</span>
+                    <span class="flex items-center"><span class="w-3 h-0.5 bg-blue-500 mr-1"></span>Entry</span>
                     <span class="flex items-center"><span class="w-3 h-0.5 bg-red-400 mr-1"></span>SL</span>
-                    <span class="flex items-center"><span class="w-3 h-0.5 bg-green-400 mr-1"></span>TP1</span>
-                    <span class="flex items-center"><span class="w-3 h-0.5 bg-green-500 mr-1"></span>TP2</span>
+                    <span class="flex items-center"><span class="w-3 h-0.5 bg-green-400 mr-1"></span>TP</span>
                 </div>
             </div>
             <div class="flex space-x-2">
@@ -599,6 +598,8 @@ function patternChart() {
             const candles = this.chartData.candles;
             const firstTime = candles[0].timestamp / 1000;
             const lastTime = candles[candles.length - 1].timestamp / 1000;
+            // Far future time so lines always extend to right edge
+            const farFuture = Math.floor(Date.now() / 1000) + (365 * 24 * 60 * 60); // 1 year ahead
             const markers = [];
 
             const priceFormat = {
@@ -607,32 +608,23 @@ function patternChart() {
                 minMove: Math.pow(10, -this.precision),
             };
 
-            // Helper to create a line series starting from pattern time
+            // Helper to create a line series from pattern time to far right
             const addLine = (startTime, price, color, lineWidth, lineStyle, title) => {
                 const effectiveStart = Math.max(startTime, firstTime);
                 const series = this.chart.addLineSeries({
                     color: color,
                     lineWidth: lineWidth,
                     lineStyle: lineStyle,
-                    priceLineVisible: false,  // Don't extend line across entire chart
-                    lastValueVisible: true,   // Show price label on right axis
+                    priceLineVisible: false,
+                    lastValueVisible: true,
                     crosshairMarkerVisible: false,
                     priceFormat,
                     title: title,
                 });
-                // Line from pattern start to chart end
                 series.setData([
                     { time: effectiveStart, value: price },
-                    { time: lastTime, value: price }
+                    { time: farFuture, value: price }
                 ]);
-                // Add a marker at the start of the line
-                series.setMarkers([{
-                    time: effectiveStart,
-                    position: 'inBar',
-                    color: color,
-                    shape: 'circle',
-                    size: 0.5,
-                }]);
                 this.patternSeries.push(series);
             };
 
@@ -640,11 +632,31 @@ function patternChart() {
             Object.values(this.selectedPatterns).forEach(pattern => {
                 const { zoneLow, zoneHigh, direction, entry, sl, tp1, tp2, detectedAt } = pattern;
                 const zoneColor = direction === 'bullish' ? '#22c55e' : '#ef4444';
+                const zoneFillColor = direction === 'bullish' ? 'rgba(34, 197, 94, 0.15)' : 'rgba(239, 68, 68, 0.15)';
                 const patternStartTime = detectedAt / 1000;
+                const effectiveStart = Math.max(patternStartTime, firstTime);
 
-                // Zone High & Low (solid lines from pattern time)
-                addLine(patternStartTime, zoneHigh, zoneColor, 2, 0, 'Zone H');
-                addLine(patternStartTime, zoneLow, zoneColor, 2, 0, 'Zone L');
+                // Zone filled area using baseline series
+                const zoneBand = this.chart.addBaselineSeries({
+                    baseValue: { type: 'price', price: zoneLow },
+                    topFillColor1: zoneFillColor,
+                    topFillColor2: zoneFillColor,
+                    bottomFillColor1: 'transparent',
+                    bottomFillColor2: 'transparent',
+                    topLineColor: zoneColor,
+                    bottomLineColor: zoneColor,
+                    lineWidth: 2,
+                    lineStyle: 0,
+                    priceLineVisible: false,
+                    lastValueVisible: false,
+                    crosshairMarkerVisible: false,
+                    priceFormat,
+                });
+                zoneBand.setData([
+                    { time: effectiveStart, value: zoneHigh },
+                    { time: farFuture, value: zoneHigh }
+                ]);
+                this.patternSeries.push(zoneBand);
 
                 // Entry (blue dashed)
                 addLine(patternStartTime, entry, '#3b82f6', 1, 2, 'Entry');
@@ -662,7 +674,7 @@ function patternChart() {
                     addLine(patternStartTime, tp2, '#22c55e', 1, 2, 'TP2');
                 }
 
-                // Add marker at pattern detection time
+                // Add arrow marker at pattern detection time
                 if (patternStartTime >= firstTime && patternStartTime <= lastTime) {
                     markers.push({
                         time: patternStartTime,
@@ -674,7 +686,7 @@ function patternChart() {
                 }
             });
 
-            // Set all markers
+            // Set all markers on candlestick series
             if (markers.length > 0) {
                 markers.sort((a, b) => a.time - b.time);
                 this.candlestickSeries.setMarkers(markers);
