@@ -26,6 +26,8 @@ def index():
 @feature_required('backtest')
 def run():
     """Run a backtest (Premium only)"""
+    from app.services.patterns import PATTERN_TYPES
+
     data = request.get_json()
 
     symbol = data.get('symbol')
@@ -33,6 +35,13 @@ def run():
     start_date = data.get('start_date')
     end_date = data.get('end_date')
     pattern_type = data.get('pattern_type', 'imbalance')
+
+    # Validate pattern type
+    if pattern_type not in PATTERN_TYPES:
+        return jsonify({
+            'success': False,
+            'error': f'Invalid pattern type. Must be one of: {PATTERN_TYPES}'
+        }), 400
 
     # Import backtester service
     from app.services.backtester import run_backtest

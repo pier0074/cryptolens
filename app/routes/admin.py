@@ -742,14 +742,39 @@ def create_template():
     from app.models import NotificationTemplate, NOTIFICATION_TEMPLATE_TYPES
 
     if request.method == 'POST':
+        name = request.form.get('name', '')
+        template_type = request.form.get('template_type', '')
+        title = request.form.get('title', '')
+        message = request.form.get('message', '')
+        tags = request.form.get('tags', '')
+
+        # Validate input lengths
+        errors = []
+        if not name or len(name) > 100:
+            errors.append('Name is required and must be less than 100 characters')
+        if not template_type or len(template_type) > 20:
+            errors.append('Template type is required and must be less than 20 characters')
+        if not title or len(title) > 200:
+            errors.append('Title is required and must be less than 200 characters')
+        if not message or len(message) > 10000:
+            errors.append('Message is required and must be less than 10000 characters')
+        if tags and len(tags) > 100:
+            errors.append('Tags must be less than 100 characters')
+
+        if errors:
+            for error in errors:
+                flash(error, 'danger')
+            return render_template('admin/create_template.html',
+                                   template_types=NOTIFICATION_TEMPLATE_TYPES)
+
         current = get_current_user()
         template = NotificationTemplate(
-            name=request.form.get('name'),
-            template_type=request.form.get('template_type'),
-            title=request.form.get('title'),
-            message=request.form.get('message'),
+            name=name,
+            template_type=template_type,
+            title=title,
+            message=message,
             priority=int(request.form.get('priority', 3)),
-            tags=request.form.get('tags'),
+            tags=tags if tags else None,
             created_by=current.id
         )
         db.session.add(template)
@@ -770,12 +795,38 @@ def edit_template(template_id):
     template = NotificationTemplate.query.get_or_404(template_id)
 
     if request.method == 'POST':
-        template.name = request.form.get('name')
-        template.template_type = request.form.get('template_type')
-        template.title = request.form.get('title')
-        template.message = request.form.get('message')
+        name = request.form.get('name', '')
+        template_type = request.form.get('template_type', '')
+        title = request.form.get('title', '')
+        message = request.form.get('message', '')
+        tags = request.form.get('tags', '')
+
+        # Validate input lengths
+        errors = []
+        if not name or len(name) > 100:
+            errors.append('Name is required and must be less than 100 characters')
+        if not template_type or len(template_type) > 20:
+            errors.append('Template type is required and must be less than 20 characters')
+        if not title or len(title) > 200:
+            errors.append('Title is required and must be less than 200 characters')
+        if not message or len(message) > 10000:
+            errors.append('Message is required and must be less than 10000 characters')
+        if tags and len(tags) > 100:
+            errors.append('Tags must be less than 100 characters')
+
+        if errors:
+            for error in errors:
+                flash(error, 'danger')
+            return render_template('admin/edit_template.html',
+                                   template=template,
+                                   template_types=NOTIFICATION_TEMPLATE_TYPES)
+
+        template.name = name
+        template.template_type = template_type
+        template.title = title
+        template.message = message
         template.priority = int(request.form.get('priority', 3))
-        template.tags = request.form.get('tags')
+        template.tags = tags if tags else None
         template.is_active = 'is_active' in request.form
         db.session.commit()
         flash(f'Template "{template.name}" updated.', 'success')
@@ -1323,8 +1374,16 @@ def save_fetch_settings():
     """Save fetch settings (start date)"""
     from app.models import Setting
     from app.services.logger import log_admin
+    from datetime import datetime
 
     fetch_start_date = request.form.get('fetch_start_date', '2024-01-01')
+
+    # Validate date format (YYYY-MM-DD)
+    try:
+        datetime.strptime(fetch_start_date, '%Y-%m-%d')
+    except ValueError:
+        flash('Invalid date format. Please use YYYY-MM-DD format.', 'danger')
+        return redirect(url_for('admin.symbols'))
 
     # Get or create setting
     setting = Setting.query.filter_by(key='fetch_start_date').first()

@@ -44,13 +44,17 @@ def index():
     query = limit_query_results(query, 'signals_limit')
     signals = query.all()
 
+    # Bulk load symbols and patterns to avoid N+1 queries
+    symbol_ids = {s.symbol_id for s in signals}
+    pattern_ids = {s.pattern_id for s in signals if s.pattern_id}
+
+    symbols_map = {s.id: s for s in Symbol.query.filter(Symbol.id.in_(symbol_ids)).all()} if symbol_ids else {}
+    patterns_map = {p.id: p for p in Pattern.query.filter(Pattern.id.in_(pattern_ids)).all()} if pattern_ids else {}
+
     # Enrich with symbol and pattern data
     for signal in signals:
-        signal.symbol_obj = db.session.get(Symbol, signal.symbol_id)
-        if signal.pattern_id:
-            signal.pattern_obj = db.session.get(Pattern, signal.pattern_id)
-        else:
-            signal.pattern_obj = None
+        signal.symbol_obj = symbols_map.get(signal.symbol_id)
+        signal.pattern_obj = patterns_map.get(signal.pattern_id) if signal.pattern_id else None
 
     return render_template('signals.html',
                            signals=signals,

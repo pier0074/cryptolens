@@ -70,93 +70,59 @@
 
 ### Security: HTTP & Webhooks
 
-- [ ] **Missing HTTP timeouts** - `app/services/payment.py`
-  - Line 77: LemonSqueezy checkout - no timeout
-  - Line 275: NOWPayments invoice - no timeout
-  - Line 549: NOWPayments currencies - no timeout + bare except
-  - Add `timeout=30` to all `requests.*` calls
+- [x] **Missing HTTP timeouts** - `app/services/payment.py` ✅ FIXED
+  - Added `timeout=30` to all 3 `requests.*` calls
+  - Fixed bare except clause in `get_available_cryptos()`
 
-- [ ] **Webhook validation bypass** - `app/services/payment.py:162`
-  ```python
-  if not LEMONSQUEEZY_WEBHOOK_SECRET:
-      log_system("WARNING...")
-      # Missing return! Execution continues without validation
-  ```
-  - Add explicit `return {'success': False, 'error': '...'}`
+- [x] **Webhook validation bypass** - `app/services/payment.py:162` ✅ ALREADY FIXED
+  - Already returns `False` when secret not configured
 
-- [ ] **Missing CSRF on key operations** - `app/routes/docs.py`
-  - Line 117: `/generate-key` POST - no CSRF
-  - Line 140: `/revoke-key` POST - no CSRF
-  - Add CSRF token validation
+- [x] **Missing CSRF on key operations** - `app/routes/docs.py` ✅ ALREADY FIXED
+  - CSRF tokens already in templates (`api/index.html`)
+  - Blueprint not exempt from global CSRF protection
 
 ### Security: Input Validation
 
-- [ ] **Unvalidated date input** - `app/routes/admin.py:1327`
-  ```python
-  fetch_start_date = request.form.get('fetch_start_date', '2024-01-01')
-  setting.value = fetch_start_date  # No validation!
-  ```
-  - Validate date format with `datetime.strptime()`
+- [x] **Unvalidated date input** - `app/routes/admin.py` ✅ FIXED
+  - Added `datetime.strptime()` validation for YYYY-MM-DD format
 
-- [ ] **Unvalidated status field** - `app/routes/signals.py:82`
-  ```python
-  signal.status = data['status']  # Any string accepted!
-  ```
-  - Whitelist: `['active', 'filled', 'expired', 'cancelled']`
+- [x] **Unvalidated status field** - `app/routes/signals.py` ✅ FIXED (CRITICAL)
+  - Already fixed in critical fixes with `VALID_SIGNAL_STATUSES` whitelist
 
-- [ ] **Unvalidated pattern type** - `app/routes/backtest.py:35`
-  ```python
-  pattern_type = data.get('pattern_type', 'imbalance')  # Not validated
-  ```
-  - Whitelist: `['imbalance', 'order_block', 'liquidity_sweep']`
+- [x] **Unvalidated pattern type** - `app/routes/backtest.py` ✅ FIXED
+  - Added whitelist validation using `PATTERN_TYPES`
 
-- [ ] **Missing input length limits** - `app/routes/admin.py:747-751`
-  - NotificationTemplate fields have no length validation
-  - Add max length checks for `name`, `title`, `message`, `tags`
+- [x] **Missing input length limits** - `app/routes/admin.py` ✅ FIXED
+  - Added length validation to `create_template()` and `edit_template()`
+  - Validates: name (100), template_type (20), title (200), message (10000), tags (100)
 
-- [ ] **Integer bounds not checked** - Multiple locations
-  - `app/routes/api.py:178` - `limit` parameter
-  - `app/routes/logs.py:45` - `limit`, `offset` parameters
-  - `app/routes/patterns.py:159` - `limit` parameter
-  - Add `min()` bounds: `limit = min(int(request.args.get('limit', 200)), 1000)`
+- [x] **Integer bounds not checked** - Multiple locations ✅ FIXED
+  - `app/routes/api.py` - candles limit (1-2000), patterns limit (1-1000)
+  - `app/routes/logs.py` - limit (1-1000), offset (>=0)
+  - `app/routes/patterns.py` - limit (1-2000)
 
 ### Performance: N+1 Queries
 
-- [ ] **Dashboard analytics loop** - `app/routes/dashboard.py:146-150`
-  ```python
-  for s in symbols:
-      count = Pattern.query.filter_by(symbol_id=s.id, status='active').count()
-  ```
-  - 101 queries for 100 symbols
-  - Use aggregation query with `func.count()` and `group_by()`
+- [x] **Dashboard analytics loop** - `app/routes/dashboard.py` ✅ FIXED
+  - Replaced loop with single aggregation query using `group_by()`
 
-- [ ] **Signal enrichment loop** - `app/routes/signals.py:48-53`
-  ```python
-  for signal in signals:
-      signal.symbol_obj = db.session.get(Symbol, signal.symbol_id)
-  ```
-  - Use `joinedload()` or eager loading
+- [x] **Signal enrichment loop** - `app/routes/signals.py` ✅ FIXED
+  - Replaced N+1 with bulk fetch using `Symbol.id.in_()` and `Pattern.id.in_()`
+
+- [x] **Pattern type statistics** - `app/routes/dashboard.py` ✅ FIXED
+  - Replaced loop with single `group_by(Pattern.pattern_type)` query
 
 - [ ] **Dashboard matrix building** - `app/routes/dashboard.py:43-57`
   - 30 queries (5 symbols × 6 timeframes)
-  - Batch query with single JOIN
-
-- [ ] **Pattern type statistics** - `app/routes/dashboard.py:131-134`
-  ```python
-  for pt in PATTERN_TYPES:
-      patterns_by_type[pt] = Pattern.query.filter_by(pattern_type=pt).count()
-  ```
-  - Use single query with `group_by(Pattern.pattern_type)`
+  - Consider batch query with single JOIN (lower priority)
 
 ### Documentation: Missing CLI Arguments
 
-- [ ] **fetch_historical.py missing 4 arguments** - `scripts/fetch_historical.py:11-16`
-  - Missing from docs: `--verbose`, `--no-aggregate`, `--full`, `--symbol`
-  - Update docstring usage section
+- [x] **fetch_historical.py missing arguments** ✅ FIXED (CRITICAL)
+  - All 8 options documented in docstring
 
-- [ ] **db_health.py missing 2 arguments** - `scripts/db_health.py:14-21`
-  - Missing from docs: `--quiet`, `--clear-gaps`
-  - Update docstring usage section
+- [x] **db_health.py missing arguments** ✅ FIXED (CRITICAL)
+  - `--quiet` and `--clear-gaps` documented in docstring
 
 ---
 

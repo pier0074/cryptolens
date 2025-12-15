@@ -128,10 +128,15 @@ def analytics():
         'notified_signals': Signal.query.filter_by(status='notified').count(),
     }
 
-    # Patterns by type
-    patterns_by_type = {}
-    for pt in PATTERN_TYPES:
-        patterns_by_type[pt] = Pattern.query.filter_by(pattern_type=pt).count()
+    # Patterns by type (single aggregation query instead of N+1)
+    pattern_type_counts = db.session.query(
+        Pattern.pattern_type,
+        func.count(Pattern.id)
+    ).group_by(Pattern.pattern_type).all()
+    patterns_by_type = {pt: 0 for pt in PATTERN_TYPES}
+    for pt, count in pattern_type_counts:
+        if pt in patterns_by_type:
+            patterns_by_type[pt] = count
 
     # Patterns by direction
     bullish_count = Pattern.query.filter_by(direction='bullish', status='active').count()
@@ -141,15 +146,17 @@ def analytics():
     day_ago = datetime.now(timezone.utc) - timedelta(days=1)
     recent_patterns = Pattern.query.filter(Pattern.created_at >= day_ago).count()
 
-    # Top performing symbols (by pattern count)
-    top_symbols = []
-    symbols = Symbol.query.filter_by(is_active=True).all()
-    for s in symbols:
-        count = Pattern.query.filter_by(symbol_id=s.id, status='active').count()
-        if count > 0:
-            top_symbols.append({'symbol': s.symbol, 'patterns': count})
-    top_symbols.sort(key=lambda x: x['patterns'], reverse=True)
-    top_symbols = top_symbols[:10]
+    # Top performing symbols (single aggregation query instead of N+1)
+    top_symbols_query = db.session.query(
+        Symbol.symbol,
+        func.count(Pattern.id).label('pattern_count')
+    ).join(Pattern, Pattern.symbol_id == Symbol.id).filter(
+        Symbol.is_active == True,
+        Pattern.status == 'active'
+    ).group_by(Symbol.id, Symbol.symbol).order_by(
+        func.count(Pattern.id).desc()
+    ).limit(10).all()
+    top_symbols = [{'symbol': s, 'patterns': c} for s, c in top_symbols_query]
 
     return render_template('analytics.html',
                            stats=stats,

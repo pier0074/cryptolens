@@ -157,6 +157,7 @@ def chart(symbol, timeframe):
         '1w': 100
     }
     limit = request.args.get('limit', type=int) or default_limits.get(timeframe, 200)
+    limit = min(max(limit, 1), 2000)  # Bound limit between 1 and 2000
     before = request.args.get('before', type=int)  # Timestamp in ms
 
     # Build query

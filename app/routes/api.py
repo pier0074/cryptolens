@@ -175,7 +175,7 @@ def get_candles(symbol: str, timeframe: str) -> JsonResponse:
     if not sym:
         return jsonify({'error': 'Symbol not found'}), 404
 
-    limit = request.args.get('limit', 200, type=int)
+    limit = min(max(request.args.get('limit', 200, type=int), 1), 2000)
 
     candles = Candle.query.filter_by(
         symbol_id=sym.id,
@@ -191,7 +191,7 @@ def get_patterns() -> Response:
     symbol = request.args.get('symbol')
     timeframe = request.args.get('timeframe')
     status = request.args.get('status', 'active')
-    limit = request.args.get('limit', 100, type=int)
+    limit = min(max(request.args.get('limit', 100, type=int), 1), 1000)
 
     query = Pattern.query
 

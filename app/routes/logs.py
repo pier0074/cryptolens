@@ -42,8 +42,8 @@ def api_logs():
     category = request.args.get('category', None)
     level = request.args.get('level', None)
     symbol = request.args.get('symbol', None)
-    limit = int(request.args.get('limit', 100))
-    offset = int(request.args.get('offset', 0))
+    limit = min(max(int(request.args.get('limit', 100)), 1), 1000)
+    offset = max(int(request.args.get('offset', 0)), 0)
 
     # Empty string means no filter
     if category == '':

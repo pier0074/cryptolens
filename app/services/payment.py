@@ -109,7 +109,8 @@ def create_lemonsqueezy_checkout(user, plan, billing_cycle='monthly'):
                         }
                     }
                 }
-            }
+            },
+            timeout=30
         )
 
         if response.status_code == 201:
@@ -285,7 +286,8 @@ def create_nowpayments_invoice(user, plan, billing_cycle='monthly', crypto_curre
                 'order_id': f'cryptolens_{user.id}_{plan}_{int(datetime.now().timestamp())}',
                 'order_description': f'CryptoLens {plan.title()} ({billing_cycle})',
                 'ipn_callback_url': os.environ.get('APP_URL', '') + '/payments/nowpayments/webhook',
-            }
+            },
+            timeout=30
         )
 
         if response.status_code == 200:
@@ -548,7 +550,8 @@ def get_available_cryptos():
     try:
         response = requests.get(
             'https://api.nowpayments.io/v1/currencies',
-            headers={'x-api-key': NOWPAYMENTS_API_KEY}
+            headers={'x-api-key': NOWPAYMENTS_API_KEY},
+            timeout=30
         )
         if response.status_code == 200:
             data = response.json()
@@ -557,5 +560,5 @@ def get_available_cryptos():
             currencies = data.get('currencies', [])
             return [c.upper() for c in popular if c in currencies]
         return ['BTC', 'ETH', 'USDT', 'LTC', 'DOGE']
-    except Exception:
+    except (requests.RequestException, ValueError, KeyError):
         return ['BTC', 'ETH', 'USDT', 'LTC', 'DOGE']
