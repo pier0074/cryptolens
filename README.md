@@ -650,22 +650,51 @@ Each user has a unique notification topic, ensuring privacy.
 
 **Interactive Documentation**: Visit `/api/docs` for Swagger UI with full API documentation.
 
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/api/health` | GET | No | Health check for monitoring |
-| `/api/symbols` | GET | No | List tracked symbols |
-| `/api/candles/{symbol}/{tf}` | GET | No | Get candles for symbol/timeframe |
-| `/api/patterns` | GET | No | Detected patterns |
-| `/api/signals` | GET | No | Trade signals |
-| `/api/matrix` | GET | No | Pattern matrix data |
-| `/api/scan` | POST | API Key | Trigger manual pattern scan |
-| `/api/fetch` | POST | API Key | Trigger manual data fetch |
-| `/api/scan/run` | POST | API Key | Run full fetch cycle |
-| `/api/docs` | GET | No | Swagger UI documentation |
-| `/api/docs/openapi.yaml` | GET | No | OpenAPI specification (YAML) |
-| `/api/docs/openapi.json` | GET | No | OpenAPI specification (JSON) |
+### Authentication
 
-**Note**: POST endpoints require API Key in `X-API-Key` header (set in Settings).
+All data endpoints require API key authentication (Premium tier) or admin session.
+
+**API Key Features:**
+- Per-key rate limiting (requests per minute/hour/day)
+- IP whitelist/blacklist with CIDR support
+- Scope-based permissions (read:symbols, write:scan, admin:scheduler, etc.)
+- Expiry dates
+- Usage tracking
+
+### Endpoints
+
+| Endpoint | Method | Scope | Description |
+|----------|--------|-------|-------------|
+| `/api/health` | GET | None | Health check for monitoring |
+| `/api/symbols` | GET | read:symbols | List tracked symbols |
+| `/api/candles/{symbol}/{tf}` | GET | read:candles | Get candles for symbol/timeframe |
+| `/api/patterns` | GET | read:patterns | Detected patterns |
+| `/api/signals` | GET | read:signals | Trade signals |
+| `/api/matrix` | GET | read:matrix | Pattern matrix data |
+| `/api/scan` | POST | write:scan | Trigger manual pattern scan |
+| `/api/fetch` | POST | write:fetch | Trigger manual data fetch |
+| `/api/scan/run` | POST | write:scan | Run full fetch cycle |
+| `/api/scheduler/status` | GET | admin:scheduler | Get scheduler status |
+| `/api/docs` | GET | None | Swagger UI documentation |
+
+### Response Format
+
+All endpoints return a standardized response envelope:
+
+```json
+{
+  "success": true,
+  "data": { ... },
+  "error": null,
+  "meta": {
+    "timestamp": "2025-01-01T00:00:00Z",
+    "request_id": "abc123",
+    "count": 10
+  }
+}
+```
+
+**Authentication**: Provide API Key via `X-API-Key` header or `api_key` query parameter.
 
 ---
 

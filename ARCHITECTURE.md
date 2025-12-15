@@ -95,7 +95,8 @@ app/
 │   ├── user.py          # User, Subscription, UserNotification
 │   ├── trading.py       # Symbol, Candle, Pattern, Signal
 │   ├── portfolio.py     # Portfolio, Trade, JournalEntry
-│   └── system.py        # Setting, Log, CronJob, Payment
+│   ├── system.py        # Setting, Log, CronJob, Payment
+│   └── api.py           # ApiKey, IpRule, ApiKeyUsage
 │
 ├── routes/              # HTTP endpoints
 │   ├── api.py           # REST API
@@ -228,10 +229,18 @@ HTTP Response
 │ email        │       │ user_id (FK) │       │ value        │
 │ password_hash│       │ plan         │       └──────────────┘
 │ is_admin     │       │ status       │
-│ is_verified  │       │ expires_at   │
-│ tier         │       └──────────────┘
-│ ntfy_topic   │
-└──────┬───────┘
+│ is_verified  │       │ expires_at   │       ┌──────────────┐
+│ tier         │       └──────────────┘       │    ApiKey    │
+│ ntfy_topic   │                              ├──────────────┤
+└──────┬───────┘───────────────────────────────│ id           │
+       │                                       │ user_id (FK) │
+       │                                       │ key_hash     │
+       │                                       │ name         │
+       │                                       │ scopes       │
+       │                                       │ rate_limit   │
+       │                                       │ expires_at   │
+       │                                       │ is_active    │
+       │                                       └──────────────┘
        │
        │ 1:N
        ▼
@@ -277,7 +286,10 @@ HTTP Response
 CREATE INDEX idx_candles_symbol_tf_ts ON candles(symbol_id, timeframe, timestamp DESC);
 CREATE INDEX idx_patterns_status_detected ON patterns(status, detected_at DESC);
 CREATE INDEX idx_signals_status_created ON signals(status, created_at DESC);
+CREATE INDEX idx_signals_created ON signals(created_at DESC);
 CREATE INDEX idx_users_email ON users(email);
+CREATE UNIQUE INDEX idx_api_keys_hash ON api_keys(key_hash);
+CREATE INDEX idx_api_keys_user ON api_keys(user_id);
 ```
 
 ---
@@ -335,7 +347,7 @@ CREATE INDEX idx_users_email ON users(email);
 | Password Hashing | Werkzeug (pbkdf2) | Credential storage |
 | Session Security | Secure cookies | Session protection |
 | 2FA | TOTP (pyotp) | Multi-factor authentication |
-| API Keys | SHA256 hashing | Machine-to-machine auth |
+| API Keys | SHA256 hashing + scopes | Machine-to-machine auth with per-key rate limits, IP rules |
 | Encryption | Fernet (AES-128) | Secrets at rest |
 
 ### Subscription Tier Access Control
@@ -453,27 +465,67 @@ Layer 3: HTTP Cache (Nginx)
 
 ### Response Format
 
+All API endpoints return a standardized envelope format:
+
 ```json
 // Success response
 {
-  "id": 1,
-  "symbol": "BTC/USDT",
-  "direction": "bullish",
-  ...
+  "success": true,
+  "data": {
+    "id": 1,
+    "symbol": "BTC/USDT",
+    "direction": "bullish"
+  },
+  "error": null,
+  "meta": {
+    "timestamp": "2025-01-01T00:00:00Z",
+    "request_id": "abc123",
+    "count": 1
+  }
 }
 
 // Error response
 {
-  "error": "Not found",
-  "message": "Symbol not found"
+  "success": false,
+  "data": null,
+  "error": "Not found: Symbol not found",
+  "meta": {
+    "timestamp": "2025-01-01T00:00:00Z",
+    "request_id": "xyz789"
+  }
 }
 
 // List response
-[
-  {"id": 1, ...},
-  {"id": 2, ...}
-]
+{
+  "success": true,
+  "data": [
+    {"id": 1, "symbol": "BTC/USDT"},
+    {"id": 2, "symbol": "ETH/USDT"}
+  ],
+  "error": null,
+  "meta": {
+    "timestamp": "2025-01-01T00:00:00Z",
+    "count": 2
+  }
+}
 ```
+
+### API Authentication
+
+API endpoints require authentication via API key (Premium tier or admin):
+
+```
+X-API-Key: your-api-key-here
+# OR
+?api_key=your-api-key-here
+```
+
+**API Key Features:**
+- **Per-key rate limits**: Requests per minute/hour/day (e.g., `60/min`, `1000/day`)
+- **IP rules**: Whitelist/blacklist with CIDR support (e.g., `192.168.1.0/24`)
+- **Scopes**: Fine-grained permissions (`read:symbols`, `write:scan`, `admin:scheduler`)
+- **Expiry dates**: Optional key expiration
+- **Usage tracking**: Request counts, last used timestamp
 
 ### Rate Limits
 
