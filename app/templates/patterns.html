@@ -13,7 +13,7 @@
                 <button @click="activeTab = 'patterns'"
                         :class="activeTab === 'patterns' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'"
                         class="px-4 py-2 rounded-md text-sm font-medium transition">
-                    Active Patterns
+                    Patterns
                 </button>
                 <button @click="activeTab = 'signals'; loadSignals()"
                         :class="activeTab === 'signals' ? 'bg-blue-600 text-white' : 'text-gray-400 hover:text-white'"
@@ -28,8 +28,11 @@
     <div x-show="activeTab === 'patterns'" x-data="patternChart()">
         <!-- Patterns Filters -->
         <div class="flex items-center justify-end mb-4">
-            <form method="GET" class="flex items-center space-x-4">
-            <select name="symbol" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
+            <form method="GET" class="flex items-center space-x-4" id="patternFilters">
+            <!-- Hidden field to preserve status when using dropdowns -->
+            <input type="hidden" name="status" value="{{ current_status or 'active' }}" id="statusHidden">
+
+            <select name="symbol" onchange="this.form.submit()" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
                 <option value="">All Symbols</option>
                 {% for s in symbols %}
                 <option value="{{ s.symbol }}" {% if current_symbol == s.symbol %}selected{% endif %}>
@@ -38,23 +41,32 @@
                 {% endfor %}
             </select>
 
-            <select name="timeframe" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
+            <select name="timeframe" onchange="this.form.submit()" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
                 <option value="">All Timeframes</option>
                 {% for tf in timeframes %}
                 <option value="{{ tf }}" {% if current_timeframe == tf %}selected{% endif %}>{{ tf }}</option>
                 {% endfor %}
             </select>
 
-            <select name="status" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm">
-                <option value="active" {% if current_status == 'active' %}selected{% endif %}>Active</option>
-                <option value="filled" {% if current_status == 'filled' %}selected{% endif %}>Filled</option>
-                <option value="expired" {% if current_status == 'expired' %}selected{% endif %}>Expired</option>
-                <option value="" {% if not current_status %}selected{% endif %}>All</option>
-            </select>
-
-            <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded text-sm">
-                Filter
-            </button>
+            <!-- Status toggle buttons -->
+            <div class="flex rounded-lg overflow-hidden border border-gray-700">
+                <button type="submit" name="status" value="active" onclick="document.getElementById('statusHidden').disabled=true"
+                        class="px-3 py-2 text-sm {% if current_status == 'active' %}bg-blue-600 text-white{% else %}bg-gray-800 text-gray-300 hover:bg-gray-700{% endif %}">
+                    Active
+                </button>
+                <button type="submit" name="status" value="" onclick="document.getElementById('statusHidden').disabled=true"
+                        class="px-3 py-2 text-sm border-l border-gray-700 {% if not current_status %}bg-blue-600 text-white{% else %}bg-gray-800 text-gray-300 hover:bg-gray-700{% endif %}">
+                    All
+                </button>
+                <button type="submit" name="status" value="expired" onclick="document.getElementById('statusHidden').disabled=true"
+                        class="px-3 py-2 text-sm border-l border-gray-700 {% if current_status == 'expired' %}bg-blue-600 text-white{% else %}bg-gray-800 text-gray-300 hover:bg-gray-700{% endif %}">
+                    Expired
+                </button>
+                <button type="submit" name="status" value="filled" onclick="document.getElementById('statusHidden').disabled=true"
+                        class="px-3 py-2 text-sm border-l border-gray-700 {% if current_status == 'filled' %}bg-blue-600 text-white{% else %}bg-gray-800 text-gray-300 hover:bg-gray-700{% endif %}">
+                    Filled
+                </button>
+            </div>
         </form>
     </div>
 
@@ -64,13 +76,15 @@
         <div class="flex items-center justify-between mb-4">
             <div class="flex items-center space-x-4">
                 <h2 class="text-lg font-bold">{{ current_symbol }} - {{ current_timeframe or '1h' }}</h2>
-                <button @click="showAllPatterns()"
-                        :class="selectedPatternId === null ? 'bg-blue-600' : 'bg-gray-700 hover:bg-gray-600'"
-                        class="px-3 py-1 rounded text-sm transition-colors">
-                    Show All
+                <button @click="clearAllSelections()"
+                        class="px-3 py-1 rounded text-sm bg-gray-700 hover:bg-gray-600 transition-colors">
+                    Reset Chart
                 </button>
-                <span x-show="selectedPatternId !== null" class="text-sm text-muted">
-                    Click a pattern below to highlight it
+                <span x-show="selectedPatternIds.length > 0" class="text-sm text-blue-400">
+                    <span x-text="selectedPatternIds.length"></span> pattern(s) selected
+                </span>
+                <span x-show="selectedPatternIds.length === 0" class="text-sm text-muted">
+                    Click patterns below to show levels on chart
                 </span>
             </div>
             <div class="flex space-x-2">
@@ -107,8 +121,8 @@
             <tbody>
                 {% for pattern in patterns %}
                 <tr class="border-b border-gray-800 hover:bg-gray-800/50 cursor-pointer {% if pattern.is_expired %}opacity-60{% endif %}"
-                    :class="{ 'ring-2 ring-blue-500 bg-gray-800': selectedPatternId === {{ pattern.id }} }"
-                    @click="selectPattern({{ pattern.id }}, {{ pattern.zone_low }}, {{ pattern.zone_high }}, '{{ pattern.direction }}', {{ pattern.trading_levels.entry }}, {{ pattern.trading_levels.stop_loss }}, {{ pattern.trading_levels.take_profit_1 }}, {{ pattern.trading_levels.take_profit_2 }}, {{ pattern.detected_at }})"
+                    :class="{ 'ring-2 ring-blue-500 bg-blue-900/30': isPatternSelected({{ pattern.id }}) }"
+                    @click="togglePattern({{ pattern.id }}, {{ pattern.zone_low }}, {{ pattern.zone_high }}, '{{ pattern.direction }}', {{ pattern.trading_levels.entry }}, {{ pattern.trading_levels.stop_loss }}, {{ pattern.trading_levels.take_profit_1 }}, {{ pattern.trading_levels.take_profit_2 }}, {{ pattern.detected_at }})"
                 >
                     <td class="p-3">
                         <a href="?symbol={{ pattern.symbol.symbol }}&timeframe={{ pattern.timeframe }}"
@@ -388,20 +402,40 @@ async function createTradeFromPattern(patternId) {
 
 function patternChart() {
     return {
-        selectedPatternId: null,
+        selectedPatternIds: [],  // Array for multi-select
+        selectedPatterns: {},    // Store pattern data by ID
         chart: null,
         candlestickSeries: null,
         patternSeries: [],
         chartData: null,
         precision: 2,
 
-        selectPattern(id, zoneLow, zoneHigh, direction, entry, sl, tp1, tp2, detectedAt) {
-            this.selectedPatternId = id;
-            this.drawSinglePattern({ zoneLow, zoneHigh, direction, entry, sl, tp1, tp2, detectedAt });
+        togglePattern(id, zoneLow, zoneHigh, direction, entry, sl, tp1, tp2, detectedAt) {
+            const idx = this.selectedPatternIds.indexOf(id);
+            if (idx > -1) {
+                // Deselect
+                this.selectedPatternIds.splice(idx, 1);
+                delete this.selectedPatterns[id];
+            } else {
+                // Select
+                this.selectedPatternIds.push(id);
+                this.selectedPatterns[id] = { id, zoneLow, zoneHigh, direction, entry, sl, tp1, tp2, detectedAt };
+            }
+            this.drawSelectedPatterns();
+        },
+
+        isPatternSelected(id) {
+            return this.selectedPatternIds.includes(id);
+        },
+
+        clearAllSelections() {
+            this.selectedPatternIds = [];
+            this.selectedPatterns = {};
+            this.clearPatternSeries();
         },
 
         showAllPatterns() {
-            this.selectedPatternId = null;
+            this.clearAllSelections();
             this.drawAllPatterns();
         },
 
@@ -541,6 +575,125 @@ function patternChart() {
             }
         },
 
+        drawSelectedPatterns() {
+            if (!this.chart || !this.chartData) return;
+            this.clearPatternSeries();
+
+            if (this.selectedPatternIds.length === 0) return;
+
+            const candles = this.chartData.candles;
+            const firstTime = candles[0].timestamp / 1000;
+            const lastTime = candles[candles.length - 1].timestamp / 1000;
+            const markers = [];
+
+            const priceFormat = {
+                type: 'price',
+                precision: this.precision,
+                minMove: Math.pow(10, -this.precision),
+            };
+
+            // Draw each selected pattern
+            Object.values(this.selectedPatterns).forEach(pattern => {
+                const { zoneLow, zoneHigh, direction, entry, sl, tp1, tp2, detectedAt } = pattern;
+                const lineColor = direction === 'bullish' ? '#22c55e' : '#ef4444';
+                const patternStartTime = detectedAt / 1000;
+                const visibleStartTime = Math.max(patternStartTime, firstTime);
+
+                // Zone high line
+                const highLine = this.chart.addLineSeries({
+                    color: lineColor, lineWidth: 2,
+                    priceLineVisible: false, lastValueVisible: true,
+                    crosshairMarkerVisible: false, priceFormat
+                });
+                highLine.setData([
+                    { time: visibleStartTime, value: zoneHigh },
+                    { time: lastTime, value: zoneHigh }
+                ]);
+                this.patternSeries.push(highLine);
+
+                // Zone low line
+                const lowLine = this.chart.addLineSeries({
+                    color: lineColor, lineWidth: 2,
+                    priceLineVisible: false, lastValueVisible: true,
+                    crosshairMarkerVisible: false, priceFormat
+                });
+                lowLine.setData([
+                    { time: visibleStartTime, value: zoneLow },
+                    { time: lastTime, value: zoneLow }
+                ]);
+                this.patternSeries.push(lowLine);
+
+                // Entry line (dashed blue)
+                const entryLine = this.chart.addLineSeries({
+                    color: '#3b82f6', lineWidth: 1, lineStyle: 2,
+                    priceLineVisible: false, lastValueVisible: true,
+                    crosshairMarkerVisible: false, priceFormat
+                });
+                entryLine.setData([
+                    { time: visibleStartTime, value: entry },
+                    { time: lastTime, value: entry }
+                ]);
+                this.patternSeries.push(entryLine);
+
+                // Stop Loss line (red)
+                const slLine = this.chart.addLineSeries({
+                    color: 'rgba(239, 68, 68, 0.8)', lineWidth: 1, lineStyle: 2,
+                    priceLineVisible: false, lastValueVisible: true,
+                    crosshairMarkerVisible: false, priceFormat
+                });
+                slLine.setData([
+                    { time: visibleStartTime, value: sl },
+                    { time: lastTime, value: sl }
+                ]);
+                this.patternSeries.push(slLine);
+
+                // TP1 line (light green)
+                if (tp1) {
+                    const tp1Line = this.chart.addLineSeries({
+                        color: 'rgba(34, 197, 94, 0.6)', lineWidth: 1, lineStyle: 2,
+                        priceLineVisible: false, lastValueVisible: true,
+                        crosshairMarkerVisible: false, priceFormat
+                    });
+                    tp1Line.setData([
+                        { time: visibleStartTime, value: tp1 },
+                        { time: lastTime, value: tp1 }
+                    ]);
+                    this.patternSeries.push(tp1Line);
+                }
+
+                // TP2 line (green)
+                if (tp2) {
+                    const tp2Line = this.chart.addLineSeries({
+                        color: 'rgba(34, 197, 94, 0.8)', lineWidth: 1, lineStyle: 2,
+                        priceLineVisible: false, lastValueVisible: true,
+                        crosshairMarkerVisible: false, priceFormat
+                    });
+                    tp2Line.setData([
+                        { time: visibleStartTime, value: tp2 },
+                        { time: lastTime, value: tp2 }
+                    ]);
+                    this.patternSeries.push(tp2Line);
+                }
+
+                // Add marker
+                if (patternStartTime >= firstTime && patternStartTime <= lastTime) {
+                    markers.push({
+                        time: patternStartTime,
+                        position: direction === 'bullish' ? 'belowBar' : 'aboveBar',
+                        color: lineColor,
+                        shape: direction === 'bullish' ? 'arrowUp' : 'arrowDown',
+                        text: ''
+                    });
+                }
+            });
+
+            // Set all markers
+            if (markers.length > 0) {
+                markers.sort((a, b) => a.time - b.time);
+                this.candlestickSeries.setMarkers(markers);
+            }
+        },
+
         drawAllPatterns() {
             if (!this.chart || !this.chartData) return;
             this.clearPatternSeries();
@@ -677,7 +830,7 @@ document.addEventListener('DOMContentLoaded', async function() {
     let hasMore = false;
     let isLoadingMore = false;
     let oldestTimestamp = null;
-    const MAX_CANDLES = 2000;  // Maximum candles to load (browser performance)
+    const MAX_CANDLES = Infinity;  // No limit (use a number like 2000 to limit for performance)
 
     // Function to load more historical candles
     async function loadMoreCandles() {

@@ -136,6 +136,7 @@ def manage_symbols():
 
 
 @settings_bp.route('/test-notification', methods=['POST'])
+@login_required
 def test_notification():
     """Send 3 varied test notifications to verify all notification types work"""
     from app.services.notifier import send_notification

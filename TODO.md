@@ -1,217 +1,344 @@
-# CryptoLens - Future Enhancements
+# CryptoLens - Audit Findings & Future Enhancements
 
+> **Audit Date**: December 15, 2025
 > **Current Version**: v2.1.0
-> **Status**: Production-ready with 3-tier subscriptions, payments, and legal compliance
-> **Tests**: 607 passing
+> **Issues Found**: 85+
 
 ---
 
-## QA Audit Fixes (Completed December 2025)
+## CRITICAL SEVERITY (Fix Immediately)
 
-> **Audit Date**: December 2025
-> **Final Verdict**: 100% feature complete, production ready
-> **All Critical/High/Medium Issues**: Resolved
+### Security: Authentication & Authorization
 
-### Critical - ✅ FIXED
+- [x] **Missing `@login_required` on portfolio routes** - `app/routes/portfolio.py` ✅ FIXED
+  - Added `@login_required` decorator to all 7 endpoints
+  - Added ownership validation (`portfolio.user_id != user.id`)
 
-- [x] **Async notification bug** - Verified: `notify_subscribers_async` wrapper correctly uses `asyncio.run()`
-  - The warning was a false positive during Flask route compilation in Python 3.14
-  - The synchronous wrapper properly executes the async code
+- [x] **Unauthenticated signal status modification** - `app/routes/signals.py:73` ✅ FIXED
+  - Added `@login_required` decorator
+  - Added status whitelist validation
 
-### High Priority - ✅ FIXED
+- [x] **Unauthenticated test notification** - `app/routes/settings.py:138` ✅ FIXED
+  - Added `@login_required` decorator
 
-- [x] **Backtest for all pattern types** - Added Order Block and Liquidity Sweep detection
-  - Location: `app/services/backtester.py`
-  - Added: `_detect_order_block_trades()` and `_detect_liquidity_sweep_trades()`
+- [ ] **Unauthenticated data endpoints** - `app/routes/api.py`
+  - Line 160: `/symbols` - no auth
+  - Line 171: `/candles/<symbol>/<timeframe>` - no auth
+  - Line 188: `/patterns` - no auth
+  - Line 213: `/signals` - no auth
+  - Line 239: `/matrix` - no auth
+  - Consider adding `@login_required` or API key requirement
 
-- [x] **Payment webhook integration tests** - Added 13 tests in `tests/test_payments.py`
-  - Tests: Signature validation, CSRF exemption, webhook processing
-  - Covers: LemonSqueezy and NOWPayments webhooks
+### Security: Cryptography
 
-- [ ] **CCXT datetime deprecation** - External library issue, cannot fix directly
-  - Tracked upstream, will be resolved in future CCXT releases
+- [x] **Hardcoded encryption salt** - `app/services/encryption.py` ✅ FIXED
+  - Now reads from `ENCRYPTION_SALT` environment variable
+  - Raises `EncryptionConfigError` in production if not set
+  - Development fallback only for testing
 
-### Medium Priority - ✅ FIXED
+- [x] **Insecure encryption key fallback** - `app/services/encryption.py` ✅ FIXED
+  - Now raises `EncryptionConfigError` in production if `SECRET_KEY` not set
+  - Development fallback only for testing
 
-- [x] **Terms checkbox HTTP-level test** - Added to `tests/test_auth.py`
-  - `test_register_without_terms_fails()` - verifies rejection
-  - `test_register_with_terms_succeeds()` - verifies acceptance
+### Security: Injection
 
-- [x] **Prometheus metrics endpoint test** - Added 6 tests in `tests/test_api.py`
-  - Tests: 200 response, Prometheus format, app info, pattern gauges, user metrics
+- [x] **SQL injection in migration script** - `scripts/init_db.py` ✅ FIXED
+  - Added `ALLOWED_TABLES` frozenset whitelist
+  - Added `validate_table_name()` function
+  - Using parameterized query for SQLite table existence check
 
-- [ ] **Chart E2E tests** - Deferred (requires Playwright/Cypress setup)
-  - Consider adding in future sprint
+### Documentation: CLI Scripts
 
-### Low Priority - ✅ DOCUMENTED
+- [x] **fetch.py has no documented arguments** ✅ FIXED
+  - Added Usage and Options sections documenting `--verbose` and `--gaps`
 
-- [ ] **SQLAlchemy deprecation warnings** - Known issue, doesn't affect functionality
-  - Will be addressed in SQLAlchemy 2.0 migration
+- [x] **init_db.py --migrate missing path argument** ✅ FIXED
+  - Updated to show: `python scripts/init_db.py --migrate /path/to/db.sqlite`
 
-- [x] **Redis rate limiter** - Documented in PRODUCTION.md
-  - Set `RATELIMIT_STORAGE_URL=redis://localhost:6379/0` in production
+- [x] **compute_stats.py has no argparse** ✅ FIXED
+  - Added argparse with `--verbose` option
 
-- [x] **Timeframe consistency** - Documented in `app/config.py`
-  - fetch.py intentionally aggregates extra timeframes (30m, 2h) for data completeness
+- [x] **fetch_historical.py missing arguments** ✅ FIXED
+  - Added all 8 options to documentation
 
----
-
-## Recently Completed
-
-### Legal & Compliance
-- [x] Comprehensive Terms of Service (20 sections)
-- [x] Privacy Policy
-- [x] Registration terms acknowledgment (checkbox)
-- [x] Age verification (18+)
-- [x] Personal account / no sharing policy
-- [x] NTFY channel code protection in ToS
-- [x] No refunds policy
-
-### UI/UX Improvements
-- [x] Login redirects to dashboard (not profile)
-- [x] Centralized plan features (DRY)
-- [x] Patterns section on landing page
-- [x] "Fair Value Gap" terminology consistency
-- [x] Tier-based upgrade buttons (no downgrade option)
-- [x] Fixed spacing issues in plan display
+- [x] **db_health.py missing arguments** ✅ FIXED
+  - Added `--quiet` and `--clear-gaps` to documentation
 
 ---
 
-## Security Enhancements
+## HIGH SEVERITY (Fix This Week)
 
-### Session Security
-- [ ] Regenerate session ID after successful login (session fixation prevention)
-- [ ] Add session timeout/inactivity logout (auto-logout after X minutes idle)
+### Security: HTTP & Webhooks
 
-### Security Auditing
-- [ ] Run OWASP ZAP automated security scan
-- [ ] Add security tests to CI/CD pipeline
-- [ ] Implement Content Security Policy (CSP) headers
+- [ ] **Missing HTTP timeouts** - `app/services/payment.py`
+  - Line 77: LemonSqueezy checkout - no timeout
+  - Line 275: NOWPayments invoice - no timeout
+  - Line 549: NOWPayments currencies - no timeout + bare except
+  - Add `timeout=30` to all `requests.*` calls
+
+- [ ] **Webhook validation bypass** - `app/services/payment.py:162`
+  ```python
+  if not LEMONSQUEEZY_WEBHOOK_SECRET:
+      log_system("WARNING...")
+      # Missing return! Execution continues without validation
+  ```
+  - Add explicit `return {'success': False, 'error': '...'}`
+
+- [ ] **Missing CSRF on key operations** - `app/routes/docs.py`
+  - Line 117: `/generate-key` POST - no CSRF
+  - Line 140: `/revoke-key` POST - no CSRF
+  - Add CSRF token validation
+
+### Security: Input Validation
+
+- [ ] **Unvalidated date input** - `app/routes/admin.py:1327`
+  ```python
+  fetch_start_date = request.form.get('fetch_start_date', '2024-01-01')
+  setting.value = fetch_start_date  # No validation!
+  ```
+  - Validate date format with `datetime.strptime()`
+
+- [ ] **Unvalidated status field** - `app/routes/signals.py:82`
+  ```python
+  signal.status = data['status']  # Any string accepted!
+  ```
+  - Whitelist: `['active', 'filled', 'expired', 'cancelled']`
+
+- [ ] **Unvalidated pattern type** - `app/routes/backtest.py:35`
+  ```python
+  pattern_type = data.get('pattern_type', 'imbalance')  # Not validated
+  ```
+  - Whitelist: `['imbalance', 'order_block', 'liquidity_sweep']`
+
+- [ ] **Missing input length limits** - `app/routes/admin.py:747-751`
+  - NotificationTemplate fields have no length validation
+  - Add max length checks for `name`, `title`, `message`, `tags`
+
+- [ ] **Integer bounds not checked** - Multiple locations
+  - `app/routes/api.py:178` - `limit` parameter
+  - `app/routes/logs.py:45` - `limit`, `offset` parameters
+  - `app/routes/patterns.py:159` - `limit` parameter
+  - Add `min()` bounds: `limit = min(int(request.args.get('limit', 200)), 1000)`
+
+### Performance: N+1 Queries
+
+- [ ] **Dashboard analytics loop** - `app/routes/dashboard.py:146-150`
+  ```python
+  for s in symbols:
+      count = Pattern.query.filter_by(symbol_id=s.id, status='active').count()
+  ```
+  - 101 queries for 100 symbols
+  - Use aggregation query with `func.count()` and `group_by()`
+
+- [ ] **Signal enrichment loop** - `app/routes/signals.py:48-53`
+  ```python
+  for signal in signals:
+      signal.symbol_obj = db.session.get(Symbol, signal.symbol_id)
+  ```
+  - Use `joinedload()` or eager loading
+
+- [ ] **Dashboard matrix building** - `app/routes/dashboard.py:43-57`
+  - 30 queries (5 symbols × 6 timeframes)
+  - Batch query with single JOIN
+
+- [ ] **Pattern type statistics** - `app/routes/dashboard.py:131-134`
+  ```python
+  for pt in PATTERN_TYPES:
+      patterns_by_type[pt] = Pattern.query.filter_by(pattern_type=pt).count()
+  ```
+  - Use single query with `group_by(Pattern.pattern_type)`
+
+### Documentation: Missing CLI Arguments
+
+- [ ] **fetch_historical.py missing 4 arguments** - `scripts/fetch_historical.py:11-16`
+  - Missing from docs: `--verbose`, `--no-aggregate`, `--full`, `--symbol`
+  - Update docstring usage section
+
+- [ ] **db_health.py missing 2 arguments** - `scripts/db_health.py:14-21`
+  - Missing from docs: `--quiet`, `--clear-gaps`
+  - Update docstring usage section
 
 ---
 
-## Admin Features
+## MEDIUM SEVERITY (Fix This Month)
 
-### Admin UI Improvements
-- [ ] Add admin UI to unlock locked accounts
-- [ ] Add bulk user management actions
-- [ ] Scheduled notifications (downtime, promotions)
+### Error Handling: Bare Exceptions
+
+- [ ] **Bare except handlers** - Multiple locations
+  - `app/jobs/notifications.py:76` - `except: pass`
+  - `app/services/notifier.py:184` - `except: pass`
+  - `app/services/notifier.py:506` - `except: pass`
+  - Replace with `except (json.JSONDecodeError, TypeError, ValueError):`
+
+- [ ] **Silent exception swallowing** - `scripts/fetch.py`
+  - Lines 105-111: Aggregation errors silently ignored
+  - Lines 129-134: Pattern detection errors silently ignored
+  - Lines 142-146: Pattern status update errors silently ignored
+  - Add logging: `logger.warning(f"Aggregation failed for {tf}: {e}")`
+
+### Database: Missing Indexes
+
+- [ ] **Add indexes to frequently queried fields**
+  ```python
+  # Symbol model
+  db.Index('idx_symbol_is_active', 'is_active')
+
+  # Pattern model
+  db.Index('idx_pattern_direction', 'direction')
+  db.Index('idx_pattern_type', 'pattern_type')
+
+  # User model
+  db.Index('idx_user_verified', 'is_verified')
+  db.Index('idx_user_admin', 'is_admin')
+
+  # Subscription model
+  db.Index('idx_subscription_user_status', 'user_id', 'status')
+
+  # Payment model
+  db.Index('idx_payment_user_status', 'user_id', 'status')
+
+  # Trade model
+  db.Index('idx_trade_signal', 'signal_id')
+
+  # Log model
+  db.Index('idx_log_timestamp', 'timestamp')
+  ```
+
+### Database: Transaction Issues
+
+- [ ] **Missing rollback in subscription operations** - `app/routes/admin.py:259-284`
+  ```python
+  cancel_subscription(user_id)   # Commits
+  extend_subscription(user_id)   # May fail - no rollback!
+  ```
+  - Wrap in try-except with `db.session.rollback()`
+
+- [ ] **Partial commits in bulk operations** - `app/routes/admin.py:183-210`
+  - No transaction wrapping for bulk user updates
+  - Add savepoints or single transaction
+
+### API: Response Consistency
+
+- [ ] **Standardize JSON response format** - All API routes
+  - Current: Mix of `{data}`, `{success, data}`, `{error}`, `{success, error}`
+  - Target: `{success: bool, data?: any, error?: string}`
+
+### Security: Rate Limiting
+
+- [ ] **Missing rate limits on admin operations** - `app/routes/admin.py`
+  - Line 109: `/users/<id>/verify` - no rate limit
+  - Line 120: `/users/<id>/unlock` - no rate limit
+  - Add `@limiter.limit("10 per minute")`
+
+### Security: Email Enumeration
+
+- [ ] **Timing side-channel on auth endpoints** - `app/routes/auth.py`
+  - Lines 415-417: `/resend-verification`
+  - Lines 445-446: `/forgot-password`
+  - Add consistent response delay (~500ms)
+
+### Resource Management
+
+- [ ] **Unclosed exchange singleton** - `app/services/data_fetcher.py:21-41`
+  - Exchange instance never explicitly closed
+  - Add cleanup method or use context manager
+
+### Cascade Delete Gaps
+
+- [ ] **Payment orphans on User delete** - `app/models/system.py:160`
+  - No cascade defined for User → Payment relationship
+  - Add `cascade='all, delete-orphan'`
+
+- [ ] **Signal orphans on Pattern delete** - `app/models/trading.py:220`
+  - No cascade defined for Pattern → Signal relationship
+  - Add `cascade='all, delete-orphan'`
 
 ---
 
-## Performance & Caching
+## LOW SEVERITY (Nice to Have)
 
-### Advanced Caching
-- [ ] Cache stats/analytics (5 minute TTL)
-- [ ] Cache user tier info for faster access checks
+### Documentation
 
-### Performance Enhancements
-- [ ] AJAX lazy-load for last_data_update in templates
-- [ ] Add database connection health monitoring
+- [ ] **Add docstrings to 40+ undocumented endpoints**
+  - `app/routes/api.py` - 5 GET endpoints
+  - `app/routes/patterns.py` - chart endpoint
+  - `app/routes/dashboard.py` - analytics endpoint
 
-### Additional Circuit Breakers
-- [ ] Wrap CCXT exchange API calls with circuit breaker
-- [ ] Wrap payment provider calls (LemonSqueezy, NOWPayments) with circuit breaker
+### Code Quality
 
----
+- [ ] **Timestamp field inconsistency**
+  - `Candle.timestamp` - BigInteger (ms)
+  - `Pattern.detected_at` - BigInteger (ms)
+  - `Signal.created_at` - DateTime object
+  - Consider standardizing
 
-## Code Quality
-
-### Refactoring
-- [ ] Convert all services to raise domain exceptions consistently
-- [ ] Remove mixed return types (tuple vs exception) in auth services
-- [ ] Add query logging in development mode
-- [ ] Profile endpoints with SQLAlchemy profiler
+- [ ] **Duplicate relationship definition** - `app/models/trading.py`
+  - Line 214: Pattern → Signal backref
+  - Line 220: Signal → Pattern backref
+  - Remove duplicate
 
 ---
 
-## Observability
+## Automated Checks to Add
 
-### Logging & Monitoring
-- [x] Include request ID in all log messages for tracing
-- [ ] Configure log aggregation (ELK/Datadog) - deployment-specific
-- [ ] Add Grafana dashboards for Prometheus metrics
-- [x] Add readiness vs liveness health check endpoints (`/api/health/live`, `/api/health/ready`)
+```yaml
+# .github/workflows/security.yml
+- name: Bandit Security Scan
+  run: bandit -r app/ -ll
 
-### Additional Health Checks
-- [x] Add Exchange API (CCXT) reachability check
-- [x] Add NTFY notification service reachability check
-- [x] Add dependency health status in /api/health response
+- name: Check for bare exceptions
+  run: |
+    if grep -rn "except:" app/ scripts/ --include="*.py" | grep -v "except.*:"; then
+      echo "Found bare except clauses"
+      exit 1
+    fi
+
+- name: Check for missing timeouts
+  run: |
+    if grep -rn "requests\.\(get\|post\)" app/ --include="*.py" | grep -v timeout; then
+      echo "Found requests without timeout"
+      exit 1
+    fi
+
+- name: Check for f-string SQL
+  run: |
+    if grep -rn 'execute(f"' scripts/ --include="*.py"; then
+      echo "Found potential SQL injection"
+      exit 1
+    fi
+```
 
 ---
 
-## Trading Features
+## Future Enhancements
 
-### Additional SMC Patterns
+### Trading Features
 - [ ] Breaker Block detection
 - [ ] Mitigation Block detection
 - [ ] Equal Highs/Lows detection
-- [ ] Swing-based pattern invalidation
-- [ ] ATR-based expiry (more dynamic than time-based)
-- [ ] Pattern ML scoring (train on historical fill rates)
+- [ ] ATR-based pattern expiry
+- [ ] Pattern ML scoring
 
 ### Automatic Trading
-- [ ] API integration for automated trade execution
-- [ ] Exchange API connection (read-only first, then trading)
+- [ ] Exchange API connection (read-only first)
 - [ ] Position sizing based on risk parameters
 - [ ] Stop-loss and take-profit automation
 
----
-
-## Payment & Monetization
-
-### European/Swiss Payment Methods
-- [ ] Stripe CH integration (Swiss cards)
-- [ ] PostFinance integration
-- [ ] TWINT support (Swiss mobile payment)
-
----
-
-## Notifications
-
-### Multi-Channel Support
-- [ ] Admin can send to multiple NTFY topics
-- [ ] Channel grouping (by tier, by preference)
-- [ ] Scheduled notifications
-
----
-
-## SEO & Marketing
-
-### Improve Google Ranking
-- [ ] Add meta tags (description, keywords, OpenGraph)
-- [ ] Create sitemap.xml
-- [ ] Add robots.txt
-- [ ] Structured data (JSON-LD) for rich snippets
-- [ ] Optimize page load speed
-- [ ] Add canonical URLs
-
----
-
-## Infrastructure
-
-### Real-time Features
+### Infrastructure
 - [ ] WebSocket for live price updates
 - [ ] Real-time pattern notifications in UI
-- [ ] Signal alerts without page refresh
+- [ ] Multi-exchange support (Coinbase, Kraken, Bybit)
 
-### Multi-Exchange Support
-- [ ] Abstract exchange interface
-- [ ] Add Coinbase, Kraken, Bybit adapters
-- [ ] Exchange selector in settings
-
----
-
-## Mobile & Integrations
-
-### Mobile App
-- [ ] iOS app
-- [ ] Android app
-- [ ] React Native or Flutter
-
-### Bot Integrations
+### Mobile & Integrations
+- [ ] iOS/Android app (React Native or Flutter)
 - [ ] Discord bot
 - [ ] Telegram bot
+
+### SEO & Marketing
+- [ ] Meta tags (description, keywords, OpenGraph)
+- [ ] sitemap.xml
+- [ ] robots.txt
+- [ ] Structured data (JSON-LD)
 
 ---
 
@@ -221,15 +348,21 @@
 # Run tests with coverage
 pytest --cov=app --cov-report=html
 
-# Start with gunicorn (production)
-gunicorn -c gunicorn.conf.py "app:create_app()"
+# Find bare exceptions
+grep -rn "except:" app/ scripts/ --include="*.py"
 
-# Check for security issues
+# Find missing timeouts
+grep -rn "requests\.\(get\|post\|put\|delete\)" app/ --include="*.py" | grep -v timeout
+
+# Find f-string SQL
+grep -rn 'execute(f"' scripts/ --include="*.py"
+
+# Check for hardcoded secrets
+grep -rn "secret\|password\|api_key" app/ --include="*.py" | grep -v "get\|environ\|config"
+
+# Security scan
 pip install bandit && bandit -r app/
 
 # Type checking
 pip install mypy && mypy app/
-
-# Load testing
-locust -f tests/load/locustfile.py
 ```

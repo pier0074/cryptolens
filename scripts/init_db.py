@@ -3,10 +3,15 @@
 Database Initialization Script
 
 Usage:
-    python scripts/init_db.py              # Initialize tables (database must exist)
-    python scripts/init_db.py --create     # Create database + tables
-    python scripts/init_db.py --drop       # Drop database
-    python scripts/init_db.py --migrate    # Migrate from SQLite to MySQL
+    python scripts/init_db.py                           # Initialize tables (database must exist)
+    python scripts/init_db.py --create                  # Create database + tables
+    python scripts/init_db.py --drop                    # Drop database
+    python scripts/init_db.py --migrate /path/to/db.sqlite  # Migrate from SQLite to MySQL
+
+Options:
+    --create              Create the MySQL database and tables (reads from .env)
+    --drop                Drop the MySQL database
+    --migrate SQLITE_PATH Migrate data from SQLite file to MySQL
 """
 import os
 import sys
@@ -152,7 +157,8 @@ def migrate_sqlite_to_mysql(sqlite_path: str):
     print()
 
     # Tables to migrate (in order due to foreign keys)
-    tables = [
+    # Whitelist of allowed tables for migration (security: prevents SQL injection)
+    ALLOWED_TABLES = frozenset([
         'settings',
         'symbols',
         'users',
@@ -166,7 +172,16 @@ def migrate_sqlite_to_mysql(sqlite_path: str):
         'trades',
         'cron_logs',
         'user_symbol_preferences',
-    ]
+    ])
+
+    def validate_table_name(table_name: str) -> str:
+        """Validate table name against whitelist to prevent SQL injection"""
+        if table_name not in ALLOWED_TABLES:
+            raise ValueError(f"Invalid table name: {table_name}")
+        # Additional safety: ensure it's alphanumeric with underscores only
+        if not table_name.replace('_', '').isalnum():
+            raise ValueError(f"Invalid table name format: {table_name}")
+        return table_name
 
     # Connect to SQLite
     sqlite_conn = sqlite3.connect(sqlite_path)
@@ -178,42 +193,46 @@ def migrate_sqlite_to_mysql(sqlite_path: str):
         print("Creating MySQL tables...")
         db.create_all()
 
-        for table in tables:
+        for table in ALLOWED_TABLES:
             try:
-                # Check if table exists in SQLite
+                # Validate table name (defense in depth)
+                safe_table = validate_table_name(table)
+
+                # Check if table exists in SQLite using parameterized query
                 sqlite_cursor.execute(
-                    f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'"
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                    (safe_table,)
                 )
                 if not sqlite_cursor.fetchone():
-                    print(f"  Skipping {table} (not in SQLite)")
+                    print(f"  Skipping {safe_table} (not in SQLite)")
                     continue
 
-                # Get data from SQLite
-                sqlite_cursor.execute(f"SELECT * FROM {table}")
+                # Get data from SQLite - table name is validated from whitelist
+                sqlite_cursor.execute(f'SELECT * FROM "{safe_table}"')
                 rows = sqlite_cursor.fetchall()
 
                 if not rows:
-                    print(f"  Skipping {table} (empty)")
+                    print(f"  Skipping {safe_table} (empty)")
                     continue
 
                 # Get column names
                 columns = [description[0] for description in sqlite_cursor.description]
 
-                # Clear existing data in MySQL
-                db.session.execute(text(f"DELETE FROM {table}"))
+                # Clear existing data in MySQL using validated table name
+                db.session.execute(text(f"DELETE FROM `{safe_table}`"))
 
                 # Insert data
                 placeholders = ', '.join([f':{col}' for col in columns])
                 cols_str = ', '.join([f'`{col}`' for col in columns])  # MySQL uses backticks
 
-                insert_sql = text(f"INSERT INTO `{table}` ({cols_str}) VALUES ({placeholders})")
+                insert_sql = text(f"INSERT INTO `{safe_table}` ({cols_str}) VALUES ({placeholders})")
 
                 for row in rows:
                     row_dict = {col: row[col] for col in columns}
                     db.session.execute(insert_sql, row_dict)
 
                 db.session.commit()
-                print(f"  Migrated {table}: {len(rows)} rows")
+                print(f"  Migrated {safe_table}: {len(rows)} rows")
 
             except Exception as e:
                 print(f"  Error migrating {table}: {e}")

@@ -14,6 +14,15 @@ Simple, consistent flow:
 9. Notify
 10. Log run to database
 
+Usage:
+  python scripts/fetch.py              # Normal fetch (silent)
+  python scripts/fetch.py --verbose    # Verbose output with details
+  python scripts/fetch.py --gaps       # Use 'gaps' job name for cron tracking
+
+Options:
+  --verbose, -v   Show detailed output (symbols, candle counts, timing)
+  --gaps          Log this run as 'gaps' job instead of 'fetch' job
+
 Cron setup:
   * * * * * cd /path && venv/bin/python scripts/fetch.py
 """

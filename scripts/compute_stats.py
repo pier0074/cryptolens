@@ -2,11 +2,15 @@
 """
 Compute and cache database statistics for fast page loads.
 
-Run periodically via cron (e.g., every 5 minutes):
-  */5 * * * * cd /path && venv/bin/python scripts/compute_stats.py
+Usage:
+  python scripts/compute_stats.py              # Compute stats (silent)
+  python scripts/compute_stats.py --verbose    # Show detailed output
 
-Or manually:
-  python scripts/compute_stats.py
+Options:
+  --verbose, -v   Show detailed statistics output
+
+Cron setup (every 5 minutes):
+  */5 * * * * cd /path && venv/bin/python scripts/compute_stats.py
 """
 import sys
 import os
@@ -281,11 +285,23 @@ def compute_stats():
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description='Compute and cache database statistics')
+    parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed output')
+    args = parser.parse_args()
+
     app = create_app()
     with app.app_context():
         # Ensure table exists
         db.create_all()
-        compute_stats()
+        stats = compute_stats()
+
+        if args.verbose and stats:
+            print("\nDetailed Statistics:")
+            print(f"  Active symbols: {stats.get('active_symbols', 0)}")
+            print(f"  Total candles: {stats.get('total_candles', 0):,}")
+            print(f"  Active patterns: {stats.get('active_patterns', 0)}")
+            print(f"  Active signals: {stats.get('active_signals', 0)}")
 
 
 if __name__ == '__main__':

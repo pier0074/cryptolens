@@ -9,11 +9,25 @@ Features:
 - Hourly cron for gap filling, manual for initial load
 
 Usage:
-  python fetch_historical.py                    # Initial load (1 year)
-  python fetch_historical.py --days=30          # Fetch 30 days
-  python fetch_historical.py --gaps             # Find and fill gaps only
-  python fetch_historical.py --status           # Show DB status
-  python fetch_historical.py --delete           # Delete all data
+  python fetch_historical.py                       # Initial load (from fetch_start_date)
+  python fetch_historical.py --days 30             # Fetch last 30 days
+  python fetch_historical.py --gaps                # Find and fill gaps only (last 7 days)
+  python fetch_historical.py --gaps --full         # Find and fill gaps (entire database)
+  python fetch_historical.py --status              # Show DB status
+  python fetch_historical.py --delete              # Delete all data
+  python fetch_historical.py --symbol BTC/USDT     # Fetch specific symbol only
+  python fetch_historical.py --verbose             # Show detailed output
+  python fetch_historical.py --no-aggregate        # Skip aggregation step
+
+Options:
+  --days N            Days of history to fetch (overrides fetch_start_date)
+  --gaps              Find and fill gaps only (for hourly cron)
+  --full              With --gaps: scan entire database instead of last 7 days
+  --status            Show database status (candle counts, date ranges)
+  --delete            Delete all candle data
+  --symbol, -s SYM    Fetch specific symbol only (e.g., BTC/USDT)
+  --verbose, -v       Show detailed progress output
+  --no-aggregate      Skip higher timeframe aggregation
 
 Cron (hourly gap check):
   0 * * * * cd /path/to/cryptolens && venv/bin/python scripts/fetch_historical.py --gaps

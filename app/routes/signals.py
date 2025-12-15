@@ -60,6 +60,7 @@ def index():
 
 
 @signals_bp.route('/<int:signal_id>')
+@login_required
 def detail(signal_id):
     """Signal detail view"""
     signal = db.session.get(Signal, signal_id)
@@ -70,7 +71,12 @@ def detail(signal_id):
     return render_template('signal_detail.html', signal=signal)
 
 
+# Valid signal statuses
+VALID_SIGNAL_STATUSES = ['pending', 'notified', 'filled', 'stopped', 'tp_hit', 'expired', 'cancelled']
+
+
 @signals_bp.route('/<int:signal_id>/status', methods=['POST'])
+@login_required
 def update_status(signal_id):
     """Update signal status"""
     signal = db.session.get(Signal, signal_id)
@@ -79,7 +85,10 @@ def update_status(signal_id):
     data = request.get_json()
 
     if 'status' in data:
-        signal.status = data['status']
+        new_status = data['status']
+        if new_status not in VALID_SIGNAL_STATUSES:
+            return jsonify({'success': False, 'error': f'Invalid status. Must be one of: {VALID_SIGNAL_STATUSES}'}), 400
+        signal.status = new_status
         db.session.commit()
 
     return jsonify({'success': True, 'signal': signal.to_dict()})

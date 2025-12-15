@@ -262,11 +262,15 @@ def detail(portfolio_id):
 
 
 @portfolio_bp.route('/<int:portfolio_id>/edit', methods=['GET', 'POST'])
+@login_required
 def edit(portfolio_id):
     """Edit portfolio"""
+    user = get_current_user()
     portfolio = db.session.get(Portfolio, portfolio_id)
     if not portfolio:
         abort(404)
+    if portfolio.user_id != user.id:
+        abort(403)
 
     if request.method == 'POST':
         data = request.form
@@ -280,11 +284,15 @@ def edit(portfolio_id):
 
 
 @portfolio_bp.route('/<int:portfolio_id>/delete', methods=['POST'])
+@login_required
 def delete(portfolio_id):
     """Delete portfolio (soft delete by setting is_active=False)"""
+    user = get_current_user()
     portfolio = db.session.get(Portfolio, portfolio_id)
     if not portfolio:
         abort(404)
+    if portfolio.user_id != user.id:
+        abort(403)
 
     portfolio.is_active = False
     db.session.commit()
@@ -423,16 +431,20 @@ def new_trade(portfolio_id):
 
 
 @portfolio_bp.route('/<int:portfolio_id>/trades/<int:trade_id>')
+@login_required
 def trade_detail(portfolio_id, trade_id):
     """Trade detail view with journal entries"""
     from app.models import Candle
     from sqlalchemy import func, and_
 
+    user = get_current_user()
     portfolio = db.session.get(Portfolio, portfolio_id)
     trade = db.session.get(Trade, trade_id)
 
     if not portfolio or not trade or trade.portfolio_id != portfolio_id:
         abort(404)
+    if portfolio.user_id != user.id:
+        abort(403)
 
     # Get current price for this symbol
     current_price = None
@@ -457,13 +469,17 @@ def trade_detail(portfolio_id, trade_id):
 
 
 @portfolio_bp.route('/<int:portfolio_id>/trades/<int:trade_id>/open', methods=['POST'])
+@login_required
 def open_trade(portfolio_id, trade_id):
     """Open a pending trade"""
+    user = get_current_user()
     portfolio = db.session.get(Portfolio, portfolio_id)
     trade = db.session.get(Trade, trade_id)
 
     if not portfolio or not trade or trade.portfolio_id != portfolio_id:
         abort(404)
+    if portfolio.user_id != user.id:
+        abort(403)
 
     if trade.status != 'pending':
         abort(400)
@@ -480,13 +496,17 @@ def open_trade(portfolio_id, trade_id):
 
 
 @portfolio_bp.route('/<int:portfolio_id>/trades/<int:trade_id>/cancel', methods=['POST'])
+@login_required
 def cancel_trade(portfolio_id, trade_id):
     """Cancel a pending trade"""
+    user = get_current_user()
     portfolio = db.session.get(Portfolio, portfolio_id)
     trade = db.session.get(Trade, trade_id)
 
     if not portfolio or not trade or trade.portfolio_id != portfolio_id:
         abort(404)
+    if portfolio.user_id != user.id:
+        abort(403)
 
     if trade.status != 'pending':
         abort(400)
@@ -498,13 +518,17 @@ def cancel_trade(portfolio_id, trade_id):
 
 
 @portfolio_bp.route('/<int:portfolio_id>/trades/<int:trade_id>/close', methods=['POST'])
+@login_required
 def close_trade(portfolio_id, trade_id):
     """Close an open trade at specified price"""
+    user = get_current_user()
     portfolio = db.session.get(Portfolio, portfolio_id)
     trade = db.session.get(Trade, trade_id)
 
     if not portfolio or not trade or trade.portfolio_id != portfolio_id:
         abort(404)
+    if portfolio.user_id != user.id:
+        abort(403)
 
     if trade.status != 'open':
         abort(400)
@@ -533,15 +557,19 @@ def close_trade(portfolio_id, trade_id):
 
 
 @portfolio_bp.route('/<int:portfolio_id>/trades/<int:trade_id>/close-market', methods=['POST'])
+@login_required
 def close_trade_market(portfolio_id, trade_id):
     """Close an open trade at current market price"""
     from app.models import Candle
 
+    user = get_current_user()
     portfolio = db.session.get(Portfolio, portfolio_id)
     trade = db.session.get(Trade, trade_id)
 
     if not portfolio or not trade or trade.portfolio_id != portfolio_id:
         abort(404)
+    if portfolio.user_id != user.id:
+        abort(403)
 
     if trade.status != 'open':
         abort(400)

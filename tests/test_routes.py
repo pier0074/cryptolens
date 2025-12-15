@@ -325,8 +325,9 @@ class TestSignalsRoutes:
         response = client.get('/signals/?direction=short')
         assert response.status_code == 200
 
-    def test_signal_detail(self, client, app, sample_symbol, sample_pattern):
+    def test_signal_detail(self, client, app, sample_user, sample_symbol, sample_pattern):
         """Test signal detail page"""
+        login_user(client, 'test@example.com', 'TestPass123')
         with app.app_context():
             signal = Signal(
                 symbol_id=sample_symbol,
@@ -349,13 +350,15 @@ class TestSignalsRoutes:
         assert response.status_code == 200
         assert b'Signal #' in response.data
 
-    def test_signal_detail_not_found(self, client, app):
+    def test_signal_detail_not_found(self, client, app, sample_user):
         """Test signal detail for non-existent signal"""
+        login_user(client, 'test@example.com', 'TestPass123')
         response = client.get('/signals/99999')
         assert response.status_code == 404
 
-    def test_signal_update_status(self, client, app, sample_symbol, sample_pattern):
+    def test_signal_update_status(self, client, app, sample_user, sample_symbol, sample_pattern):
         """Test updating signal status"""
+        login_user(client, 'test@example.com', 'TestPass123')
         with app.app_context():
             signal = Signal(
                 symbol_id=sample_symbol,
@@ -465,8 +468,9 @@ class TestSettingsRoutes:
         data = response.get_json()
         assert data['success'] is True
 
-    def test_settings_test_notification(self, client, app):
+    def test_settings_test_notification(self, client, app, sample_user):
         """Test test notification endpoint"""
+        login_user(client, 'test@example.com', 'TestPass123')
         with patch('app.services.notifier.send_notification') as mock_send:
             mock_send.return_value = True
             response = client.post('/settings/test-notification')
@@ -550,12 +554,13 @@ class TestTradeInputValidation:
     """Tests for trade input validation (requires Pro+ subscription)"""
 
     @pytest.fixture
-    def sample_portfolio(self, app):
+    def sample_portfolio(self, app, sample_user):
         """Create a sample portfolio for testing"""
         from app.models import Portfolio
         with app.app_context():
             portfolio = Portfolio(
                 name='Test Portfolio',
+                user_id=sample_user,  # Link to the sample_user for ownership validation
                 initial_balance=10000,
                 current_balance=10000,
                 currency='USDT'

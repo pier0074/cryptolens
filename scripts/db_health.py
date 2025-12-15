@@ -12,12 +12,24 @@ Checks:
 4. Continuity - open should equal previous candle's close
 
 Usage:
-  python scripts/db_health.py              # Report only (incremental)
-  python scripts/db_health.py --fix        # Auto-fix: delete bad candles, fetch missing, re-aggregate
+  python scripts/db_health.py                    # Report only (incremental)
+  python scripts/db_health.py --fix              # Auto-fix: delete bad, fetch missing, re-aggregate
   python scripts/db_health.py --symbol BTC/USDT  # Check specific symbol
-  python scripts/db_health.py --reset      # Reset all verification flags
-  python scripts/db_health.py --accept-gaps  # Mark current gaps as OK (exchange had no data)
-  python scripts/db_health.py --show-gaps  # Show all known gaps
+  python scripts/db_health.py --reset            # Reset all verification flags
+  python scripts/db_health.py --reset --fix      # Reset then re-verify everything with fix
+  python scripts/db_health.py --accept-gaps      # Mark current gaps as known (exchange had no data)
+  python scripts/db_health.py --show-gaps        # Show all known/accepted gaps
+  python scripts/db_health.py --clear-gaps       # Clear all known gaps (to re-check them)
+  python scripts/db_health.py --quiet            # Only show summary output
+
+Options:
+  --fix              Auto-fix issues (delete bad candles, fetch missing, re-aggregate)
+  --symbol, -s SYM   Check specific symbol only (e.g., BTC/USDT)
+  --reset            Reset all verification flags (mark all as unverified)
+  --accept-gaps      Mark all currently detected gaps as accepted
+  --show-gaps        Show all known/accepted gaps
+  --clear-gaps       Clear all known gaps (allows re-checking)
+  --quiet, -q        Only show summary (less verbose output)
 
 Gap Handling:
   --fix will attempt to fetch missing 1m candles from the exchange.
@@ -528,7 +540,10 @@ def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False, a
             print("Resetting all verification flags...")
             total_reset = reset_verification()
             print(f"Reset {total_reset} candles.")
-            return
+            if not fix:
+                # If only reset (no fix), return here
+                return
+            print()  # Blank line before continuing with fix
 
         print(f"\n{'='*60}")
         print(f"  DATABASE HEALTH CHECK - {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}")
