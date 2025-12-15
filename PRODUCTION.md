@@ -8,7 +8,7 @@ Complete guide to deploying CryptoLens on a production server.
 
 1. [Prerequisites](#prerequisites)
 2. [Server Setup](#server-setup)
-3. [PostgreSQL Setup](#postgresql-setup)
+3. [MySQL Setup](#mysql-setup)
 4. [Redis Setup](#redis-setup)
 5. [Application Setup](#application-setup)
 6. [Environment Configuration](#environment-configuration)
@@ -28,7 +28,7 @@ Complete guide to deploying CryptoLens on a production server.
 
 - Ubuntu 22.04 LTS or similar Linux server
 - Python 3.9+
-- PostgreSQL 14+
+- MySQL 8.0+
 - Redis 6+
 - Nginx
 - Domain name with DNS configured
@@ -50,7 +50,7 @@ sudo apt update && sudo apt upgrade -y
 
 # Install Python and build tools
 sudo apt install -y python3 python3-pip python3-venv python3-dev
-sudo apt install -y build-essential libpq-dev
+sudo apt install -y build-essential libmysqlclient-dev
 
 # Install Nginx
 sudo apt install -y nginx
@@ -71,55 +71,58 @@ sudo usermod -aG sudo cryptolens
 
 ---
 
-## PostgreSQL Setup
+## MySQL Setup
 
-### 1. Install PostgreSQL
+### 1. Install MySQL
 
 ```bash
-sudo apt install -y postgresql postgresql-contrib
+sudo apt install -y mysql-server
+sudo mysql_secure_installation
 ```
 
 ### 2. Create database and user
 
 ```bash
-sudo -u postgres psql
+sudo mysql
 
--- In PostgreSQL shell:
-CREATE USER cryptolens WITH PASSWORD 'your-secure-password-here';
-CREATE DATABASE cryptolens_prod OWNER cryptolens;
-GRANT ALL PRIVILEGES ON DATABASE cryptolens_prod TO cryptolens;
+-- In MySQL shell:
+CREATE DATABASE cryptolens_prod CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'cryptolens'@'localhost' IDENTIFIED BY 'your-secure-password-here';
+GRANT ALL PRIVILEGES ON cryptolens_prod.* TO 'cryptolens'@'localhost';
+FLUSH PRIVILEGES;
 
--- Enable required extensions
-\c cryptolens_prod
-CREATE EXTENSION IF NOT EXISTS pg_trgm;  -- For text search
-
-\q
+EXIT;
 ```
 
-### 3. Configure PostgreSQL for production
+### 3. Configure MySQL for production
 
-Edit `/etc/postgresql/14/main/postgresql.conf`:
+Edit `/etc/mysql/mysql.conf.d/mysqld.cnf`:
 
 ```ini
+[mysqld]
 # Connection settings
-listen_addresses = 'localhost'
+bind-address = 127.0.0.1
 max_connections = 100
 
 # Memory settings (adjust based on server RAM)
-shared_buffers = 1GB              # 25% of RAM
-effective_cache_size = 3GB        # 75% of RAM
-work_mem = 16MB
-maintenance_work_mem = 256MB
+innodb_buffer_pool_size = 1G        # 50-70% of RAM for dedicated MySQL server
+innodb_log_file_size = 256M
+innodb_flush_log_at_trx_commit = 2  # Better performance, slight durability trade-off
 
-# Write-ahead log
-wal_buffers = 64MB
-checkpoint_completion_target = 0.9
+# Query cache (MySQL 8.0 doesn't have query cache, use application caching)
+# For older versions:
+# query_cache_size = 64M
+# query_cache_type = 1
+
+# Character set
+character-set-server = utf8mb4
+collation-server = utf8mb4_unicode_ci
 ```
 
-Restart PostgreSQL:
+Restart MySQL:
 
 ```bash
-sudo systemctl restart postgresql
+sudo systemctl restart mysql
 ```
 
 ---
@@ -209,8 +212,8 @@ pip install -r requirements.txt
 ### 3. Create directories
 
 ```bash
-mkdir -p data logs
-chmod 755 data logs
+mkdir -p logs
+chmod 755 logs
 ```
 
 ---
@@ -234,8 +237,15 @@ Add the following configuration:
 SECRET_KEY=generate-a-64-char-random-string-here
 FLASK_ENV=production
 
-# Database (PostgreSQL)
-DATABASE_URL=postgresql://cryptolens:your-db-password@localhost:5432/cryptolens_prod
+# Database (MySQL)
+PROD_DB_HOST=localhost
+PROD_DB_PORT=3306
+PROD_DB_USER=cryptolens
+PROD_DB_PASS=your-db-password
+PROD_DB_NAME=cryptolens_prod
+
+# Or use DATABASE_URL directly:
+# DATABASE_URL=mysql+pymysql://cryptolens:your-db-password@localhost:3306/cryptolens_prod
 
 # Redis Cache
 REDIS_URL=redis://:your-redis-password@localhost:6379/0
@@ -255,7 +265,7 @@ NTFY_URL=https://ntfy.sh
 ENCRYPTION_KEY=your-fernet-key-here
 
 # Error Tracking (Self-hosted - no external service required)
-# Uses PostgreSQL for storage and sends email alerts for critical errors
+# Uses MySQL for storage and sends email alerts for critical errors
 ERROR_TRACKING_ENABLED=true
 APP_VERSION=1.0.0
 
@@ -297,7 +307,7 @@ chmod 600 .env
 
 ```bash
 source venv/bin/activate
-python scripts/migrate_all.py
+python scripts/init_db.py
 ```
 
 ### 2. Create admin account
@@ -374,7 +384,7 @@ sudo nano /etc/systemd/system/cryptolens.service
 ```ini
 [Unit]
 Description=CryptoLens Gunicorn Application
-After=network.target postgresql.service redis.service
+After=network.target mysql.service redis.service
 
 [Service]
 User=cryptolens
@@ -541,7 +551,7 @@ sudo nano /etc/systemd/system/cryptolens-worker.service
 ```ini
 [Unit]
 Description=CryptoLens RQ Worker
-After=network.target redis.service postgresql.service
+After=network.target redis.service mysql.service
 
 [Service]
 User=cryptolens
@@ -629,7 +639,7 @@ scrape_configs:
 
 ### 2. Error Tracking (Self-Hosted)
 
-CryptoLens includes a built-in error tracking system that stores errors in PostgreSQL and sends email alerts for critical errors. No external services (like Sentry or Docker) are required.
+CryptoLens includes a built-in error tracking system that stores errors in MySQL and sends email alerts for critical errors. No external services (like Sentry or Docker) are required.
 
 **Features:**
 - Automatic error capture for all unhandled exceptions
@@ -695,11 +705,13 @@ nano /home/cryptolens/backup.sh
 BACKUP_DIR="/home/cryptolens/backups"
 DATE=$(date +%Y%m%d_%H%M%S)
 DB_NAME="cryptolens_prod"
+DB_USER="cryptolens"
+DB_PASS="your-db-password"
 
 mkdir -p $BACKUP_DIR
 
-# PostgreSQL backup
-pg_dump -U cryptolens $DB_NAME | gzip > "$BACKUP_DIR/db_$DATE.sql.gz"
+# MySQL backup
+mysqldump -u $DB_USER -p$DB_PASS $DB_NAME | gzip > "$BACKUP_DIR/db_$DATE.sql.gz"
 
 # Keep only last 7 days of backups
 find $BACKUP_DIR -name "db_*.sql.gz" -mtime +7 -delete
@@ -742,7 +754,7 @@ rclone config
 sudo systemctl status cryptolens
 sudo systemctl status cryptolens-worker
 sudo systemctl status nginx
-sudo systemctl status postgresql
+sudo systemctl status mysql
 sudo systemctl status redis
 ```
 
@@ -766,9 +778,9 @@ sudo journalctl -u cryptolens -f
 - Check Gunicorn logs: `tail -f logs/gunicorn-error.log`
 
 **2. Database connection errors**
-- Verify PostgreSQL is running: `sudo systemctl status postgresql`
-- Check DATABASE_URL in `.env`
-- Test connection: `psql -U cryptolens -d cryptolens_prod`
+- Verify MySQL is running: `sudo systemctl status mysql`
+- Check database config in `.env`
+- Test connection: `mysql -u cryptolens -p cryptolens_prod`
 
 **3. Redis connection errors**
 - Verify Redis is running: `sudo systemctl status redis`
@@ -787,7 +799,7 @@ sudo journalctl -u cryptolens -f
 ### Restart all services
 
 ```bash
-sudo systemctl restart postgresql redis cryptolens cryptolens-worker nginx
+sudo systemctl restart mysql redis cryptolens cryptolens-worker nginx
 ```
 
 ---
@@ -799,7 +811,7 @@ sudo systemctl restart postgresql redis cryptolens cryptolens-worker nginx
 - [ ] Enable firewall (UFW): only allow 22, 80, 443
 - [ ] Set up fail2ban for SSH
 - [ ] Configure automatic security updates
-- [ ] Enable PostgreSQL SSL (for remote connections)
+- [ ] Enable MySQL SSL (for remote connections)
 - [ ] Set up log rotation
 - [ ] Configure backup encryption
 - [ ] Review Nginx security headers
@@ -813,7 +825,7 @@ sudo systemctl restart postgresql redis cryptolens cryptolens-worker nginx
 |---------|------|-----------------|
 | Nginx | 80, 443 | `/etc/nginx/sites-available/cryptolens` |
 | Gunicorn | 8000 | `/home/cryptolens/cryptolens/gunicorn.conf.py` |
-| PostgreSQL | 5432 | `/etc/postgresql/14/main/postgresql.conf` |
+| MySQL | 3306 | `/etc/mysql/mysql.conf.d/mysqld.cnf` |
 | Redis | 6379 | `/etc/redis/redis.conf` |
 | Prometheus | 9090 | `/opt/prometheus/prometheus.yml` |
 
@@ -823,7 +835,7 @@ sudo systemctl restart postgresql redis cryptolens cryptolens-worker nginx
 | `sudo systemctl restart cryptolens-worker` | Restart background worker |
 | `sudo -u cryptolens crontab -l` | View cron jobs |
 | `tail -f logs/gunicorn-error.log` | Watch app logs |
-| `python scripts/migrate_all.py` | Run migrations |
+| `python scripts/init_db.py` | Initialize database |
 
 ---
 

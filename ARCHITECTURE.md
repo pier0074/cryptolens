@@ -54,7 +54,7 @@ CryptoLens is a Flask-based web application for detecting Smart Money Concepts (
        │             │              │              │
        ▼             ▼              ▼              ▼
 ┌────────────┐ ┌───────────┐ ┌───────────┐ ┌───────────────┐
-│   Redis    │ │ PostgreSQL│ │   NTFY    │ │    CCXT       │
+│   Redis    │ │   MySQL   │ │   NTFY    │ │    CCXT       │
 │  (Cache)   │ │ (Database)│ │  (Push)   │ │  (Exchange)   │
 └────────────┘ └───────────┘ └───────────┘ └───────────────┘
 ```
@@ -66,14 +66,14 @@ CryptoLens is a Flask-based web application for detecting Smart Money Concepts (
 | Web Server | Nginx | Reverse proxy, SSL, static files |
 | WSGI | Gunicorn | Python application server |
 | Framework | Flask 3.0 | Web framework |
-| Database | PostgreSQL 14+ | Primary data store |
+| Database | MySQL 8.0+ | Primary data store |
 | Cache | Redis 6+ | Caching, rate limiting, job queue |
 | ORM | SQLAlchemy 2.0 | Database abstraction |
 | Task Queue | RQ (Redis Queue) | Background job processing |
 | Exchange API | CCXT | Cryptocurrency exchange data |
 | Notifications | NTFY | Push notifications |
 | Monitoring | Prometheus | Metrics collection |
-| Error Tracking | Self-hosted (PostgreSQL) | Error capture and alerting |
+| Error Tracking | Self-hosted (MySQL) | Error capture and alerting |
 
 ---
 
@@ -207,7 +207,7 @@ HTTP Request
          │
          ▼
 ┌─────────────────┐
-│   Data Layer    │ ◀──▶ PostgreSQL / Redis
+│   Data Layer    │ ◀──▶ MySQL / Redis
 └────────┬────────┘
          │
          ▼
@@ -415,7 +415,7 @@ Layer 1: Application Cache (Flask-Caching + Redis)
 ├── Last Data Update: 60s TTL
 └── Session Data: 7 days TTL
 
-Layer 2: Database Query Cache (PostgreSQL)
+Layer 2: Database Query Cache (MySQL)
 ├── Prepared statements
 └── Connection pooling (10 connections, 20 overflow)
 

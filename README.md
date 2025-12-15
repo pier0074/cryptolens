@@ -684,7 +684,7 @@ Configure your Prometheus to scrape `http://your-server:5000/metrics`.
 
 ### Error Tracking (Self-Hosted)
 
-Built-in error tracking that stores errors in PostgreSQL and sends email alerts. No external services or Docker required.
+Built-in error tracking that stores errors in MySQL and sends email alerts. No external services or Docker required.
 
 **Features:**
 - Automatic capture of all unhandled exceptions
