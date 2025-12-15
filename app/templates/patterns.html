@@ -607,16 +607,23 @@ function patternChart() {
                 minMove: Math.pow(10, -this.precision),
             };
 
-            // Helper to create price line with label on right axis
-            const createPriceLine = (series, price, color, title) => {
-                series.createPriceLine({
-                    price: price,
+            // Helper to create a line series starting from pattern time
+            const addLine = (startTime, price, color, lineWidth, lineStyle, title) => {
+                const series = this.chart.addLineSeries({
                     color: color,
-                    lineWidth: 1,
-                    lineStyle: 2, // Dashed
-                    axisLabelVisible: true,
+                    lineWidth: lineWidth,
+                    lineStyle: lineStyle,
+                    priceLineVisible: true,  // Show price on right axis
+                    lastValueVisible: true,
+                    crosshairMarkerVisible: false,
+                    priceFormat,
                     title: title,
                 });
+                series.setData([
+                    { time: Math.max(startTime, firstTime), value: price },
+                    { time: lastTime, value: price }
+                ]);
+                this.patternSeries.push(series);
             };
 
             // Draw each selected pattern
@@ -625,69 +632,24 @@ function patternChart() {
                 const zoneColor = direction === 'bullish' ? '#22c55e' : '#ef4444';
                 const patternStartTime = detectedAt / 1000;
 
-                // Use price lines on the candlestick series for clean display on right axis
-                // Zone High
-                this.priceLines.push(this.candlestickSeries.createPriceLine({
-                    price: zoneHigh,
-                    color: zoneColor,
-                    lineWidth: 2,
-                    lineStyle: 0, // Solid
-                    axisLabelVisible: true,
-                    title: 'Zone H',
-                }));
-
-                // Zone Low
-                this.priceLines.push(this.candlestickSeries.createPriceLine({
-                    price: zoneLow,
-                    color: zoneColor,
-                    lineWidth: 2,
-                    lineStyle: 0, // Solid
-                    axisLabelVisible: true,
-                    title: 'Zone L',
-                }));
+                // Zone High & Low (solid lines from pattern time)
+                addLine(patternStartTime, zoneHigh, zoneColor, 2, 0, 'Zone H');
+                addLine(patternStartTime, zoneLow, zoneColor, 2, 0, 'Zone L');
 
                 // Entry (blue dashed)
-                this.priceLines.push(this.candlestickSeries.createPriceLine({
-                    price: entry,
-                    color: '#3b82f6',
-                    lineWidth: 1,
-                    lineStyle: 2, // Dashed
-                    axisLabelVisible: true,
-                    title: 'Entry',
-                }));
+                addLine(patternStartTime, entry, '#3b82f6', 1, 2, 'Entry');
 
-                // Stop Loss (red)
-                this.priceLines.push(this.candlestickSeries.createPriceLine({
-                    price: sl,
-                    color: '#f87171',
-                    lineWidth: 1,
-                    lineStyle: 2,
-                    axisLabelVisible: true,
-                    title: 'SL',
-                }));
+                // Stop Loss (red dashed)
+                addLine(patternStartTime, sl, '#f87171', 1, 2, 'SL');
 
-                // TP1 (light green)
+                // TP1 (light green dashed)
                 if (tp1) {
-                    this.priceLines.push(this.candlestickSeries.createPriceLine({
-                        price: tp1,
-                        color: '#4ade80',
-                        lineWidth: 1,
-                        lineStyle: 2,
-                        axisLabelVisible: true,
-                        title: 'TP1',
-                    }));
+                    addLine(patternStartTime, tp1, '#4ade80', 1, 2, 'TP1');
                 }
 
-                // TP2 (green)
+                // TP2 (green dashed)
                 if (tp2) {
-                    this.priceLines.push(this.candlestickSeries.createPriceLine({
-                        price: tp2,
-                        color: '#22c55e',
-                        lineWidth: 1,
-                        lineStyle: 2,
-                        axisLabelVisible: true,
-                        title: 'TP2',
-                    }));
+                    addLine(patternStartTime, tp2, '#22c55e', 1, 2, 'TP2');
                 }
 
                 // Add marker at pattern detection time
