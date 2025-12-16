@@ -700,6 +700,11 @@ def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False,
     Order:
     1. Verify all 1m candles first
     2. Only then verify aggregated timeframes
+
+    Exit conditions:
+    - All candles verified
+    - No progress made for 3 consecutive iterations (stuck)
+    - Max iterations reached
     """
     batch_count = BATCH_SIZES.get(batch_size, 10080)
 
@@ -730,6 +735,8 @@ def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False,
 
         iteration = 0
         total_verified = 0
+        no_progress_count = 0  # Track consecutive iterations with no progress
+        MAX_NO_PROGRESS = 3    # Exit after this many iterations with no progress
 
         while True:
             iteration += 1
@@ -745,6 +752,7 @@ def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False,
             print(f"{'='*60}\n")
 
             iteration_verified = 0
+            iteration_skipped = 0  # Track skipped candles
             all_symbols_done = True
             total_errors = defaultdict(int)
 
@@ -796,6 +804,7 @@ def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False,
                     )
 
                     iteration_verified += result['verified']
+                    iteration_skipped += result.get('skipped', 0)
 
                     if result['verified'] > 0 or result['skipped'] > 0 or result['error'] or result['remaining'] > 0:
                         line = f"  {tf}: verified {result['verified']}"
@@ -825,6 +834,7 @@ def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False,
             print(f"  ITERATION {iteration} SUMMARY")
             print(f"{'='*60}")
             print(f"  Verified this iteration: {iteration_verified}")
+            print(f"  Skipped this iteration: {iteration_skipped}")
             print(f"  Total verified: {total_verified}")
 
             if total_errors:
@@ -833,6 +843,21 @@ def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False,
             if all_symbols_done:
                 print("\n  ALL CANDLES VERIFIED!")
                 break
+
+            # Check for stuck state (no progress made)
+            if iteration_verified == 0:
+                no_progress_count += 1
+                if no_progress_count >= MAX_NO_PROGRESS:
+                    print(f"\n  NO PROGRESS for {MAX_NO_PROGRESS} consecutive iterations.")
+                    print(f"  This usually means remaining candles depend on 1m data")
+                    print(f"  that hasn't been fetched yet (near current time).")
+                    print(f"  Run the fetch script to get latest 1m data, then try again.")
+                    print(f"\n  EXITING - no more work possible at this time.")
+                    break
+                else:
+                    print(f"\n  WARNING: No progress this iteration ({no_progress_count}/{MAX_NO_PROGRESS})")
+            else:
+                no_progress_count = 0  # Reset counter on progress
 
             if not until_done:
                 remaining_1m = sum(
