@@ -264,30 +264,30 @@ The separation is intentional: public APIs use standardized ApiResponse, while i
 
 ---
 
-### [MEDIUM] Testing: Major Untested Routes
+### ~~[MEDIUM] Testing: Major Untested Routes~~ ✅ PARTIALLY FIXED
 
 **Category**: Testing
 **Issue**: Critical routes without test coverage
 
 | Route | Lines | Tests | Risk |
 |-------|-------|-------|------|
-| `admin.py` | 2,052 | Minimal | **CRITICAL** |
+| ~~`admin.py`~~ | 2,052 | ✅ 28 tests | ~~**CRITICAL**~~ Fixed |
 | `docs.py` | 4,386 | None | Medium |
 | `main.py` | 2,002 | None | Low |
 | `metrics.py` | 5,515 | None | Medium |
 
 ---
 
-### [MEDIUM] Testing: Untested Services
+### ~~[MEDIUM] Testing: Untested Services~~ ✅ PARTIALLY FIXED
 
 **Category**: Testing
 **Issue**: Core services without test coverage
 
 - `payment.py` - Payment processing logic untested
 - `data_fetcher.py` - Data fetching logic untested
-- `email.py` - Email sending untested
-- `health.py` - Health checks untested
-- `broadcast.py` - Broadcast logic untested
+- ~~`email.py`~~ - ✅ 9 tests added
+- ~~`health.py`~~ - ✅ 14 tests added
+- ~~`broadcast.py`~~ - ✅ 10 tests added
 
 ---
 
