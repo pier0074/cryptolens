@@ -184,6 +184,7 @@ async def run_fetch_cycle(symbols, app, verbose=False):
     exchange = create_exchange('binance')
 
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+    target_time = datetime.now(timezone.utc).strftime('%H:%M')
 
     try:
         # Phase 1: Get all timestamps in ONE query
@@ -195,10 +196,10 @@ async def run_fetch_cycle(symbols, app, verbose=False):
         gap_minutes = (now_ms - fetch_start) // 60000
 
         if verbose:
-            _t1 = _time.time()
-            print(f"  Timestamps loaded in {(_t1-_t0)*1000:.0f}ms")
-            print(f"  Aligned fetch: {gap_minutes} minutes gap")
-            print(f"  Fetching {len(symbols)} symbols in parallel...")
+            print(f"  Target: {target_time} UTC")
+            print(f"  Phase 1: Fetching {len(symbols)} symbols in parallel...")
+            for symbol in symbols:
+                print(f"  {symbol}: Fetching {gap_minutes} min gap...")
 
         logger.info(f"Fetch cycle: {len(symbols)} symbols, {gap_minutes} minutes gap")
 
@@ -206,7 +207,7 @@ async def run_fetch_cycle(symbols, app, verbose=False):
         _t2 = _time.time()
         fetch_tasks = {
             symbol: asyncio.create_task(
-                fetch_symbol_batches(exchange, symbol, fetch_start, now_ms, verbose=verbose)
+                fetch_symbol_batches(exchange, symbol, fetch_start, now_ms, verbose=False)
             )
             for symbol in symbols
         }
@@ -223,14 +224,19 @@ async def run_fetch_cycle(symbols, app, verbose=False):
                 fetch_results[symbol] = []
                 logger.error(f"{symbol}: Fetch failed - {e}")
 
-        if verbose:
-            _t3 = _time.time()
-            total_candles = sum(len(v) for v in fetch_results.values())
-            print(f"  Fetch complete: {total_candles:,} candles in {(_t3-_t2):.1f}s")
+        _t3 = _time.time()
+        total_candles = sum(len(v) for v in fetch_results.values())
 
-        logger.info(f"Fetch phase complete: {sum(len(v) for v in fetch_results.values()):,} candles in {_time.time()-_t2:.1f}s")
+        if verbose:
+            print(f"  Phase 1 complete: {total_candles:,} candles in {(_t3-_t2):.1f}s")
+
+        logger.info(f"Fetch phase complete: {total_candles:,} candles in {_t3-_t2:.1f}s")
 
         # Phase 3: Process results sequentially (CPU-bound, doesn't block network)
+        if verbose:
+            print(f"  Phase 2: Processing {len(symbols)} symbols...")
+
+        _t4 = _time.time()
         results = []
         for symbol in symbols:
             ohlcv = fetch_results.get(symbol, [])
@@ -246,6 +252,10 @@ async def run_fetch_cycle(symbols, app, verbose=False):
                 results.append(result)
             else:
                 results.append({'symbol': symbol, 'new': 0, 'patterns': 0})
+
+        if verbose:
+            _t5 = _time.time()
+            print(f"  Phase 2 complete: processed in {(_t5-_t4):.1f}s")
 
         return results
 
