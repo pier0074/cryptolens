@@ -2,16 +2,16 @@
 """
 Real-time Candle Fetcher with Pattern Detection
 
-Simple, consistent flow:
-1. Check last candle timestamp in DB
-2. Fetch all candles from there to now
-3. Save new candles
-4. Aggregate ALL higher timeframes
-5. Detect patterns on all fetched candles
-6. Update pattern status
-7. Generate signals
-8. Expire old patterns
-9. Notify
+Optimized async flow:
+1. Batch query all symbols' last timestamps (single DB query)
+2. Align fetch start time across all symbols
+3. True parallel fetch using ccxt rate limiting (no semaphore)
+4. Batch save candles
+5. Aggregate higher timeframes
+6. Detect patterns
+7. Update pattern status
+8. Generate signals
+9. Expire old patterns
 10. Log run to database
 
 Usage:
@@ -37,29 +37,19 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Lock file path for preventing concurrent execution
 LOCK_FILE = '/tmp/cryptolens_fetch.lock'
 
-import ccxt.async_support as ccxt_async
 from datetime import datetime, timezone
 
-# Import shared retry utilities
-from scripts.utils.retry import async_retry_call, get_error_summary
+# Import shared fetch utilities
+from scripts.utils.fetch_utils import (
+    get_all_last_timestamps,
+    get_aligned_fetch_start,
+    fetch_symbol_batches,
+    create_exchange,
+    logger
+)
 
 # All timeframes to aggregate (always, regardless of current time)
 ALL_TIMEFRAMES = ['5m', '15m', '30m', '1h', '2h', '4h', '1d']
-
-
-def get_last_candle_timestamp(app, symbol_name):
-    """Get the timestamp of the last 1m candle for a symbol."""
-    from app.models import Symbol, Candle
-    from sqlalchemy import func
-
-    with app.app_context():
-        sym = Symbol.query.filter_by(symbol=symbol_name).first()
-        if not sym:
-            return None
-        return Candle.query.filter_by(
-            symbol_id=sym.id,
-            timeframe='1m'
-        ).with_entities(func.max(Candle.timestamp)).scalar()
 
 
 def process_symbol(symbol_name, ohlcv, app, verbose=False):
@@ -81,6 +71,7 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
         # Get symbol
         sym = Symbol.query.filter_by(symbol=symbol_name).first()
         if not sym:
+            logger.warning(f"{symbol_name}: Symbol not found in database")
             return {'symbol': symbol_name, 'new': 0, 'patterns': 0}
 
         # 1. Save new candles
@@ -109,6 +100,7 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
 
         if new_count > 0:
             db.session.commit()
+            logger.debug(f"{symbol_name}: Saved {new_count} new 1m candles")
 
         # 2. Aggregate ALL higher timeframes
         # Use full aggregation if catching up (many new candles), otherwise realtime (faster)
@@ -121,6 +113,7 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
                 else:
                     aggregate_candles_realtime(symbol_name, '1m', tf)
             except Exception as e:
+                logger.error(f"{symbol_name}: Aggregation failed for {tf}: {e}")
                 if verbose:
                     print(f"  Warning: Aggregation failed for {tf}: {e}")
 
@@ -145,6 +138,7 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
                         if patterns:
                             patterns_found += len(patterns)
                     except Exception as e:
+                        logger.error(f"{symbol_name}: Pattern detection failed for {detector.__class__.__name__} on {tf}: {e}")
                         if verbose:
                             print(f"  Warning: Pattern detection failed for {detector.__class__.__name__} on {tf}: {e}")
 
@@ -158,12 +152,15 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
                         try:
                             detector.update_pattern_status(symbol_name, tf, current_price)
                         except Exception as e:
+                            logger.error(f"{symbol_name}: Pattern status update failed for {detector.__class__.__name__} on {tf}: {e}")
                             if verbose:
                                 print(f"  Warning: Pattern status update failed for {detector.__class__.__name__} on {tf}: {e}")
 
         _elapsed = _time.time() - _t0
         if verbose and (new_count > 0 or patterns_found > 0):
             print(f"  {symbol_name}: {new_count} candles, {patterns_found} patterns ({_elapsed:.1f}s)")
+
+        logger.info(f"{symbol_name}: Processed {new_count} candles, {patterns_found} patterns in {_elapsed:.1f}s")
 
         return {
             'symbol': symbol_name,
@@ -173,101 +170,85 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
         }
 
 
-async def fetch_with_retry(exchange, symbol, timeframe, since=None, limit=None, verbose=False):
-    """Fetch OHLCV with retry logic for rate limits, timeouts, and errors."""
-    return await async_retry_call(
-        exchange.fetch_ohlcv,
-        symbol, timeframe, since=since, limit=limit,
-        context=symbol,
-        verbose=verbose
-    )
-
-
-async def fetch_and_process(exchange, symbol, app, semaphore, verbose=False):
-    """Fetch candles from last timestamp to now, then process."""
-    from app.config import Config
-
-    async with semaphore:  # Limit concurrent requests
-        try:
-            # Get last candle timestamp
-            last_ts = get_last_candle_timestamp(app, symbol)
-            now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-
-            if last_ts:
-                gap_minutes = (now_ms - last_ts) // 60000
-                if verbose and gap_minutes > 10:
-                    print(f"  {symbol}: Fetching {gap_minutes} min gap...")
-
-                # Fetch in batches of 1000 (Binance max) until caught up
-                all_ohlcv = []
-                since = last_ts + 60000  # Start from next minute
-
-                while since < now_ms:
-                    batch = await fetch_with_retry(
-                        exchange, symbol, '1m',
-                        since=since, limit=1000,
-                        verbose=verbose
-                    )
-                    if not batch:
-                        break
-                    all_ohlcv.extend(batch)
-                    # Move to next batch (last candle timestamp + 1 min)
-                    since = batch[-1][0] + 60000
-                    # Small delay between batches to respect rate limits
-                    if len(batch) == 1000:
-                        await asyncio.sleep(0.2)
-
-                ohlcv = all_ohlcv
-            else:
-                # No data yet - fetch initial history
-                ohlcv = await fetch_with_retry(
-                    exchange, symbol, '1m', limit=500,
-                    verbose=verbose
-                )
-                if verbose:
-                    print(f"  {symbol}: Initial fetch (500 candles)...")
-
-            if ohlcv:
-                return process_symbol(symbol, ohlcv, app, verbose)
-            return {'symbol': symbol, 'new': 0, 'patterns': 0}
-
-        except Exception as e:
-            error_msg = get_error_summary(e)
-            if verbose:
-                print(f"  {symbol}: ERROR - {error_msg}")
-            return {'symbol': symbol, 'new': 0, 'patterns': 0, 'error': error_msg}
-
-
 async def run_fetch_cycle(symbols, app, verbose=False):
-    """Run a complete fetch cycle with rate-limited parallel fetching."""
-    from app.config import Config
+    """
+    True parallel fetch cycle - ccxt handles rate limiting.
 
-    exchange = ccxt_async.binance({
-        'enableRateLimit': True,
-        'options': {'defaultType': 'spot'},
-        'rateLimit': 100,  # More conservative rate limit (ms between requests)
-    })
+    Phase 1: Batch query all timestamps (1 DB query)
+    Phase 2: Parallel fetch all symbols (ccxt queues internally)
+    Phase 3: Sequential processing (after all fetches complete)
+    """
+    import time as _time
 
-    # Semaphore to limit concurrent requests (prevents rate limiting)
-    semaphore = asyncio.Semaphore(Config.MAX_CONCURRENT_REQUESTS)
+    # Create exchange - let ccxt handle rate limiting
+    exchange = create_exchange('binance')
 
-    if verbose:
-        print(f"  Fetching {len(symbols)} symbols (max {Config.MAX_CONCURRENT_REQUESTS} concurrent)...")
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
     try:
-        # Stagger task creation to prevent burst requests
-        inter_delay = getattr(Config, 'INTER_SYMBOL_DELAY', 0.3)
-        tasks = []
-        for i, symbol in enumerate(symbols):
-            task = asyncio.create_task(fetch_and_process(exchange, symbol, app, semaphore, verbose))
-            tasks.append(task)
-            # Small delay between starting each symbol (except last)
-            if i < len(symbols) - 1:
-                await asyncio.sleep(inter_delay)
+        # Phase 1: Get all timestamps in ONE query
+        _t0 = _time.time()
+        last_timestamps = get_all_last_timestamps(app, symbols)
 
-        # Wait for all to complete
-        results = await asyncio.gather(*tasks)
-        return list(results)
+        # Calculate aligned fetch start (oldest timestamp across all symbols)
+        fetch_start = get_aligned_fetch_start(last_timestamps, now_ms)
+        gap_minutes = (now_ms - fetch_start) // 60000
+
+        if verbose:
+            _t1 = _time.time()
+            print(f"  Timestamps loaded in {(_t1-_t0)*1000:.0f}ms")
+            print(f"  Aligned fetch: {gap_minutes} minutes gap")
+            print(f"  Fetching {len(symbols)} symbols in parallel...")
+
+        logger.info(f"Fetch cycle: {len(symbols)} symbols, {gap_minutes} minutes gap")
+
+        # Phase 2: Create ALL fetch tasks at once (true parallel)
+        _t2 = _time.time()
+        fetch_tasks = {
+            symbol: asyncio.create_task(
+                fetch_symbol_batches(exchange, symbol, fetch_start, now_ms, verbose=verbose)
+            )
+            for symbol in symbols
+        }
+
+        # Wait for ALL fetches to complete (ccxt queues internally)
+        fetch_results = {}
+        fetch_errors = {}
+
+        for symbol, task in fetch_tasks.items():
+            try:
+                fetch_results[symbol] = await task
+            except Exception as e:
+                fetch_errors[symbol] = str(e)
+                fetch_results[symbol] = []
+                logger.error(f"{symbol}: Fetch failed - {e}")
+
+        if verbose:
+            _t3 = _time.time()
+            total_candles = sum(len(v) for v in fetch_results.values())
+            print(f"  Fetch complete: {total_candles:,} candles in {(_t3-_t2):.1f}s")
+
+        logger.info(f"Fetch phase complete: {sum(len(v) for v in fetch_results.values()):,} candles in {_time.time()-_t2:.1f}s")
+
+        # Phase 3: Process results sequentially (CPU-bound, doesn't block network)
+        results = []
+        for symbol in symbols:
+            ohlcv = fetch_results.get(symbol, [])
+            if symbol in fetch_errors:
+                results.append({
+                    'symbol': symbol,
+                    'new': 0,
+                    'patterns': 0,
+                    'error': fetch_errors[symbol]
+                })
+            elif ohlcv:
+                result = process_symbol(symbol, ohlcv, app, verbose)
+                results.append(result)
+            else:
+                results.append({'symbol': symbol, 'new': 0, 'patterns': 0})
+
+        return results
+
     finally:
         await exchange.close()
 
@@ -281,8 +262,10 @@ def generate_signals_batch(app, verbose=False):
             result = scan_and_generate_signals()
             if verbose and result['signals_generated'] > 0:
                 print(f"  Generated {result['signals_generated']} signals")
+            logger.info(f"Generated {result['signals_generated']} signals")
             return result
         except Exception as e:
+            logger.error(f"Signal generation failed: {e}")
             if verbose:
                 print(f"  Signal error: {e}")
             return {'signals_generated': 0}
@@ -313,6 +296,7 @@ def expire_old_patterns(app, verbose=False):
 
         if expired_count > 0:
             db.session.commit()
+            logger.info(f"Expired {expired_count} old patterns")
             if verbose:
                 print(f"  Expired {expired_count} old patterns")
 
@@ -341,6 +325,7 @@ def start_cron_run(app, job_name='fetch'):
 
         # Check if job is enabled
         if not job.is_enabled:
+            logger.info(f"Job '{job_name}' is disabled, skipping")
             return None
 
         # Create a new run record
@@ -378,6 +363,8 @@ def complete_cron_run(app, run_id, success=True, error_message=None,
             run.notifications_sent = notifications_sent
             db.session.commit()
 
+            logger.info(f"Cron run completed: success={success}, symbols={symbols_processed}, candles={candles_fetched}")
+
 
 def acquire_lock():
     """Acquire file lock to prevent concurrent execution."""
@@ -410,6 +397,7 @@ def main():
     lock_file = acquire_lock()
     if lock_file is None:
         print("Another instance is already running, skipping")
+        logger.warning("Fetch skipped: another instance is running")
         return
 
     job_name = 'gaps' if args.gaps else 'fetch'
@@ -438,11 +426,14 @@ def main():
 
         if not symbols:
             print("No active symbols found")
+            logger.warning("No active symbols found")
             complete_cron_run(app, run_id, success=True, symbols_processed=0)
             return
 
         if args.verbose:
             print(f"\n  {len(symbols)} symbols")
+
+        logger.info(f"Starting fetch cycle for {len(symbols)} symbols")
 
         # 1. Fetch and process all symbols (parallel)
         results = asyncio.run(run_fetch_cycle(symbols, app, args.verbose))
@@ -452,8 +443,6 @@ def main():
 
         # 3. Expire old patterns
         expired = expire_old_patterns(app, args.verbose)
-
-        elapsed = time.time() - start_time
 
         # Summary
         total_new = sum(r.get('new', 0) for r in results)
@@ -473,6 +462,15 @@ def main():
             notifications_sent=0  # Updated by notification service if used
         )
 
+        # Refresh stats cache
+        from scripts.compute_stats import compute_stats
+        with app.app_context():
+            compute_stats()
+
+        elapsed = time.time() - start_time
+
+        logger.info(f"Fetch cycle complete: {total_new} candles, {total_patterns} patterns, {total_signals} signals in {elapsed:.1f}s")
+
         if args.verbose:
             print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] "
                   f"new={total_new} patterns={total_patterns} signals={total_signals} "
@@ -483,6 +481,7 @@ def main():
     except Exception as e:
         error_msg = f"{type(e).__name__}: {str(e)}"
         print(f"ERROR: {error_msg}")
+        logger.error(f"Fetch cycle failed: {error_msg}", exc_info=True)
         if args.verbose:
             traceback.print_exc()
 

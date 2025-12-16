@@ -1622,6 +1622,12 @@ def quick_sanitize():
                 verified = result.get('verified', 0) if result else 0
                 errors = result.get('errors', {}) if result else {}
                 error_count = sum(errors.values()) if errors else 0
+
+                # Refresh stats cache
+                log_admin("Sanitize: Refreshing statistics...")
+                from scripts.compute_stats import compute_stats
+                compute_stats()
+
                 log_admin(f"Sanitize: Complete! Verified {verified:,} candles, fixed {error_count} issues")
                 _complete_cron_run(run_id, success=True, symbols_processed=verified)
             except Exception as e:
@@ -1925,6 +1931,11 @@ def api_fetch_historical(symbol_id):
                         aggregate_candles_realtime(sym_name, '1m', tf)
                     except Exception as e:
                         log_admin(f"Historical fetch: {sym_name} - aggregation error for {tf}: {str(e)}")
+
+                # Refresh stats cache
+                log_admin(f"Historical fetch: {sym_name} - refreshing statistics...")
+                from scripts.compute_stats import compute_stats
+                compute_stats()
 
                 log_admin(f"Historical fetch: {sym_name} - complete! {total_candles:,} candles fetched and aggregated")
                 success = True

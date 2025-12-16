@@ -65,15 +65,25 @@ def release_lock(lock_file):
         except Exception:
             pass
 
-import ccxt.async_support as ccxt_async
+
 from sqlalchemy import func
 
-# Import shared retry utilities
+# Import shared fetch utilities
+from scripts.utils.fetch_utils import (
+    fetch_symbol_batches,
+    create_exchange,
+    save_candles_to_db,
+    logger
+)
+
+# Import retry utilities for error handling
 from scripts.utils.retry import (
-    async_retry_call, is_rate_limit_error, is_timeout_error,
-    extract_rate_limit_wait_time, logger,
-    MAX_RETRIES, RETRY_DELAY_SECONDS, TIMEOUT_RETRY_DELAY_SECONDS,
-    DEFAULT_RATE_LIMIT_COOLOFF_SECONDS
+    is_rate_limit_error,
+    is_timeout_error,
+    extract_rate_limit_wait_time,
+    MAX_RETRIES,
+    RETRY_DELAY_SECONDS,
+    TIMEOUT_RETRY_DELAY_SECONDS,
 )
 
 
@@ -132,125 +142,142 @@ def find_gaps(symbol_id: int, start_ts: int, end_ts: int, max_gap_minutes: int =
     if now_ts - timestamps[-1] > max_gap_ms and timestamps[-1] < end_ts:
         gaps.append((timestamps[-1] + expected_interval, min(end_ts, now_ts)))
 
+    logger.debug(f"Found {len(gaps)} gaps for symbol_id={symbol_id}")
     return gaps
 
 
-async def fetch_range_async(exchange, symbol: str, start_ts: int, end_ts: int,
-                           verbose: bool = False, save_callback=None,
-                           save_every: int = 10000) -> List:
-    """Fetch candles for a time range using async with retry and rate limit handling.
+async def fetch_range_with_save(
+    exchange,
+    symbol: str,
+    symbol_id: int,
+    start_ts: int,
+    end_ts: int,
+    app,
+    verbose: bool = False,
+    save_every: int = 10000
+) -> Tuple[int, int]:
+    """
+    Fetch candles for a time range with incremental saves.
+
+    Uses the shared fetch_symbol_batches function but saves incrementally
+    for crash resilience during large historical fetches.
 
     Args:
-        save_callback: Optional function(candles) to save candles incrementally.
-                       If provided, saves every `save_every` candles for crash resilience.
-        save_every: Save to DB every N candles (default 10,000 = ~1 week of 1m data)
+        exchange: ccxt async exchange instance
+        symbol: Symbol name
+        symbol_id: Symbol database ID
+        start_ts: Start timestamp in milliseconds
+        end_ts: End timestamp in milliseconds
+        app: Flask application instance
+        verbose: Print progress messages
+        save_every: Save to DB every N candles (default 10,000)
 
     Returns:
-        List of candles (empty if save_callback was used, since they're already saved)
+        Tuple of (fetched_count, saved_count)
     """
+    from app.models import Candle
+    from app import db
+
     all_candles = []
-    pending_candles = []  # Buffer for incremental saves
+    total_fetched = 0
+    total_saved = 0
     current_ts = start_ts
     batch_size = 1000
     total_range = end_ts - start_ts
     last_progress = -1
-    total_saved = 0
     consecutive_errors = 0
 
     while current_ts < end_ts:
         retries = 0
         success = False
+        batch = None
 
         while retries < MAX_RETRIES and not success:
             try:
-                ohlcv = await exchange.fetch_ohlcv(symbol, '1m', since=current_ts, limit=batch_size)
-                if not ohlcv:
-                    success = True  # No more data, but not an error
+                batch = await exchange.fetch_ohlcv(symbol, '1m', since=current_ts, limit=batch_size)
+
+                if not batch:
+                    success = True
                     break
 
-                if save_callback:
-                    pending_candles.extend(ohlcv)
-                    # Save every N candles for crash resilience
-                    if len(pending_candles) >= save_every:
-                        saved = save_callback(pending_candles)
-                        total_saved += saved
-                        pending_candles = []
-                else:
-                    all_candles.extend(ohlcv)
+                all_candles.extend(batch)
+                total_fetched += len(batch)
+                consecutive_errors = 0
+
+                # Save every N candles for crash resilience
+                if len(all_candles) >= save_every:
+                    saved = _save_candles_batch(app, symbol_id, all_candles)
+                    total_saved += saved
+                    all_candles = []
 
                 # Move to next batch
-                last_ts = ohlcv[-1][0]
+                last_ts = batch[-1][0]
                 if last_ts <= current_ts:
                     success = True
                     break
                 current_ts = last_ts + 60000
                 success = True
-                consecutive_errors = 0  # Reset on success
 
-                # Show progress every 10%
+                # Show progress
                 if not verbose:
                     progress = int((current_ts - start_ts) / total_range * 10)
                     if progress > last_progress:
                         print(".", end='', flush=True)
                         last_progress = progress
                 else:
-                    count = total_saved + len(pending_candles) if save_callback else len(all_candles)
-                    if count % 10000 < batch_size:
-                        print(f"    Fetched {count:,} candles...", end='\r')
+                    if total_fetched % 10000 < batch_size:
+                        print(f"    Fetched {total_fetched:,} candles...", end='\r')
 
             except Exception as e:
                 retries += 1
                 consecutive_errors += 1
 
                 if is_rate_limit_error(e):
-                    # Rate limit: extract wait time and cool off
                     wait_time = extract_rate_limit_wait_time(e)
-                    logger.warning(f"Rate limit hit for {symbol} at {current_ts}, cooling off {wait_time}s (attempt {retries}/{MAX_RETRIES})")
+                    logger.warning(f"{symbol}: Rate limit hit, cooling off {wait_time}s (attempt {retries}/{MAX_RETRIES})")
                     if verbose:
                         print(f"\n    Rate limit hit, cooling off {wait_time}s...")
                     await asyncio.sleep(wait_time)
 
                 elif is_timeout_error(e):
-                    # Timeout: retry with shorter delay
-                    logger.warning(f"Timeout for {symbol} at {current_ts}, retrying in {TIMEOUT_RETRY_DELAY_SECONDS}s (attempt {retries}/{MAX_RETRIES})")
+                    logger.warning(f"{symbol}: Timeout, retrying in {TIMEOUT_RETRY_DELAY_SECONDS}s (attempt {retries}/{MAX_RETRIES})")
                     if verbose:
                         print(f"\n    Timeout, retrying in {TIMEOUT_RETRY_DELAY_SECONDS}s...")
                     await asyncio.sleep(TIMEOUT_RETRY_DELAY_SECONDS)
 
                 else:
-                    # Other error: log and retry with standard delay
-                    logger.error(f"Error fetching {symbol} at {current_ts}: {e} (attempt {retries}/{MAX_RETRIES})")
+                    logger.error(f"{symbol}: Error at {current_ts}: {e} (attempt {retries}/{MAX_RETRIES})")
                     if verbose:
                         print(f"\n    Error at {current_ts}: {e}, retrying...")
                     await asyncio.sleep(RETRY_DELAY_SECONDS)
 
         # If all retries failed, skip this batch and move forward
         if not success:
-            logger.error(f"Failed to fetch {symbol} at {current_ts} after {MAX_RETRIES} retries, skipping batch")
+            logger.error(f"{symbol}: Failed at {current_ts} after {MAX_RETRIES} retries, skipping batch")
             if verbose:
                 print(f"\n    Failed after {MAX_RETRIES} retries, skipping batch")
             current_ts += batch_size * 60000
 
             # If too many consecutive errors, bail out
             if consecutive_errors >= MAX_RETRIES * 3:
-                logger.error(f"Too many consecutive errors for {symbol}, aborting fetch")
+                logger.error(f"{symbol}: Too many consecutive errors, aborting fetch")
                 if verbose:
                     print(f"\n    Too many consecutive errors, aborting")
                 break
 
         # Break if no more data
-        if success and not ohlcv:
+        if success and not batch:
             break
 
-    # Save remaining pending candles
-    if save_callback and pending_candles:
-        saved = save_callback(pending_candles)
+    # Save remaining candles
+    if all_candles:
+        saved = _save_candles_batch(app, symbol_id, all_candles)
         total_saved += saved
 
-    return all_candles if not save_callback else []
+    return total_fetched, total_saved
 
 
-def save_candles_batch(symbol_id: int, candles: List, verbose: bool = False) -> int:
+def _save_candles_batch(app, symbol_id: int, candles: List) -> int:
     """Save candles to database, skipping duplicates."""
     from app import db
     from app.models import Candle
@@ -258,52 +285,65 @@ def save_candles_batch(symbol_id: int, candles: List, verbose: bool = False) -> 
     if not candles:
         return 0
 
-    # Get existing timestamps
-    timestamps = [c[0] for c in candles]
-    existing = set(
-        c.timestamp for c in Candle.query.filter(
-            Candle.symbol_id == symbol_id,
-            Candle.timeframe == '1m',
-            Candle.timestamp.in_(timestamps)
-        ).all()
-    )
+    with app.app_context():
+        # Get existing timestamps
+        timestamps = [c[0] for c in candles]
+        existing = set(
+            c.timestamp for c in Candle.query.filter(
+                Candle.symbol_id == symbol_id,
+                Candle.timeframe == '1m',
+                Candle.timestamp.in_(timestamps)
+            ).all()
+        )
 
-    new_count = 0
-    for candle in candles:
-        ts, o, h, l, c, v = candle
-        if ts in existing:
-            continue
-        if any(x is None or x <= 0 for x in [o, h, l, c]):
-            continue
+        new_count = 0
+        for candle in candles:
+            ts, o, h, l, c, v = candle
+            if ts in existing:
+                continue
+            if any(x is None or x <= 0 for x in [o, h, l, c]):
+                continue
 
-        db.session.add(Candle(
-            symbol_id=symbol_id,
-            timeframe='1m',
-            timestamp=ts,
-            open=o, high=h, low=l, close=c,
-            volume=v or 0
-        ))
-        new_count += 1
+            db.session.add(Candle(
+                symbol_id=symbol_id,
+                timeframe='1m',
+                timestamp=ts,
+                open=o, high=h, low=l, close=c,
+                volume=v or 0
+            ))
+            new_count += 1
 
-    if new_count > 0:
-        db.session.commit()
+        if new_count > 0:
+            db.session.commit()
 
-    return new_count
+        return new_count
 
 
-async def fill_gaps_for_symbol(exchange, symbol_name: str, symbol_id: int,
-                               days: int, verbose: bool = False,
-                               full_scan: bool = False, app=None, print_lock=None) -> dict:
-    """Find and fill gaps for a single symbol.
+async def fill_gaps_for_symbol(
+    exchange,
+    symbol_name: str,
+    symbol_id: int,
+    days: int,
+    verbose: bool = False,
+    full_scan: bool = False,
+    app=None,
+    print_lock=None
+) -> dict:
+    """
+    Find and fill gaps for a single symbol.
 
     Args:
-        full_scan: If True, scan from beginning of database to now (ignores days parameter)
-        app: Flask app context to reuse (avoids creating multiple apps)
+        exchange: ccxt async exchange instance
+        symbol_name: Symbol name (e.g., 'BTC/USDT')
+        symbol_id: Symbol database ID
+        days: Days to scan for gaps
+        verbose: Show detailed output
+        full_scan: If True, scan from beginning of database to now
+        app: Flask app context to reuse
         print_lock: asyncio.Lock for serializing output
     """
     from app import db
     from app.models import Candle
-    from sqlalchemy import func
 
     now = datetime.now(timezone.utc)
     end_ts = int(now.timestamp() * 1000) - (5 * 60 * 1000)  # 5 min buffer
@@ -330,34 +370,23 @@ async def fill_gaps_for_symbol(exchange, symbol_name: str, symbol_id: int,
         if verbose and print_lock:
             async with print_lock:
                 print(f"  {symbol_name}: No gaps found")
+        logger.debug(f"{symbol_name}: No gaps found")
         return {'symbol': symbol_name, 'gaps': 0, 'filled': 0}
 
     # Collect results, then print at end to avoid interleaving
     total_filled = 0
     gap_results = []
 
-    # Create save callback that uses app context
-    def make_save_callback():
-        saved_count = [0]  # Use list to allow mutation in closure
-
-        def save_cb(candles):
-            with app.app_context():
-                saved = save_candles_batch(symbol_id, candles, False)
-                saved_count[0] += saved
-                return saved
-        return save_cb, saved_count
-
     for i, (gap_start, gap_end) in enumerate(gaps):
         gap_duration = (gap_end - gap_start) / (60 * 1000)
         gap_start_dt = datetime.fromtimestamp(gap_start / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')
         gap_end_dt = datetime.fromtimestamp(gap_end / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M')
 
-        # Use incremental saves for large gaps (>10k candles = ~1 week)
-        save_cb, saved_count = make_save_callback()
-        await fetch_range_async(exchange, symbol_name, gap_start, gap_end, False,
-                                save_callback=save_cb, save_every=10000)
+        # Fetch and save with incremental saves for large gaps
+        fetched, filled = await fetch_range_with_save(
+            exchange, symbol_name, symbol_id, gap_start, gap_end, app, False
+        )
 
-        filled = saved_count[0]
         total_filled += filled
         if filled > 0:
             gap_results.append(f"    [{i+1}/{len(gaps)}] {gap_start_dt} → {gap_end_dt} ({gap_duration:.0f}m) = {filled:,} saved")
@@ -377,12 +406,20 @@ async def fill_gaps_for_symbol(exchange, symbol_name: str, symbol_id: int,
             for line in gap_results:
                 print(line)
 
+    logger.info(f"{symbol_name}: Filled {len(gaps)} gaps with {total_filled:,} candles")
     return {'symbol': symbol_name, 'gaps': len(gaps), 'filled': total_filled}
 
 
-async def fetch_symbol_full(exchange, symbol_name: str, symbol_id: int,
-                           days: int, verbose: bool = False, index: int = 0,
-                           total: int = 1) -> dict:
+async def fetch_symbol_full(
+    exchange,
+    symbol_name: str,
+    symbol_id: int,
+    days: int,
+    verbose: bool = False,
+    index: int = 0,
+    total: int = 1,
+    app=None
+) -> dict:
     """Fetch full history for a symbol with incremental saves."""
     from app import create_app
 
@@ -396,24 +433,13 @@ async def fetch_symbol_full(exchange, symbol_name: str, symbol_id: int,
     if verbose:
         print(f"\n    Range: {days} days")
 
-    app = create_app()
-    total_saved = [0]
-    total_fetched = [0]
+    if app is None:
+        app = create_app()
 
-    # Create save callback for incremental saves
-    def save_cb(candles):
-        with app.app_context():
-            saved = save_candles_batch(symbol_id, candles, False)
-            total_saved[0] += saved
-            total_fetched[0] += len(candles)
-            return saved
-
-    # Use incremental saves every 10k candles
-    await fetch_range_async(exchange, symbol_name, start_ts, end_ts, verbose,
-                            save_callback=save_cb, save_every=10000)
-
-    new_count = total_saved[0]
-    fetched_count = total_fetched[0]
+    # Fetch with incremental saves
+    fetched_count, new_count = await fetch_range_with_save(
+        exchange, symbol_name, symbol_id, start_ts, end_ts, app, verbose
+    )
 
     # Show result on same line (after dots)
     if not verbose:
@@ -421,15 +447,24 @@ async def fetch_symbol_full(exchange, symbol_name: str, symbol_id: int,
     else:
         print(f"    Saved {new_count:,} new candles")
 
+    logger.info(f"{symbol_name}: Fetched {fetched_count:,} candles, {new_count:,} new")
     return {'symbol': symbol_name, 'fetched': fetched_count, 'new': new_count}
 
 
-async def run_gap_fill(symbols: List[Tuple[str, int]], days: int, verbose: bool = False,
-                       full_scan: bool = False):
-    """Fill gaps for all symbols with rate-limited parallel fetching.
+async def run_gap_fill(
+    symbols: List[Tuple[str, int]],
+    days: int,
+    verbose: bool = False,
+    full_scan: bool = False
+):
+    """
+    Fill gaps for all symbols with rate-limited parallel fetching.
 
     Args:
-        full_scan: If True, scan from beginning of database (not just last X days)
+        symbols: List of (symbol_name, symbol_id) tuples
+        days: Days to scan for gaps
+        verbose: Show detailed output
+        full_scan: If True, scan from beginning of database
     """
     from app import create_app
     from app.config import Config
@@ -437,10 +472,7 @@ async def run_gap_fill(symbols: List[Tuple[str, int]], days: int, verbose: bool 
     # Create app once to avoid repeated "Logging system active" messages
     app = create_app()
 
-    exchange = ccxt_async.binance({
-        'enableRateLimit': True,
-        'options': {'defaultType': 'spot'}
-    })
+    exchange = create_exchange('binance')
 
     # Semaphore to limit concurrent requests
     semaphore = asyncio.Semaphore(Config.MAX_CONCURRENT_REQUESTS)
@@ -456,13 +488,17 @@ async def run_gap_fill(symbols: List[Tuple[str, int]], days: int, verbose: bool 
     if verbose:
         print(f"  Filling gaps for {len(symbols)} symbols ({scan_type}, max {Config.MAX_CONCURRENT_REQUESTS} concurrent)...")
 
+    logger.info(f"Starting gap fill for {len(symbols)} symbols ({scan_type})")
+
     try:
         tasks = [limited_fill(name, sid) for name, sid in symbols]
         results = await asyncio.gather(*tasks, return_exceptions=True)
+
         # Filter out exceptions and log them
         clean_results = []
         for r in results:
             if isinstance(r, Exception):
+                logger.error(f"Gap fill error: {r}")
                 if verbose:
                     print(f"  Gap fill error: {r}")
                 clean_results.append({'symbol': 'unknown', 'gaps': 0, 'filled': 0, 'error': str(r)})
@@ -473,19 +509,24 @@ async def run_gap_fill(symbols: List[Tuple[str, int]], days: int, verbose: bool 
         await exchange.close()
 
 
-async def run_full_fetch(symbols: List[Tuple[str, int]], days: int, verbose: bool = False):
+async def run_full_fetch(
+    symbols: List[Tuple[str, int]],
+    days: int,
+    verbose: bool = False
+):
     """Fetch full history for all symbols (sequential for progress display)."""
-    exchange = ccxt_async.binance({
-        'enableRateLimit': True,
-        'options': {'defaultType': 'spot'}
-    })
+    from app import create_app
+
+    app = create_app()
+    exchange = create_exchange('binance')
+
+    logger.info(f"Starting full fetch for {len(symbols)} symbols, {days} days")
 
     try:
         results = []
         total = len(symbols)
         for i, (name, sid) in enumerate(symbols):
-            result = await fetch_symbol_full(exchange, name, sid, days, verbose,
-                                            index=i, total=total)
+            result = await fetch_symbol_full(exchange, name, sid, days, verbose, index=i, total=total, app=app)
             results.append(result)
 
         return results
@@ -591,6 +632,7 @@ def delete_all():
         Log.query.delete()
         Candle.query.delete()
         db.session.commit()
+        logger.info("All data deleted")
         print("Done.")
         return True
 
@@ -614,6 +656,7 @@ def main():
         lock_file = acquire_lock()
         if lock_file is None:
             print("Another instance is already running, skipping")
+            logger.warning("Historical fetch skipped: another instance is running")
             return
 
     try:
@@ -646,12 +689,14 @@ def main():
                 symbols = Symbol.query.filter_by(symbol=args.symbol).all()
                 if not symbols:
                     print(f"  Symbol '{args.symbol}' not found in database.", flush=True)
+                    logger.warning(f"Symbol '{args.symbol}' not found")
                     return
             else:
                 symbols = Symbol.query.filter_by(is_active=True).all()
 
             if not symbols:
                 print("  No active symbols found. Add symbols in Admin > Symbols.", flush=True)
+                logger.warning("No active symbols found")
                 return
 
             symbol_list = [(s.symbol, s.id) for s in symbols]
@@ -686,6 +731,8 @@ def main():
             print(f"  Target: {date_info}")
         print(f"{'═'*60}", flush=True)
 
+        logger.info(f"Starting historical fetch: mode={mode_desc}, symbols={len(symbol_list)}, days={days}")
+
         if args.gaps:
             # Gap fill mode
             results = asyncio.run(run_gap_fill(symbol_list, days, args.verbose, args.full))
@@ -695,20 +742,35 @@ def main():
 
             print(f"\n  Gaps found: {total_gaps}")
             print(f"  Candles filled: {total_filled:,}")
+            logger.info(f"Gap fill complete: {total_gaps} gaps, {total_filled:,} candles filled")
         else:
             # Full fetch mode
             results = asyncio.run(run_full_fetch(symbol_list, days, args.verbose))
 
             total_new = sum(r['new'] for r in results)
             print(f"\n  New candles: {total_new:,}")
+            logger.info(f"Full fetch complete: {total_new:,} new candles")
 
         # Aggregate (reuse app from initial symbol fetch)
         if not args.no_aggregate:
             aggregate_all_symbols(args.verbose, app, symbol_filter=args.symbol)
 
+        # Refresh stats cache
+        print("\nRefreshing statistics...", flush=True)
+        from scripts.compute_stats import compute_stats
+        with app.app_context():
+            compute_stats()
+
         elapsed = time.time() - start_time
         print(f"\n  Time: {format_time(elapsed)}")
         print(f"{'═'*60}\n")
+
+        logger.info(f"Historical fetch complete in {format_time(elapsed)}")
+
+    except Exception as e:
+        logger.error(f"Historical fetch failed: {e}", exc_info=True)
+        print(f"\nERROR: {e}")
+        raise
 
     finally:
         # Always release the lock
