@@ -146,7 +146,7 @@ paths:
           schema:
             type: integer
             minimum: 1
-            maximum: 1000
+            maximum: 2000
             default: 200
       responses:
         '200':
@@ -222,7 +222,7 @@ paths:
           description: Filter by signal status
           schema:
             type: string
-            enum: ['active', 'triggered', 'expired']
+            enum: ['pending', 'notified', 'filled', 'stopped', 'tp_hit', 'expired', 'cancelled']
         - name: direction
           in: query
           description: Filter by signal direction
@@ -412,6 +412,9 @@ paths:
       summary: Get scheduler status
       description: Get the current status of the background scheduler
       operationId: getSchedulerStatus
+      security:
+        - ApiKeyHeader: []
+        - ApiKeyQuery: []
       responses:
         '200':
           description: Scheduler status
@@ -419,6 +422,111 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/SchedulerStatus'
+        '401':
+          description: Unauthorized - API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /scheduler/start:
+    post:
+      tags:
+        - Operations
+      summary: Start the scheduler
+      description: |
+        Start the APScheduler-based background job scheduler.
+        Requires scope: admin:scheduler
+        Rate limited: 2 requests per minute.
+      operationId: startScheduler
+      security:
+        - ApiKeyHeader: []
+        - ApiKeyQuery: []
+      responses:
+        '200':
+          description: Scheduler started
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchedulerStatus'
+        '401':
+          description: Unauthorized - API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limit exceeded (2 per minute)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /scheduler/stop:
+    post:
+      tags:
+        - Operations
+      summary: Stop the scheduler
+      description: |
+        Stop the APScheduler-based background job scheduler.
+        Requires scope: admin:scheduler
+        Rate limited: 2 requests per minute.
+      operationId: stopScheduler
+      security:
+        - ApiKeyHeader: []
+        - ApiKeyQuery: []
+      responses:
+        '200':
+          description: Scheduler stopped
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchedulerStatus'
+        '401':
+          description: Unauthorized - API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limit exceeded (2 per minute)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  /scheduler/toggle:
+    post:
+      tags:
+        - Operations
+      summary: Toggle scheduler (deprecated)
+      description: |
+        Legacy endpoint - scheduler is now cron-based.
+        Use POST /api/scan/run to trigger a manual scan instead.
+      operationId: toggleScheduler
+      deprecated: true
+      security:
+        - ApiKeyHeader: []
+        - ApiKeyQuery: []
+      responses:
+        '200':
+          description: Scheduler status with deprecation notice
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SchedulerStatus'
+        '401':
+          description: Unauthorized - API key required
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429':
+          description: Rate limit exceeded (2 per minute)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
 
 components:
   securitySchemes:

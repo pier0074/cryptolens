@@ -223,6 +223,24 @@ MAIL_DEFAULT_SENDER=your-email@gmail.com
 
 # NTFY (self-hosted or ntfy.sh)
 NTFY_URL=https://ntfy.sh
+
+# Logging
+LOG_LEVEL=INFO          # DEBUG, INFO, WARNING, ERROR
+LOG_FORMAT=colored      # colored, json, simple
+
+# Security (required for production)
+# Generate with: python -c "import secrets; print(secrets.token_hex(32))"
+ENCRYPTION_KEY=your-encryption-key
+ENCRYPTION_SALT=your-salt
+
+# Scheduler (APScheduler for background jobs)
+SCHEDULER_ENABLED=false  # Use cron instead for production
+
+# API Settings
+ALLOW_UNAUTHENTICATED_API=false  # Never enable in production
+
+# Gunicorn (production)
+GUNICORN_WORKERS=4      # Default: cpu_count * 2 + 1
 ```
 
 **Database Notes:**

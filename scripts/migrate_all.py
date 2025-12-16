@@ -15,23 +15,46 @@ from app import create_app, db
 from sqlalchemy import text
 
 
+# Whitelist of valid table names to prevent SQL injection
+VALID_TABLES = {
+    'symbols', 'candles', 'patterns', 'signals', 'settings', 'logs',
+    'stats_cache', 'users', 'subscriptions', 'user_notifications',
+    'payments', 'notification_templates', 'broadcast_notifications',
+    'scheduled_notifications', 'portfolios', 'trades', 'journal_entries',
+    'trade_tags', 'user_symbol_preferences', 'api_keys', 'error_logs'
+}
+
+
+def _validate_table_name(table_name):
+    """Validate table name against whitelist to prevent SQL injection."""
+    if table_name not in VALID_TABLES:
+        raise ValueError(f"Invalid table name: {table_name}")
+    return table_name
+
+
 def get_table_columns(table_name):
     """Get list of column names for a table."""
+    _validate_table_name(table_name)
+    # PRAGMA doesn't support parameterized queries, but table name is validated
     result = db.session.execute(text(f"PRAGMA table_info({table_name})"))
     return [row[1] for row in result.fetchall()]
 
 
 def get_table_indexes(table_name):
     """Get list of index names for a table."""
+    _validate_table_name(table_name)
+    # PRAGMA doesn't support parameterized queries, but table name is validated
     result = db.session.execute(text(f"PRAGMA index_list({table_name})"))
     return [row[1] for row in result.fetchall()]
 
 
 def table_exists(table_name):
-    """Check if a table exists."""
-    result = db.session.execute(text(
-        f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'"
-    ))
+    """Check if a table exists using parameterized query."""
+    _validate_table_name(table_name)
+    result = db.session.execute(
+        text("SELECT name FROM sqlite_master WHERE type='table' AND name = :table_name"),
+        {'table_name': table_name}
+    )
     return result.fetchone() is not None
 
 

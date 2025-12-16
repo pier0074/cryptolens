@@ -333,13 +333,12 @@ def test_patterns_filter_by_symbol(self, ...):
 
 ## Low Priority Issues
 
-### [LOW] SQL Injection Risk in Migration Script
+### ~~[LOW] SQL Injection Risk in Migration Script~~ ✅ FIXED
 
 **Category**: Security
 **File**: `scripts/migrate_all.py:20-33`
 **Issue**: Uses f-strings in raw SQL (script-only, not production)
-**Evidence**: `db.session.execute(text(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table_name}'"))`
-**Fix**: Use parameterized queries even in scripts
+**Resolution**: Added table name whitelist validation + parameterized query for `table_exists()`
 
 ---
 
@@ -367,18 +366,18 @@ def test_get_redis_connection(self, mock_redis):
 
 ## Documentation Mismatches
 
-### OpenAPI Spec Mismatches
+### ~~OpenAPI Spec Mismatches~~ ✅ FIXED
 
-| Endpoint | Issue |
-|----------|-------|
-| `/api/candles` | OpenAPI says `max: 1000`, code enforces `max: 2000` |
-| `/api/signals` | OpenAPI status enum: `['active', 'triggered', 'expired']`, code accepts: `['pending', 'notified', 'filled', 'stopped', 'tp_hit']` |
-| `/api/scheduler/*` | `/scheduler/start`, `/scheduler/stop`, `/scheduler/toggle` not in OpenAPI spec |
+| Endpoint | Issue | Status |
+|----------|-------|--------|
+| `/api/candles` | OpenAPI says `max: 1000`, code enforces `max: 2000` | ✅ Fixed to `max: 2000` |
+| `/api/signals` | Status enum incorrect | ✅ Fixed to correct values |
+| `/api/scheduler/*` | Missing endpoints | ✅ Added start/stop/toggle endpoints |
 
-### README vs Code
+### ~~README vs Code~~ ✅ FIXED
 
-- README claims self-hosted NTFY support but `NTFY_URL` is hardcoded
-- README missing documentation for logging, encryption, scheduler configuration
+- ~~README claims self-hosted NTFY support but `NTFY_URL` is hardcoded~~ ✅ `NTFY_URL` now configurable
+- ~~README missing documentation for logging, encryption, scheduler configuration~~ ✅ Added to environment config section
 
 ---
 
