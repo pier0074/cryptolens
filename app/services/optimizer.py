@@ -156,18 +156,21 @@ class ParameterOptimizer:
 
         for symbol in symbols:
             for timeframe in timeframes:
+                query_start = datetime.now(timezone.utc)
                 df = self._get_candle_data(symbol, timeframe)
+                query_duration = (datetime.now(timezone.utc) - query_start).total_seconds()
+
                 if df is not None and len(df) >= 20:
                     ohlcv_arrays = self._df_to_arrays(df)
                     data_cache[(symbol, timeframe)] = (df, ohlcv_arrays)
                     total_candles += len(df)
-                    print(f"  {symbol} {timeframe}: {len(df):,} candles")
+                    print(f"  {symbol} {timeframe}: {len(df):,} candles ({query_duration:.2f}s)")
                 else:
                     data_cache[(symbol, timeframe)] = (None, None)
-                    print(f"  {symbol} {timeframe}: No data")
+                    print(f"  {symbol} {timeframe}: No data ({query_duration:.2f}s)")
 
         phase1_duration = (datetime.now(timezone.utc) - phase1_start).total_seconds()
-        print(f"  → Total: {total_candles:,} candles loaded in {phase1_duration:.1f}s")
+        print(f"  ✓ Phase 1 complete: {total_candles:,} candles in {phase1_duration:.1f}s")
 
         # ===== PHASE 2: Pre-detect all patterns =====
         # Pattern cache: (symbol, timeframe, pattern_type, min_zone_pct, use_overlap) -> patterns
@@ -187,6 +190,7 @@ class ParameterOptimizer:
                 if df is None:
                     continue
 
+                tf_start = datetime.now(timezone.utc)
                 tf_patterns = 0
                 for pattern_type in pattern_types:
                     detector = _detectors.get(pattern_type)
@@ -205,11 +209,13 @@ class ParameterOptimizer:
                             tf_patterns += len(patterns)
                             total_patterns += len(patterns)
 
-                print(f"  {symbol} {timeframe}: {tf_patterns:,} patterns")
+                tf_duration = (datetime.now(timezone.utc) - tf_start).total_seconds()
+                print(f"  {symbol} {timeframe}: {tf_patterns:,} patterns ({tf_duration:.2f}s)")
 
         phase2_duration = (datetime.now(timezone.utc) - phase2_start).total_seconds()
-        print(f"  → Total: {total_patterns:,} patterns detected in {phase2_duration:.1f}s")
+        print(f"  ✓ Phase 2 complete: {total_patterns:,} patterns in {phase2_duration:.1f}s")
 
+        phase3_start = datetime.now(timezone.utc)
         print(f"\n[Phase 3/3] Running parameter sweep ({job.total_runs:,} combinations)...")
 
         # ===== PHASE 3: Fast parameter sweep =====
@@ -300,6 +306,9 @@ class ParameterOptimizer:
                     'total_profit_pct': best_result.total_profit_pct,
                     'total_trades': best_result.total_trades,
                 }
+
+            phase3_duration = (datetime.now(timezone.utc) - phase3_start).total_seconds()
+            print(f"  ✓ Phase 3 complete: {completed:,} runs in {phase3_duration:.1f}s")
 
             job.status = 'completed'
             job.completed_at = datetime.now(timezone.utc)
