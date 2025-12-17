@@ -21,8 +21,7 @@ _fvg_detector = FVGDetector()
 _ob_detector = OrderBlockDetector()
 _sweep_detector = LiquiditySweepDetector()
 
-# Configurable limits (can be overridden via Config in future)
-DEFAULT_CANDLE_LIMIT = 5000
+# Minimum candles required for meaningful backtest
 MIN_CANDLES_REQUIRED = 10
 
 # Lookback periods by timeframe (higher timeframes need longer lookback)
@@ -41,7 +40,7 @@ DEFAULT_LOOKBACK = 100
 def run_backtest(symbol: str, timeframe: str, start_date: str, end_date: str,
                  pattern_type: str = 'imbalance', rr_target: float = 2.0,
                  sl_buffer_pct: float = 10.0, slippage_pct: float = 0.0,
-                 limit: int = None, page: int = 1, per_page: int = 50) -> Dict:
+                 page: int = 1, per_page: int = 50) -> Dict:
     """
     Run a backtest for a specific pattern strategy
 
@@ -54,7 +53,6 @@ def run_backtest(symbol: str, timeframe: str, start_date: str, end_date: str,
         rr_target: Target risk/reward ratio (must be > 0)
         sl_buffer_pct: Stop loss buffer as percentage of zone size (default 10%)
         slippage_pct: Slippage as percentage of entry price (default 0%)
-        limit: Max candles to fetch (default: calculated from date range)
         page: Page number for trade results (default: 1)
         per_page: Trades per page (default: 50, use -1 for all)
 
@@ -96,9 +94,8 @@ def run_backtest(symbol: str, timeframe: str, start_date: str, end_date: str,
         }
     )
 
-    # Get historical data
-    candle_limit = limit if limit else DEFAULT_CANDLE_LIMIT
-    df = get_candles_as_dataframe(symbol, timeframe, limit=candle_limit)
+    # Get historical data (no limit - date range filtering handles boundaries)
+    df = get_candles_as_dataframe(symbol, timeframe)
 
     if df.empty:
         log_backtest(

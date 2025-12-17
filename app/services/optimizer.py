@@ -274,31 +274,27 @@ class ParameterOptimizer:
             return {'error': str(e)}
 
     def _get_candle_data(
-        self, symbol: str, timeframe: str, start_date: str, end_date: str
+        self, symbol: str, timeframe: str, start_date: str = None, end_date: str = None
     ) -> Optional[pd.DataFrame]:
         """
-        Get candle data for a symbol/timeframe within date range.
+        Get candle data for a symbol/timeframe.
 
         Uses verified candles only to ensure backtest accuracy.
         Falls back to all candles if no verified candles exist.
+        No date filtering - uses ALL available candles.
         """
         try:
             # Try verified candles first (recommended for accurate backtesting)
-            df = get_candles_as_dataframe(symbol, timeframe, limit=50000, verified_only=True)
+            df = get_candles_as_dataframe(symbol, timeframe, verified_only=True)
 
             if df.empty:
                 # Fallback to all candles if no verified data exists
-                df = get_candles_as_dataframe(symbol, timeframe, limit=50000, verified_only=False)
+                df = get_candles_as_dataframe(symbol, timeframe, verified_only=False)
 
             if df.empty:
                 return None
 
-            # Filter by date range
-            start_ts = int(datetime.strptime(start_date, '%Y-%m-%d').timestamp() * 1000)
-            end_ts = int(datetime.strptime(end_date, '%Y-%m-%d').timestamp() * 1000)
-
-            df = df[(df['timestamp'] >= start_ts) & (df['timestamp'] <= end_ts)]
-
+            # No date filtering - use ALL available candles
             return df if len(df) >= 20 else None
 
         except Exception:
@@ -951,9 +947,9 @@ class ParameterOptimizer:
                 # Load data ONCE per symbol/timeframe (major optimization)
                 cache_key = (symbol, timeframe)
                 if cache_key not in data_cache:
-                    df = get_candles_as_dataframe(symbol, timeframe, limit=50000, verified_only=True)
+                    df = get_candles_as_dataframe(symbol, timeframe, verified_only=True)
                     if df is None or df.empty:
-                        df = get_candles_as_dataframe(symbol, timeframe, limit=50000, verified_only=False)
+                        df = get_candles_as_dataframe(symbol, timeframe, verified_only=False)
 
                     if df is None or df.empty or len(df) < 20:
                         data_cache[cache_key] = (None, None, None)
@@ -1101,10 +1097,10 @@ class ParameterOptimizer:
         )
 
         # Get all available VERIFIED candles (for accurate incremental updates)
-        df = get_candles_as_dataframe(symbol, timeframe, limit=50000, verified_only=True)
+        df = get_candles_as_dataframe(symbol, timeframe, verified_only=True)
         if df is None or df.empty:
             # Fallback to all candles if no verified data
-            df = get_candles_as_dataframe(symbol, timeframe, limit=50000, verified_only=False)
+            df = get_candles_as_dataframe(symbol, timeframe, verified_only=False)
         if df is None or df.empty or len(df) < 20:
             return 'skipped'
 
