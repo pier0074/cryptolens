@@ -17,10 +17,10 @@
 
 <!-- Filters -->
 <div class="bg-card rounded-lg p-4 mb-6">
-    <form method="GET" class="flex flex-wrap items-end gap-4">
+    <form id="filterForm" method="GET" class="flex flex-wrap items-end gap-4">
         <div>
             <label class="block text-gray-400 text-sm mb-1">Symbol</label>
-            <select name="symbol" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white">
+            <select name="symbol" class="filter-auto bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white">
                 <option value="">All Symbols</option>
                 {% for s in symbols %}
                     <option value="{{ s }}" {% if s == filter_symbol %}selected{% endif %}>{{ s }}</option>
@@ -29,7 +29,7 @@
         </div>
         <div>
             <label class="block text-gray-400 text-sm mb-1">Pattern</label>
-            <select name="pattern_type" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white">
+            <select name="pattern_type" class="filter-auto bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white">
                 <option value="">All Patterns</option>
                 <option value="imbalance" {% if filter_pattern == 'imbalance' %}selected{% endif %}>Imbalance (FVG)</option>
                 <option value="order_block" {% if filter_pattern == 'order_block' %}selected{% endif %}>Order Block</option>
@@ -38,7 +38,7 @@
         </div>
         <div>
             <label class="block text-gray-400 text-sm mb-1">Timeframe</label>
-            <select name="timeframe" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white">
+            <select name="timeframe" class="filter-auto bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white">
                 <option value="">All Timeframes</option>
                 {% for tf in timeframes %}
                     <option value="{{ tf }}" {% if tf == filter_timeframe %}selected{% endif %}>{{ tf }}</option>
@@ -47,26 +47,27 @@
         </div>
         <div>
             <label class="block text-gray-400 text-sm mb-1">Sort By</label>
-            <select name="sort" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white">
+            <select name="sort" class="filter-auto bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white">
                 <option value="profit" {% if sort_by == 'profit' %}selected{% endif %}>Profit %</option>
                 <option value="winrate" {% if sort_by == 'winrate' %}selected{% endif %}>Win Rate</option>
                 <option value="sharpe" {% if sort_by == 'sharpe' %}selected{% endif %}>Sharpe Ratio</option>
                 <option value="trades" {% if sort_by == 'trades' %}selected{% endif %}>Total Trades</option>
             </select>
         </div>
-        <div>
-            <label class="block text-gray-400 text-sm mb-1">Min Trades</label>
-            <input type="number" name="min_trades" value="{{ min_trades }}" min="1" max="100"
-                   class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white w-20">
-        </div>
-        <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded">
-            Filter
-        </button>
-        <a href="{{ url_for('admin.optimization_results') }}" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded">
+        <a href="{{ url_for('admin.optimization_results') }}" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded text-sm">
             Reset
         </a>
     </form>
 </div>
+
+<script>
+// Auto-submit on select change
+document.querySelectorAll('.filter-auto').forEach(el => {
+    el.addEventListener('change', () => {
+        document.getElementById('filterForm').submit();
+    });
+});
+</script>
 
 <!-- Date Range Info -->
 {% if date_range %}
@@ -258,6 +259,7 @@
                     <th class="text-left py-3 px-3">Symbol</th>
                     <th class="text-left py-3 px-3">TF</th>
                     <th class="text-left py-3 px-3">Pattern</th>
+                    <th class="text-left py-3 px-3">Period</th>
                     <th class="text-right py-3 px-3">RR</th>
                     <th class="text-right py-3 px-3">SL%</th>
                     <th class="text-right py-3 px-3">Trades</th>
@@ -282,6 +284,20 @@
                         <span class="px-2 py-0.5 {% if run.pattern_type == 'imbalance' %}bg-blue-900 text-blue-300{% elif run.pattern_type == 'order_block' %}bg-purple-900 text-purple-300{% else %}bg-green-900 text-green-300{% endif %} rounded text-xs">
                             {{ run.pattern_type }}
                         </span>
+                    </td>
+                    <td class="py-3 px-3 text-gray-400 text-xs">
+                        {% if run.start_date and run.end_date %}
+                            <div>{{ run.start_date[:10] }} → {{ run.end_date[:10] }}</div>
+                            {% set start_parts = run.start_date[:10].split('-') %}
+                            {% set end_parts = run.end_date[:10].split('-') %}
+                            {% if start_parts|length == 3 and end_parts|length == 3 %}
+                                <div class="text-gray-500">
+                                    ~{{ ((end_parts[0]|int - start_parts[0]|int) * 365 + (end_parts[1]|int - start_parts[1]|int) * 30 + (end_parts[2]|int - start_parts[2]|int)) }}d
+                                </div>
+                            {% endif %}
+                        {% else %}
+                            -
+                        {% endif %}
                     </td>
                     <td class="py-3 px-3 text-right">{{ run.rr_target }}</td>
                     <td class="py-3 px-3 text-right">{{ run.sl_buffer_pct }}%</td>
@@ -318,7 +334,7 @@
         </div>
         <div class="flex gap-2">
             {% if pagination.has_prev %}
-                <a href="{{ url_for('admin.optimization_results', page=pagination.prev_num, symbol=filter_symbol, pattern_type=filter_pattern, timeframe=filter_timeframe, sort=sort_by, min_trades=min_trades) }}"
+                <a href="{{ url_for('admin.optimization_results', page=pagination.prev_num, symbol=filter_symbol, pattern_type=filter_pattern, timeframe=filter_timeframe, sort=sort_by) }}"
                    class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm">
                     &larr; Previous
                 </a>
@@ -329,7 +345,7 @@
                     {% if page_num == pagination.page %}
                         <span class="px-3 py-1 bg-blue-600 rounded text-sm">{{ page_num }}</span>
                     {% else %}
-                        <a href="{{ url_for('admin.optimization_results', page=page_num, symbol=filter_symbol, pattern_type=filter_pattern, timeframe=filter_timeframe, sort=sort_by, min_trades=min_trades) }}"
+                        <a href="{{ url_for('admin.optimization_results', page=page_num, symbol=filter_symbol, pattern_type=filter_pattern, timeframe=filter_timeframe, sort=sort_by) }}"
                            class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm">
                             {{ page_num }}
                         </a>
@@ -340,7 +356,7 @@
             {% endfor %}
 
             {% if pagination.has_next %}
-                <a href="{{ url_for('admin.optimization_results', page=pagination.next_num, symbol=filter_symbol, pattern_type=filter_pattern, timeframe=filter_timeframe, sort=sort_by, min_trades=min_trades) }}"
+                <a href="{{ url_for('admin.optimization_results', page=pagination.next_num, symbol=filter_symbol, pattern_type=filter_pattern, timeframe=filter_timeframe, sort=sort_by) }}"
                    class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm">
                     Next &rarr;
                 </a>

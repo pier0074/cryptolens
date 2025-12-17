@@ -398,7 +398,7 @@ aggregate_candles_windowed = aggregate_new_candles
 def get_candles_as_dataframe(
     symbol: str,
     timeframe: str,
-    limit: int = 500,
+    limit: int = None,
     verified_only: bool = False
 ) -> pd.DataFrame:
     """
@@ -407,7 +407,7 @@ def get_candles_as_dataframe(
     Args:
         symbol: Trading pair (e.g., 'BTC/USDT')
         timeframe: Candle timeframe (e.g., '1h', '4h')
-        limit: Maximum number of candles to return
+        limit: Maximum number of candles to return (None = all candles)
         verified_only: If True, only return verified candles (recommended for backtesting)
 
     Returns:
@@ -417,34 +417,58 @@ def get_candles_as_dataframe(
     if not sym:
         return pd.DataFrame()
 
+    # Build query based on whether limit is specified
     if verified_only:
-        query = text("""
-            SELECT timestamp, open, high, low, close, volume
-            FROM candles
-            WHERE symbol_id = :symbol_id AND timeframe = :timeframe
-              AND verified_at IS NOT NULL
-            ORDER BY timestamp DESC
-            LIMIT :limit
-        """)
+        if limit:
+            query = text("""
+                SELECT timestamp, open, high, low, close, volume
+                FROM candles
+                WHERE symbol_id = :symbol_id AND timeframe = :timeframe
+                  AND verified_at IS NOT NULL
+                ORDER BY timestamp DESC
+                LIMIT :limit
+            """)
+            params = {'symbol_id': sym.id, 'timeframe': timeframe, 'limit': limit}
+        else:
+            query = text("""
+                SELECT timestamp, open, high, low, close, volume
+                FROM candles
+                WHERE symbol_id = :symbol_id AND timeframe = :timeframe
+                  AND verified_at IS NOT NULL
+                ORDER BY timestamp ASC
+            """)
+            params = {'symbol_id': sym.id, 'timeframe': timeframe}
     else:
-        query = text("""
-            SELECT timestamp, open, high, low, close, volume
-            FROM candles
-            WHERE symbol_id = :symbol_id AND timeframe = :timeframe
-            ORDER BY timestamp DESC
-            LIMIT :limit
-        """)
+        if limit:
+            query = text("""
+                SELECT timestamp, open, high, low, close, volume
+                FROM candles
+                WHERE symbol_id = :symbol_id AND timeframe = :timeframe
+                ORDER BY timestamp DESC
+                LIMIT :limit
+            """)
+            params = {'symbol_id': sym.id, 'timeframe': timeframe, 'limit': limit}
+        else:
+            query = text("""
+                SELECT timestamp, open, high, low, close, volume
+                FROM candles
+                WHERE symbol_id = :symbol_id AND timeframe = :timeframe
+                ORDER BY timestamp ASC
+            """)
+            params = {'symbol_id': sym.id, 'timeframe': timeframe}
 
     df = pd.read_sql(
         query,
         db.engine,
-        params={'symbol_id': sym.id, 'timeframe': timeframe, 'limit': limit}
+        params=params
     )
 
     if df.empty:
         return pd.DataFrame()
 
-    # Reverse to chronological order and add datetime
-    df = df.iloc[::-1].reset_index(drop=True)
+    # When limit is used, data comes in DESC order, so reverse to chronological
+    if limit:
+        df = df.iloc[::-1].reset_index(drop=True)
+
     df['datetime'] = pd.to_datetime(df['timestamp'], unit='ms')
     return df

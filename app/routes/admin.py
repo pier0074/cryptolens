@@ -2103,7 +2103,6 @@ def optimization_results():
     filter_pattern = request.args.get('pattern_type', '')
     filter_timeframe = request.args.get('timeframe', '')
     sort_by = request.args.get('sort', 'profit')
-    min_trades = request.args.get('min_trades', 5, type=int)
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 50, type=int)
     per_page = min(per_page, 100)  # Cap at 100
@@ -2111,7 +2110,7 @@ def optimization_results():
     # Base filter conditions
     base_filters = [
         OptimizationRun.status == 'completed',
-        OptimizationRun.total_trades >= min_trades
+        OptimizationRun.total_trades >= 1  # At least 1 trade
     ]
     if filter_symbol:
         base_filters.append(OptimizationRun.symbol == filter_symbol)
@@ -2150,8 +2149,10 @@ def optimization_results():
     symbols = db.session.query(OptimizationRun.symbol).distinct().all()
     symbols = sorted([s[0] for s in symbols if s[0]])
 
+    # Timeframe sort order (chronological)
+    tf_order = {'1m': 1, '3m': 2, '5m': 3, '15m': 4, '30m': 5, '1h': 6, '2h': 7, '4h': 8, '6h': 9, '8h': 10, '12h': 11, '1d': 12, '3d': 13, '1w': 14, '1M': 15}
     timeframes = db.session.query(OptimizationRun.timeframe).distinct().all()
-    timeframes = sorted([t[0] for t in timeframes if t[0]])
+    timeframes = sorted([t[0] for t in timeframes if t[0]], key=lambda x: tf_order.get(x, 99))
 
     # Get best results using SQL (not Python iteration)
     best_result = OptimizationRun.query.filter(*base_filters).order_by(
@@ -2193,7 +2194,6 @@ def optimization_results():
         filter_pattern=filter_pattern,
         filter_timeframe=filter_timeframe,
         sort_by=sort_by,
-        min_trades=min_trades,
         best_result=best_result,
         best_winrate=best_winrate,
         date_range=date_range,
