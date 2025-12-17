@@ -96,6 +96,20 @@ def progress_callback(completed, total):
     print(f'\r  [{bar}] {pct}% ({completed}/{total})', end='', flush=True)
 
 
+def format_duration(seconds):
+    """Format duration in human-readable format."""
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    elif seconds < 3600:
+        mins = int(seconds // 60)
+        secs = int(seconds % 60)
+        return f"{mins}m {secs}s"
+    else:
+        hours = int(seconds // 3600)
+        mins = int((seconds % 3600) // 60)
+        return f"{hours}h {mins}m"
+
+
 def run_optimization(symbols, timeframes, pattern_types, verbose=False, incremental=False):
     """Run optimization for given symbols."""
     if incremental:
@@ -110,7 +124,7 @@ def run_optimization(symbols, timeframes, pattern_types, verbose=False, incremen
         return
 
     print(f"\n{'='*60}")
-    print(f"PARAMETER OPTIMIZATION")
+    print(f"PARAMETER OPTIMIZATION (Full Mode)")
     print(f"{'='*60}")
     print(f"  Symbols: {', '.join(symbols)}")
     print(f"  Timeframes: {', '.join(timeframes)}")
@@ -134,9 +148,12 @@ def run_optimization(symbols, timeframes, pattern_types, verbose=False, incremen
     print(f"  Total runs: {job.total_runs}")
     print()
 
-    # Run job
+    # Run job with timing
+    start_time = datetime.now()
     callback = progress_callback if verbose else None
     result = optimizer.run_job(job.id, progress_callback=callback)
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds()
 
     if verbose:
         print()  # New line after progress bar
@@ -150,6 +167,7 @@ def run_optimization(symbols, timeframes, pattern_types, verbose=False, incremen
     print(f"{'='*60}")
     print(f"  Successful: {result['completed']}")
     print(f"  Failed: {result['failed']}")
+    print(f"  Duration: {format_duration(duration)}")
 
     if result.get('best_params'):
         bp = result['best_params']
@@ -165,15 +183,27 @@ def run_optimization(symbols, timeframes, pattern_types, verbose=False, incremen
 
 def run_incremental_optimization(symbols, timeframes, pattern_types, verbose=False):
     """Run incremental optimization - only process new candles."""
+    import itertools
+
+    # Get date range from first symbol's candles for display
+    start_date, end_date = get_date_range_for_symbol(symbols[0], timeframes[0])
+
+    # Calculate total combinations for display
+    param_combinations = list(itertools.product(*QUICK_PARAMETER_GRID.values()))
+    total_runs = len(symbols) * len(timeframes) * len(pattern_types) * len(param_combinations)
+
     print(f"\n{'='*60}")
-    print(f"INCREMENTAL OPTIMIZATION")
+    print(f"PARAMETER OPTIMIZATION (Incremental Mode)")
     print(f"{'='*60}")
     print(f"  Symbols: {', '.join(symbols)}")
     print(f"  Timeframes: {', '.join(timeframes)}")
     print(f"  Patterns: {', '.join(pattern_types)}")
-    print(f"  Mode: Incremental (only new candles)")
+    print(f"  Date range: {start_date or 'N/A'} to {end_date or 'N/A'}")
+    print(f"  Total combinations: {total_runs}")
     print(f"{'='*60}\n")
 
+    # Run with timing
+    start_time = datetime.now()
     callback = progress_callback if verbose else None
     result = optimizer.run_incremental(
         symbols=symbols,
@@ -182,6 +212,8 @@ def run_incremental_optimization(symbols, timeframes, pattern_types, verbose=Fal
         parameter_grid=QUICK_PARAMETER_GRID,
         progress_callback=callback
     )
+    end_time = datetime.now()
+    duration = (end_time - start_time).total_seconds()
 
     if verbose:
         print()  # New line after progress bar
@@ -193,6 +225,15 @@ def run_incremental_optimization(symbols, timeframes, pattern_types, verbose=Fal
     print(f"  New runs created: {result['new_runs']}")
     print(f"  Skipped (no new data): {result['skipped']}")
     print(f"  Errors: {result['errors']}")
+    print(f"  Duration: {format_duration(duration)}")
+
+    if result.get('best_result'):
+        bp = result['best_result']
+        print(f"\n  BEST RESULT:")
+        print(f"    {bp['symbol']} {bp['timeframe']} {bp['pattern_type']}")
+        print(f"    RR: {bp['rr_target']}, SL: {bp['sl_buffer_pct']}%")
+        print(f"    Win Rate: {bp['win_rate']}%, Profit: {bp['total_profit_pct']}%")
+        print(f"    Trades: {bp['total_trades']}")
 
     print(f"\nView all results: python scripts/run_optimization.py --results")
     print(f"Or visit: /admin/optimization/results")
