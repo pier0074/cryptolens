@@ -46,8 +46,11 @@
     <button id="createJobBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
         + Create New Job
     </button>
+    <a href="{{ url_for('admin.optimization_results') }}" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg">
+        View All Results
+    </a>
     <a href="{{ url_for('admin.optimization_compare') }}" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg">
-        Compare Parameters
+        Heatmap
     </a>
 </div>
 

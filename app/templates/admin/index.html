@@ -95,10 +95,13 @@
             <h3 class="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Analytics</h3>
             <div class="space-y-2">
                 <a href="{{ url_for('admin.optimization_index') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
-                    Parameter Optimization
+                    Optimization Jobs
+                </a>
+                <a href="{{ url_for('admin.optimization_results') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
+                    All Results
                 </a>
                 <a href="{{ url_for('admin.optimization_compare') }}" class="block px-3 py-2 bg-darker rounded hover:bg-gray-700 transition text-sm">
-                    Compare Parameters
+                    Compare Heatmap
                 </a>
             </div>
         </div>

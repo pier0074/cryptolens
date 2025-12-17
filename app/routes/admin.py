@@ -2090,6 +2090,70 @@ def optimization_index():
     return render_template('admin/optimization.html', jobs=jobs)
 
 
+@admin_bp.route('/optimization/results')
+@admin_required
+def optimization_results():
+    """View all optimization results with filters"""
+    from app.models import OptimizationRun
+
+    # Get filter parameters
+    filter_symbol = request.args.get('symbol', '')
+    filter_pattern = request.args.get('pattern_type', '')
+    filter_timeframe = request.args.get('timeframe', '')
+    sort_by = request.args.get('sort', 'profit')
+    min_trades = request.args.get('min_trades', 5, type=int)
+
+    # Build query
+    query = OptimizationRun.query.filter(
+        OptimizationRun.status == 'completed',
+        OptimizationRun.total_trades >= min_trades
+    )
+
+    if filter_symbol:
+        query = query.filter(OptimizationRun.symbol == filter_symbol)
+    if filter_pattern:
+        query = query.filter(OptimizationRun.pattern_type == filter_pattern)
+    if filter_timeframe:
+        query = query.filter(OptimizationRun.timeframe == filter_timeframe)
+
+    # Sort
+    if sort_by == 'winrate':
+        query = query.order_by(OptimizationRun.win_rate.desc())
+    elif sort_by == 'sharpe':
+        query = query.order_by(OptimizationRun.sharpe_ratio.desc())
+    elif sort_by == 'trades':
+        query = query.order_by(OptimizationRun.total_trades.desc())
+    else:
+        query = query.order_by(OptimizationRun.total_profit_pct.desc())
+
+    results = query.all()
+
+    # Get available filter options
+    symbols = db.session.query(OptimizationRun.symbol).distinct().all()
+    symbols = sorted([s[0] for s in symbols])
+
+    timeframes = db.session.query(OptimizationRun.timeframe).distinct().all()
+    timeframes = sorted([t[0] for t in timeframes])
+
+    # Get best results
+    best_result = results[0] if results else None
+    best_winrate = max(results, key=lambda r: r.win_rate or 0) if results else None
+
+    return render_template(
+        'admin/optimization_results.html',
+        results=results,
+        symbols=symbols,
+        timeframes=timeframes,
+        filter_symbol=filter_symbol,
+        filter_pattern=filter_pattern,
+        filter_timeframe=filter_timeframe,
+        sort_by=sort_by,
+        min_trades=min_trades,
+        best_result=best_result,
+        best_winrate=best_winrate
+    )
+
+
 @admin_bp.route('/optimization/<int:job_id>')
 @admin_required
 def optimization_detail(job_id):

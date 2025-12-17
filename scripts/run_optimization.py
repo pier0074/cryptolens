@@ -1,42 +1,65 @@
 #!/usr/bin/env python
 """
-Run parameter optimization jobs.
+Run parameter optimization for backtesting.
 
 Usage:
-    python scripts/run_optimization.py --new                    # Create and run new quick job
-    python scripts/run_optimization.py --job-id ID              # Run existing job
-    python scripts/run_optimization.py --list                   # List all jobs
-    python scripts/run_optimization.py --best                   # Show best parameters
+    python scripts/run_optimization.py --symbol BTC/USDT       # Single symbol
+    python scripts/run_optimization.py --all-symbols           # All active symbols
+    python scripts/run_optimization.py --list                  # List all jobs
+    python scripts/run_optimization.py --results               # Show all results
+    python scripts/run_optimization.py --best                  # Show best parameters
 
 Options:
-    --new           Create and run a new optimization job
-    --job-id ID     Run an existing job by ID
-    --list          List all optimization jobs
-    --best          Show best parameters from all completed runs
-    --symbols       Comma-separated symbols (default: BTC/USDT,ETH/USDT)
+    --symbol        Run optimization for a specific symbol
+    --all-symbols   Run optimization for all active symbols
     --timeframes    Comma-separated timeframes (default: 1h,4h)
     --patterns      Comma-separated patterns (default: imbalance,order_block)
-    --start-date    Start date YYYY-MM-DD (default: 90 days ago)
-    --end-date      End date YYYY-MM-DD (default: today)
-    --full-grid     Use full parameter grid instead of quick grid
+    --list          List all optimization jobs
+    --results       Show all optimization results
+    --best          Show best parameters by symbol
     --verbose       Show detailed progress
 
-Cron setup (run weekly on Sunday at 2 AM):
-    0 2 * * 0 cd /path/to/cryptolens && venv/bin/python scripts/run_optimization.py --new
+The script automatically uses the full available date range from candles.
 """
 import sys
 import os
 import argparse
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import create_app, db
 from app.models import (
-    OptimizationJob, OptimizationRun, Symbol,
+    OptimizationJob, OptimizationRun, Symbol, Candle,
     DEFAULT_PARAMETER_GRID, QUICK_PARAMETER_GRID
 )
 from app.services.optimizer import optimizer
+
+
+def get_date_range_for_symbol(symbol_name, timeframe='1h'):
+    """Get the available date range for a symbol from candles."""
+    symbol = Symbol.query.filter_by(symbol=symbol_name).first()
+    if not symbol:
+        return None, None
+
+    # Get earliest and latest candle
+    earliest = Candle.query.filter_by(
+        symbol_id=symbol.id,
+        timeframe=timeframe
+    ).order_by(Candle.timestamp.asc()).first()
+
+    latest = Candle.query.filter_by(
+        symbol_id=symbol.id,
+        timeframe=timeframe
+    ).order_by(Candle.timestamp.desc()).first()
+
+    if not earliest or not latest:
+        return None, None
+
+    start_date = datetime.fromtimestamp(earliest.timestamp / 1000, tz=timezone.utc)
+    end_date = datetime.fromtimestamp(latest.timestamp / 1000, tz=timezone.utc)
+
+    return start_date.strftime('%Y-%m-%d'), end_date.strftime('%Y-%m-%d')
 
 
 def progress_callback(completed, total):
@@ -48,52 +71,26 @@ def progress_callback(completed, total):
     print(f'\r  [{bar}] {pct}% ({completed}/{total})', end='', flush=True)
 
 
-def create_and_run_job(args):
-    """Create a new job and run it"""
-    # Parse symbols
-    if args.symbols:
-        symbols = [s.strip() for s in args.symbols.split(',')]
-    else:
-        # Get active symbols from DB
-        active_symbols = Symbol.query.filter_by(is_active=True).limit(5).all()
-        symbols = [s.symbol for s in active_symbols] if active_symbols else ['BTC/USDT', 'ETH/USDT']
+def run_optimization(symbols, timeframes, pattern_types, verbose=False):
+    """Run optimization for given symbols."""
+    # Get date range from first symbol's candles
+    start_date, end_date = get_date_range_for_symbol(symbols[0], timeframes[0])
 
-    # Parse timeframes
-    if args.timeframes:
-        timeframes = [t.strip() for t in args.timeframes.split(',')]
-    else:
-        timeframes = ['1h', '4h']
+    if not start_date:
+        print(f"Error: No candle data found for {symbols[0]}")
+        return
 
-    # Parse patterns
-    if args.patterns:
-        pattern_types = [p.strip() for p in args.patterns.split(',')]
-    else:
-        pattern_types = ['imbalance', 'order_block']
-
-    # Parse dates
-    if args.end_date:
-        end_date = args.end_date
-    else:
-        end_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
-
-    if args.start_date:
-        start_date = args.start_date
-    else:
-        start_dt = datetime.now(timezone.utc) - timedelta(days=90)
-        start_date = start_dt.strftime('%Y-%m-%d')
-
-    # Select parameter grid
-    param_grid = DEFAULT_PARAMETER_GRID if args.full_grid else QUICK_PARAMETER_GRID
+    print(f"\n{'='*60}")
+    print(f"PARAMETER OPTIMIZATION")
+    print(f"{'='*60}")
+    print(f"  Symbols: {', '.join(symbols)}")
+    print(f"  Timeframes: {', '.join(timeframes)}")
+    print(f"  Patterns: {', '.join(pattern_types)}")
+    print(f"  Date range: {start_date} to {end_date}")
+    print(f"{'='*60}\n")
 
     # Create job
     job_name = f"Optimization {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
-    print(f"Creating optimization job: {job_name}")
-    print(f"  Symbols: {symbols}")
-    print(f"  Timeframes: {timeframes}")
-    print(f"  Patterns: {pattern_types}")
-    print(f"  Date range: {start_date} to {end_date}")
-    print(f"  Grid: {'full' if args.full_grid else 'quick'}")
-
     job = optimizer.create_job(
         name=job_name,
         symbols=symbols,
@@ -101,127 +98,170 @@ def create_and_run_job(args):
         pattern_types=pattern_types,
         start_date=start_date,
         end_date=end_date,
-        parameter_grid=param_grid,
+        parameter_grid=QUICK_PARAMETER_GRID,
     )
 
+    print(f"Created job #{job.id}: {job.name}")
     print(f"  Total runs: {job.total_runs}")
     print()
 
     # Run job
-    run_job(job.id, args.verbose)
-
-
-def run_job(job_id, verbose=False):
-    """Run an existing job"""
-    job = OptimizationJob.query.get(job_id)
-    if not job:
-        print(f"Error: Job {job_id} not found")
-        return
-
-    print(f"Running job {job_id}: {job.name}")
-    print(f"  Status: {job.status}")
-    print(f"  Total runs: {job.total_runs}")
-    print()
-
     callback = progress_callback if verbose else None
-    result = optimizer.run_job(job_id, progress_callback=callback)
+    result = optimizer.run_job(job.id, progress_callback=callback)
 
     if verbose:
         print()  # New line after progress bar
 
     if 'error' in result:
-        print(f"Error: {result['error']}")
+        print(f"\nError: {result['error']}")
         return
 
-    print(f"\nCompleted!")
+    print(f"\n{'='*60}")
+    print(f"COMPLETED")
+    print(f"{'='*60}")
     print(f"  Successful: {result['completed']}")
     print(f"  Failed: {result['failed']}")
 
     if result.get('best_params'):
         bp = result['best_params']
-        print(f"\nBest parameters:")
-        print(f"  Symbol: {bp['symbol']}")
-        print(f"  Timeframe: {bp['timeframe']}")
-        print(f"  Pattern: {bp['pattern_type']}")
-        print(f"  RR Target: {bp['params']['rr_target']}")
-        print(f"  SL Buffer: {bp['params']['sl_buffer_pct']}%")
-        print(f"  Win Rate: {bp['win_rate']}%")
-        print(f"  Total Profit: {bp['total_profit_pct']}%")
-        print(f"  Total Trades: {bp['total_trades']}")
+        print(f"\n  BEST RESULT:")
+        print(f"    {bp['symbol']} {bp['timeframe']} {bp['pattern_type']}")
+        print(f"    RR: {bp['params']['rr_target']}, SL: {bp['params']['sl_buffer_pct']}%")
+        print(f"    Win Rate: {bp['win_rate']}%, Profit: {bp['total_profit_pct']}%")
+        print(f"    Trades: {bp['total_trades']}")
+
+    print(f"\nView all results: python scripts/run_optimization.py --results")
+    print(f"Or visit: /admin/optimization/results")
 
 
 def list_jobs():
-    """List all optimization jobs"""
+    """List all optimization jobs."""
     jobs = OptimizationJob.query.order_by(OptimizationJob.created_at.desc()).all()
 
     if not jobs:
         print("No optimization jobs found")
         return
 
-    print(f"{'ID':<5} {'Name':<40} {'Status':<12} {'Progress':<15} {'Created':<20}")
-    print('-' * 95)
+    print(f"\n{'ID':<5} {'Name':<35} {'Status':<12} {'Progress':<12} {'Created':<20}")
+    print('-' * 90)
 
     for job in jobs:
-        progress = f"{job.completed_runs + job.failed_runs}/{job.total_runs}"
+        progress = f"{job.completed_runs}/{job.total_runs}"
         created = job.created_at.strftime('%Y-%m-%d %H:%M') if job.created_at else 'N/A'
-        print(f"{job.id:<5} {job.name[:40]:<40} {job.status:<12} {progress:<15} {created:<20}")
+        print(f"{job.id:<5} {job.name[:35]:<35} {job.status:<12} {progress:<12} {created:<20}")
 
 
-def show_best_params(args):
-    """Show best parameters from all completed runs"""
-    print("Best parameters by profit:\n")
+def show_results():
+    """Show all optimization results."""
+    runs = OptimizationRun.query.filter(
+        OptimizationRun.status == 'completed',
+        OptimizationRun.total_trades >= 5
+    ).order_by(
+        OptimizationRun.total_profit_pct.desc()
+    ).all()
 
-    # Get best for each pattern type
-    for pattern_type in ['imbalance', 'order_block', 'liquidity_sweep']:
-        best = optimizer.get_best_params(
-            pattern_type=pattern_type,
-            metric='total_profit_pct',
-            min_trades=10
-        )
+    if not runs:
+        print("No optimization results found (min 5 trades required)")
+        return
 
-        if best:
-            print(f"  {pattern_type}:")
-            print(f"    Symbol: {best['symbol']} {best['timeframe']}")
-            print(f"    RR: {best['params']['rr_target']}, SL: {best['params']['sl_buffer_pct']}%")
-            print(f"    Win Rate: {best['win_rate']}%, Profit: {best['total_profit_pct']}%")
-            print(f"    Trades: {best['total_trades']}, Sharpe: {best['sharpe_ratio']}")
-            print()
-        else:
-            print(f"  {pattern_type}: No data")
-            print()
+    print(f"\n{'Symbol':<12} {'TF':<5} {'Pattern':<15} {'RR':<5} {'SL%':<5} {'Trades':<7} {'Win%':<7} {'Profit%':<10} {'Sharpe':<8}")
+    print('-' * 90)
+
+    best_profit = runs[0].total_profit_pct if runs else 0
+
+    for i, run in enumerate(runs[:50]):  # Top 50
+        is_best = run.total_profit_pct == best_profit
+        marker = '*' if is_best else ' '
+
+        print(f"{marker}{run.symbol:<11} {run.timeframe:<5} {run.pattern_type:<15} "
+              f"{run.rr_target:<5} {run.sl_buffer_pct:<5} {run.total_trades:<7} "
+              f"{run.win_rate or 0:<7.1f} {run.total_profit_pct or 0:<10.2f} "
+              f"{run.sharpe_ratio or 0:<8.2f}")
+
+    print(f"\n* = Best result | Showing top 50 of {len(runs)} results")
+
+
+def show_best_params():
+    """Show best parameters by symbol."""
+    # Get unique symbols
+    symbols = db.session.query(OptimizationRun.symbol).distinct().all()
+    symbols = [s[0] for s in symbols]
+
+    if not symbols:
+        print("No optimization results found")
+        return
+
+    print(f"\n{'='*70}")
+    print("BEST PARAMETERS BY SYMBOL")
+    print(f"{'='*70}\n")
+
+    for symbol in sorted(symbols):
+        print(f"{symbol}:")
+
+        for pattern_type in ['imbalance', 'order_block', 'liquidity_sweep']:
+            best = OptimizationRun.query.filter(
+                OptimizationRun.symbol == symbol,
+                OptimizationRun.pattern_type == pattern_type,
+                OptimizationRun.status == 'completed',
+                OptimizationRun.total_trades >= 5
+            ).order_by(
+                OptimizationRun.total_profit_pct.desc()
+            ).first()
+
+            if best:
+                print(f"  {pattern_type:20} RR={best.rr_target}, SL={best.sl_buffer_pct}% "
+                      f"→ Win:{best.win_rate:.1f}%, Profit:{best.total_profit_pct:.2f}%, "
+                      f"Trades:{best.total_trades}")
+            else:
+                print(f"  {pattern_type:20} No data")
+        print()
 
 
 def main():
     parser = argparse.ArgumentParser(description='Run parameter optimization')
-    parser.add_argument('--new', action='store_true', help='Create and run new job')
-    parser.add_argument('--job-id', type=int, help='Run existing job by ID')
+    parser.add_argument('--symbol', type=str, help='Single symbol to optimize')
+    parser.add_argument('--all-symbols', action='store_true', help='Optimize all active symbols')
+    parser.add_argument('--timeframes', type=str, default='1h,4h', help='Comma-separated timeframes')
+    parser.add_argument('--patterns', type=str, default='imbalance,order_block',
+                        help='Comma-separated pattern types')
     parser.add_argument('--list', action='store_true', help='List all jobs')
+    parser.add_argument('--results', action='store_true', help='Show all results')
     parser.add_argument('--best', action='store_true', help='Show best parameters')
-    parser.add_argument('--symbols', type=str, help='Comma-separated symbols')
-    parser.add_argument('--timeframes', type=str, help='Comma-separated timeframes')
-    parser.add_argument('--patterns', type=str, help='Comma-separated pattern types')
-    parser.add_argument('--start-date', type=str, help='Start date YYYY-MM-DD')
-    parser.add_argument('--end-date', type=str, help='End date YYYY-MM-DD')
-    parser.add_argument('--full-grid', action='store_true', help='Use full parameter grid')
     parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed progress')
 
     args = parser.parse_args()
 
     app = create_app()
     with app.app_context():
-        # Ensure tables exist
         db.create_all()
 
         if args.list:
             list_jobs()
+        elif args.results:
+            show_results()
         elif args.best:
-            show_best_params(args)
-        elif args.job_id:
-            run_job(args.job_id, args.verbose)
-        elif args.new:
-            create_and_run_job(args)
+            show_best_params()
+        elif args.symbol:
+            symbols = [args.symbol.strip()]
+            timeframes = [t.strip() for t in args.timeframes.split(',')]
+            patterns = [p.strip() for p in args.patterns.split(',')]
+            run_optimization(symbols, timeframes, patterns, args.verbose)
+        elif args.all_symbols:
+            active_symbols = Symbol.query.filter_by(is_active=True).all()
+            if not active_symbols:
+                print("No active symbols found")
+                return
+            symbols = [s.symbol for s in active_symbols]
+            timeframes = [t.strip() for t in args.timeframes.split(',')]
+            patterns = [p.strip() for p in args.patterns.split(',')]
+            run_optimization(symbols, timeframes, patterns, args.verbose)
         else:
             parser.print_help()
+            print("\nExamples:")
+            print("  python scripts/run_optimization.py --symbol BTC/USDT -v")
+            print("  python scripts/run_optimization.py --all-symbols -v")
+            print("  python scripts/run_optimization.py --results")
+            print("  python scripts/run_optimization.py --best")
 
 
 if __name__ == '__main__':
