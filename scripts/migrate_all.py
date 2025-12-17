@@ -395,6 +395,12 @@ def migrate():
                     user_id INTEGER NOT NULL,
                     symbol_id INTEGER NOT NULL,
                     notify_enabled BOOLEAN DEFAULT 1,
+                    custom_rr FLOAT,
+                    custom_sl_buffer_pct FLOAT,
+                    custom_min_zone_pct FLOAT,
+                    pattern_params TEXT,
+                    params_source VARCHAR(50),
+                    optimization_run_id INTEGER,
                     created_at DATETIME,
                     updated_at DATETIME,
                     FOREIGN KEY (user_id) REFERENCES users (id),
@@ -404,6 +410,23 @@ def migrate():
             """))
             db.session.execute(text("CREATE INDEX idx_user_symbol_pref ON user_symbol_preferences (user_id, symbol_id)"))
             changes.append("Created user_symbol_preferences table")
+        else:
+            # Add new columns for custom trading parameters
+            cols = get_table_columns('user_symbol_preferences')
+            pref_cols = [
+                ('custom_rr', 'FLOAT'),
+                ('custom_sl_buffer_pct', 'FLOAT'),
+                ('custom_min_zone_pct', 'FLOAT'),
+                ('pattern_params', 'TEXT'),
+                ('params_source', 'VARCHAR(50)'),
+                ('optimization_run_id', 'INTEGER'),
+            ]
+            for col_name, col_type in pref_cols:
+                if col_name not in cols:
+                    db.session.execute(text(
+                        f"ALTER TABLE user_symbol_preferences ADD COLUMN {col_name} {col_type}"
+                    ))
+                    changes.append(f"Added user_symbol_preferences.{col_name}")
 
         # Seed default notification templates
         if table_exists('notification_templates'):

@@ -1,0 +1,312 @@
+{% extends "base.html" %}
+
+{% block title %}Parameter Comparison - {{ symbol }} {{ pattern_type }}{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold">Parameter Comparison</h1>
+            <p class="text-gray-400 text-sm mt-1">{{ symbol }} - {{ pattern_type }}{% if timeframe %} ({{ timeframe }}){% endif %}</p>
+        </div>
+        <a href="{{ url_for('admin.optimization_index') }}" class="text-blue-400 hover:text-blue-300">
+            &larr; Back to Optimization
+        </a>
+    </div>
+</div>
+
+<!-- Filter Controls -->
+<div class="bg-card rounded-lg p-4 mb-6">
+    <form method="GET" class="flex flex-wrap items-end gap-4">
+        <div>
+            <label class="block text-gray-400 text-sm mb-1">Symbol</label>
+            <select name="symbol" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white">
+                {% for s in symbols %}
+                    <option value="{{ s }}" {% if s == symbol %}selected{% endif %}>{{ s }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div>
+            <label class="block text-gray-400 text-sm mb-1">Pattern Type</label>
+            <select name="pattern_type" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white">
+                <option value="imbalance" {% if pattern_type == 'imbalance' %}selected{% endif %}>Imbalance (FVG)</option>
+                <option value="order_block" {% if pattern_type == 'order_block' %}selected{% endif %}>Order Block</option>
+                <option value="liquidity_sweep" {% if pattern_type == 'liquidity_sweep' %}selected{% endif %}>Liquidity Sweep</option>
+            </select>
+        </div>
+        <div>
+            <label class="block text-gray-400 text-sm mb-1">Timeframe</label>
+            <select name="timeframe" class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white">
+                <option value="">All</option>
+                {% for tf in timeframes %}
+                    <option value="{{ tf }}" {% if tf == timeframe %}selected{% endif %}>{{ tf }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded">
+            Update
+        </button>
+    </form>
+</div>
+
+{% if data and data.success %}
+<!-- Best Parameters Summary -->
+<div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+    <div class="bg-card rounded-lg p-6">
+        <h3 class="text-lg font-semibold mb-3 text-green-400">Best by Profit</h3>
+        {% if data.best_by_profit.rr %}
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <p class="text-gray-400 text-sm">RR Target</p>
+                    <p class="text-2xl font-bold">{{ data.best_by_profit.rr }}</p>
+                </div>
+                <div>
+                    <p class="text-gray-400 text-sm">SL Buffer</p>
+                    <p class="text-2xl font-bold">{{ data.best_by_profit.sl }}%</p>
+                </div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-gray-700">
+                <p class="text-gray-400 text-sm">Total Profit</p>
+                <p class="text-3xl font-bold text-green-400">{{ data.best_by_profit.value }}%</p>
+            </div>
+            <button onclick="copyParams('{{ symbol }}', '{{ pattern_type }}', {{ data.best_by_profit.rr }}, {{ data.best_by_profit.sl }})"
+                    class="mt-4 w-full px-4 py-2 bg-green-600 hover:bg-green-700 rounded text-sm">
+                Copy to My Preferences
+            </button>
+        {% else %}
+            <p class="text-gray-400">No data available</p>
+        {% endif %}
+    </div>
+
+    <div class="bg-card rounded-lg p-6">
+        <h3 class="text-lg font-semibold mb-3 text-blue-400">Best by Win Rate</h3>
+        {% if data.best_by_winrate.rr %}
+            <div class="grid grid-cols-2 gap-4">
+                <div>
+                    <p class="text-gray-400 text-sm">RR Target</p>
+                    <p class="text-2xl font-bold">{{ data.best_by_winrate.rr }}</p>
+                </div>
+                <div>
+                    <p class="text-gray-400 text-sm">SL Buffer</p>
+                    <p class="text-2xl font-bold">{{ data.best_by_winrate.sl }}%</p>
+                </div>
+            </div>
+            <div class="mt-4 pt-4 border-t border-gray-700">
+                <p class="text-gray-400 text-sm">Win Rate</p>
+                <p class="text-3xl font-bold text-blue-400">{{ data.best_by_winrate.value }}%</p>
+            </div>
+            <button onclick="copyParams('{{ symbol }}', '{{ pattern_type }}', {{ data.best_by_winrate.rr }}, {{ data.best_by_winrate.sl }})"
+                    class="mt-4 w-full px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-sm">
+                Copy to My Preferences
+            </button>
+        {% else %}
+            <p class="text-gray-400">No data available</p>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Heatmaps -->
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+    <!-- Win Rate Heatmap -->
+    <div class="bg-card rounded-lg p-6">
+        <h3 class="text-lg font-semibold mb-4">Win Rate by RR vs SL%</h3>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr>
+                        <th class="py-2 px-3 text-left text-gray-400">RR \ SL%</th>
+                        {% for sl in data.sl_values %}
+                            <th class="py-2 px-3 text-center text-gray-400">{{ sl }}%</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for i in range(data.rr_values|length) %}
+                    <tr>
+                        <td class="py-2 px-3 font-medium">{{ data.rr_values[i] }}</td>
+                        {% for j in range(data.sl_values|length) %}
+                            {% set val = data.win_rate_grid[i][j] %}
+                            {% set is_best = data.best_by_winrate.rr == data.rr_values[i] and data.best_by_winrate.sl == data.sl_values[j] %}
+                            <td class="py-2 px-3 text-center {% if val is not none %}{% if val >= 55 %}bg-green-900/50 text-green-300{% elif val >= 45 %}bg-yellow-900/50 text-yellow-300{% else %}bg-red-900/50 text-red-300{% endif %}{% endif %} {% if is_best %}ring-2 ring-blue-400{% endif %}">
+                                {% if val is not none %}{{ val }}%{% else %}-{% endif %}
+                            </td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="text-gray-500 text-xs mt-2">Higher win rate = greener. Blue ring = best cell.</p>
+    </div>
+
+    <!-- Profit Heatmap -->
+    <div class="bg-card rounded-lg p-6">
+        <h3 class="text-lg font-semibold mb-4">Total Profit by RR vs SL%</h3>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr>
+                        <th class="py-2 px-3 text-left text-gray-400">RR \ SL%</th>
+                        {% for sl in data.sl_values %}
+                            <th class="py-2 px-3 text-center text-gray-400">{{ sl }}%</th>
+                        {% endfor %}
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for i in range(data.rr_values|length) %}
+                    <tr>
+                        <td class="py-2 px-3 font-medium">{{ data.rr_values[i] }}</td>
+                        {% for j in range(data.sl_values|length) %}
+                            {% set val = data.profit_grid[i][j] %}
+                            {% set is_best = data.best_by_profit.rr == data.rr_values[i] and data.best_by_profit.sl == data.sl_values[j] %}
+                            <td class="py-2 px-3 text-center {% if val is not none %}{% if val > 10 %}bg-green-900/50 text-green-300{% elif val > 0 %}bg-green-900/30 text-green-200{% elif val > -10 %}bg-red-900/30 text-red-200{% else %}bg-red-900/50 text-red-300{% endif %}{% endif %} {% if is_best %}ring-2 ring-green-400{% endif %}">
+                                {% if val is not none %}{{ val }}%{% else %}-{% endif %}
+                            </td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="text-gray-500 text-xs mt-2">Profit > 0 = green, < 0 = red. Green ring = best cell.</p>
+    </div>
+</div>
+
+<!-- Trade Count Heatmap -->
+<div class="bg-card rounded-lg p-6 mb-6">
+    <h3 class="text-lg font-semibold mb-4">Trade Count by RR vs SL%</h3>
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr>
+                    <th class="py-2 px-3 text-left text-gray-400">RR \ SL%</th>
+                    {% for sl in data.sl_values %}
+                        <th class="py-2 px-3 text-center text-gray-400">{{ sl }}%</th>
+                    {% endfor %}
+                </tr>
+            </thead>
+            <tbody>
+                {% for i in range(data.rr_values|length) %}
+                <tr>
+                    <td class="py-2 px-3 font-medium">{{ data.rr_values[i] }}</td>
+                    {% for j in range(data.sl_values|length) %}
+                        {% set val = data.trades_grid[i][j] %}
+                        <td class="py-2 px-3 text-center {% if val >= 20 %}text-white{% elif val >= 10 %}text-gray-300{% else %}text-gray-500{% endif %}">
+                            {{ val if val else '-' }}
+                        </td>
+                    {% endfor %}
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    <p class="text-gray-500 text-xs mt-2">More trades = more statistically significant results.</p>
+</div>
+
+{% else %}
+<div class="bg-card rounded-lg p-8 text-center">
+    <p class="text-gray-400 text-lg">No comparison data available for this selection.</p>
+    <p class="text-gray-500 text-sm mt-2">Run an optimization job first to generate comparison data.</p>
+</div>
+{% endif %}
+
+<!-- Copy Parameters Modal -->
+<div id="copyModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+    <div class="bg-card rounded-lg p-6 w-full max-w-md mx-4">
+        <h3 class="text-xl font-semibold mb-4">Copy Parameters to Preferences</h3>
+        <div id="copyModalContent">
+            <p class="text-gray-400 mb-4">Apply these optimized parameters to your notifications?</p>
+            <div class="bg-gray-800 rounded p-4 mb-4">
+                <p><strong>Symbol:</strong> <span id="modalSymbol"></span></p>
+                <p><strong>Pattern:</strong> <span id="modalPattern"></span></p>
+                <p><strong>RR Target:</strong> <span id="modalRR"></span></p>
+                <p><strong>SL Buffer:</strong> <span id="modalSL"></span>%</p>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button onclick="closeCopyModal()" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded">
+                    Cancel
+                </button>
+                <button id="confirmCopyBtn" class="px-4 py-2 bg-green-600 hover:bg-green-700 rounded">
+                    Copy Parameters
+                </button>
+            </div>
+        </div>
+        <div id="copyModalResult" class="hidden">
+            <div id="copySuccess" class="hidden text-center">
+                <div class="text-green-400 text-4xl mb-4">&#10003;</div>
+                <p class="text-lg mb-4">Parameters copied successfully!</p>
+                <button onclick="closeCopyModal()" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded">
+                    Close
+                </button>
+            </div>
+            <div id="copyError" class="hidden text-center">
+                <div class="text-red-400 text-4xl mb-4">&#10007;</div>
+                <p class="text-lg mb-2">Failed to copy parameters</p>
+                <p id="copyErrorMsg" class="text-gray-400 text-sm mb-4"></p>
+                <button onclick="closeCopyModal()" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+let pendingCopy = null;
+
+function copyParams(symbol, patternType, rr, sl) {
+    pendingCopy = { symbol, patternType, rr, sl };
+    document.getElementById('modalSymbol').textContent = symbol;
+    document.getElementById('modalPattern').textContent = patternType;
+    document.getElementById('modalRR').textContent = rr;
+    document.getElementById('modalSL').textContent = sl;
+
+    document.getElementById('copyModalContent').classList.remove('hidden');
+    document.getElementById('copyModalResult').classList.add('hidden');
+    document.getElementById('copyModal').classList.remove('hidden');
+    document.getElementById('copyModal').classList.add('flex');
+}
+
+function closeCopyModal() {
+    document.getElementById('copyModal').classList.add('hidden');
+    document.getElementById('copyModal').classList.remove('flex');
+    pendingCopy = null;
+}
+
+document.getElementById('confirmCopyBtn').addEventListener('click', async () => {
+    if (!pendingCopy) return;
+
+    try {
+        const resp = await fetch('/admin/api/optimization/apply-params', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                symbol: pendingCopy.symbol,
+                pattern_type: pendingCopy.patternType,
+                rr_target: pendingCopy.rr,
+                sl_buffer_pct: pendingCopy.sl
+            })
+        });
+        const result = await resp.json();
+
+        document.getElementById('copyModalContent').classList.add('hidden');
+        document.getElementById('copyModalResult').classList.remove('hidden');
+
+        if (result.success) {
+            document.getElementById('copySuccess').classList.remove('hidden');
+            document.getElementById('copyError').classList.add('hidden');
+        } else {
+            document.getElementById('copySuccess').classList.add('hidden');
+            document.getElementById('copyError').classList.remove('hidden');
+            document.getElementById('copyErrorMsg').textContent = result.error || 'Unknown error';
+        }
+    } catch (err) {
+        document.getElementById('copyModalContent').classList.add('hidden');
+        document.getElementById('copyModalResult').classList.remove('hidden');
+        document.getElementById('copySuccess').classList.add('hidden');
+        document.getElementById('copyError').classList.remove('hidden');
+        document.getElementById('copyErrorMsg').textContent = err.message;
+    }
+});
+</script>
+{% endblock %}

@@ -357,6 +357,20 @@ class UserSymbolPreference(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('users.id', ondelete='CASCADE'), nullable=False)
     symbol_id = db.Column(db.Integer, db.ForeignKey('symbols.id', ondelete='CASCADE'), nullable=False)
     notify_enabled = db.Column(db.Boolean, default=True)  # User's notification preference
+
+    # Custom trading parameters (Premium feature - copied from optimization)
+    # NULL means use system defaults
+    custom_rr = db.Column(db.Float, nullable=True)  # Risk/Reward ratio
+    custom_sl_buffer_pct = db.Column(db.Float, nullable=True)  # Stop loss buffer %
+    custom_min_zone_pct = db.Column(db.Float, nullable=True)  # Minimum zone size %
+
+    # Pattern-specific overrides (JSON: {"imbalance": {"rr": 2.5}, "order_block": {"rr": 3.0}})
+    pattern_params = db.Column(db.Text, nullable=True)
+
+    # Track where params came from
+    params_source = db.Column(db.String(50), nullable=True)  # 'optimization', 'manual', etc.
+    optimization_run_id = db.Column(db.Integer, nullable=True)  # Reference to source run
+
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc),
                           onupdate=lambda: datetime.now(timezone.utc))
@@ -414,3 +428,99 @@ class UserSymbolPreference(db.Model):
         pref.notify_enabled = not pref.notify_enabled
         db.session.commit()
         return pref.notify_enabled
+
+    @property
+    def pattern_params_dict(self):
+        """Get pattern params as dict"""
+        if not self.pattern_params:
+            return {}
+        try:
+            return json.loads(self.pattern_params)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    @pattern_params_dict.setter
+    def pattern_params_dict(self, value):
+        """Set pattern params from dict"""
+        self.pattern_params = json.dumps(value) if value else None
+
+    def get_params_for_pattern(self, pattern_type):
+        """Get parameters for a specific pattern type.
+
+        Returns pattern-specific params if set, otherwise symbol-level defaults.
+        Returns None values if no custom params are set.
+        """
+        params = {
+            'rr_target': self.custom_rr,
+            'sl_buffer_pct': self.custom_sl_buffer_pct,
+            'min_zone_pct': self.custom_min_zone_pct,
+        }
+
+        # Override with pattern-specific params if available
+        pattern_params = self.pattern_params_dict.get(pattern_type, {})
+        if pattern_params:
+            if 'rr_target' in pattern_params:
+                params['rr_target'] = pattern_params['rr_target']
+            if 'sl_buffer_pct' in pattern_params:
+                params['sl_buffer_pct'] = pattern_params['sl_buffer_pct']
+            if 'min_zone_pct' in pattern_params:
+                params['min_zone_pct'] = pattern_params['min_zone_pct']
+
+        return params
+
+    def set_params_from_optimization(self, rr_target, sl_buffer_pct, min_zone_pct=None,
+                                      pattern_type=None, optimization_run_id=None):
+        """Set parameters from an optimization run.
+
+        Args:
+            rr_target: Risk/Reward ratio
+            sl_buffer_pct: Stop loss buffer percentage
+            min_zone_pct: Minimum zone size percentage (optional)
+            pattern_type: If set, store as pattern-specific override
+            optimization_run_id: Reference to the source optimization run
+        """
+        if pattern_type:
+            # Store as pattern-specific override
+            params = self.pattern_params_dict
+            params[pattern_type] = {
+                'rr_target': rr_target,
+                'sl_buffer_pct': sl_buffer_pct,
+            }
+            if min_zone_pct is not None:
+                params[pattern_type]['min_zone_pct'] = min_zone_pct
+            self.pattern_params_dict = params
+        else:
+            # Store as symbol-level defaults
+            self.custom_rr = rr_target
+            self.custom_sl_buffer_pct = sl_buffer_pct
+            if min_zone_pct is not None:
+                self.custom_min_zone_pct = min_zone_pct
+
+        self.params_source = 'optimization'
+        self.optimization_run_id = optimization_run_id
+
+    def clear_custom_params(self):
+        """Clear all custom parameters, reverting to system defaults"""
+        self.custom_rr = None
+        self.custom_sl_buffer_pct = None
+        self.custom_min_zone_pct = None
+        self.pattern_params = None
+        self.params_source = None
+        self.optimization_run_id = None
+
+    def to_dict(self):
+        """Convert to dictionary"""
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'symbol_id': self.symbol_id,
+            'symbol': self.symbol.symbol if self.symbol else None,
+            'notify_enabled': self.notify_enabled,
+            'custom_rr': self.custom_rr,
+            'custom_sl_buffer_pct': self.custom_sl_buffer_pct,
+            'custom_min_zone_pct': self.custom_min_zone_pct,
+            'pattern_params': self.pattern_params_dict,
+            'params_source': self.params_source,
+            'optimization_run_id': self.optimization_run_id,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }

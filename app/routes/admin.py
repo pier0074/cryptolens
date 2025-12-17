@@ -2254,3 +2254,184 @@ def api_best_params():
         return jsonify({'success': True, 'best': best})
     else:
         return jsonify({'success': True, 'best': None, 'message': 'No data available'})
+
+
+@admin_bp.route('/optimization/compare')
+@admin_required
+def optimization_compare():
+    """Parameter comparison heatmap page"""
+    from app.models import OptimizationRun, Symbol
+    from app.services.auto_tuner import auto_tuner
+
+    # Get filter parameters
+    symbol = request.args.get('symbol', 'BTC/USDT')
+    pattern_type = request.args.get('pattern_type', 'imbalance')
+    timeframe = request.args.get('timeframe', '')
+
+    # Get available symbols and timeframes for filters
+    symbols = db.session.query(OptimizationRun.symbol).distinct().all()
+    symbols = sorted([s[0] for s in symbols]) if symbols else ['BTC/USDT']
+
+    timeframes = db.session.query(OptimizationRun.timeframe).distinct().all()
+    timeframes = sorted([t[0] for t in timeframes]) if timeframes else []
+
+    # Get comparison data
+    data = auto_tuner.get_comparison_data(
+        symbol=symbol,
+        pattern_type=pattern_type,
+        timeframe=timeframe if timeframe else None
+    )
+
+    return render_template(
+        'admin/optimization_compare.html',
+        symbol=symbol,
+        pattern_type=pattern_type,
+        timeframe=timeframe,
+        symbols=symbols,
+        timeframes=timeframes,
+        data=data
+    )
+
+
+@admin_bp.route('/api/optimization/apply-params', methods=['POST'])
+@admin_required
+def api_apply_optimization_params():
+    """API: Apply optimization parameters to user preferences.
+
+    Premium/Admin feature: Copies best parameters to user's symbol preferences.
+    """
+    from app.models import User, Symbol, UserSymbolPreference, OptimizationRun
+    from app.services.auto_tuner import auto_tuner
+
+    # Get current user
+    current_user = get_current_user()
+    if not current_user:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+    # Check premium or admin access
+    if not current_user.is_admin and current_user.subscription_tier != 'premium':
+        return jsonify({
+            'success': False,
+            'error': 'Premium subscription required for custom parameters'
+        }), 403
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+    symbol = data.get('symbol')
+    pattern_type = data.get('pattern_type')
+    rr_target = data.get('rr_target')
+    sl_buffer_pct = data.get('sl_buffer_pct')
+    min_zone_pct = data.get('min_zone_pct')
+
+    if not symbol:
+        return jsonify({'success': False, 'error': 'Symbol required'}), 400
+
+    # Get symbol from DB
+    sym = Symbol.query.filter_by(symbol=symbol).first()
+    if not sym:
+        return jsonify({'success': False, 'error': f'Symbol {symbol} not found'}), 404
+
+    # If specific params provided, apply them directly
+    if rr_target is not None and sl_buffer_pct is not None:
+        pref = UserSymbolPreference.get_or_create(current_user.id, sym.id)
+        pref.set_params_from_optimization(
+            rr_target=float(rr_target),
+            sl_buffer_pct=float(sl_buffer_pct),
+            min_zone_pct=float(min_zone_pct) if min_zone_pct else None,
+            pattern_type=pattern_type
+        )
+        db.session.commit()
+
+        return jsonify({
+            'success': True,
+            'message': f'Parameters applied for {symbol}',
+            'params': {
+                'rr_target': rr_target,
+                'sl_buffer_pct': sl_buffer_pct,
+                'min_zone_pct': min_zone_pct,
+                'pattern_type': pattern_type
+            }
+        })
+
+    # Otherwise, find best params from optimization
+    result = auto_tuner.apply_best_params_to_user(
+        user_id=current_user.id,
+        symbol=symbol,
+        pattern_type=pattern_type,
+        metric=data.get('metric', 'total_profit_pct'),
+        min_trades=data.get('min_trades', 10)
+    )
+
+    return jsonify(result)
+
+
+@admin_bp.route('/api/optimization/best-by-symbol')
+@admin_required
+def api_best_params_by_symbol():
+    """API: Get best parameters grouped by symbol"""
+    from app.services.auto_tuner import auto_tuner
+
+    symbol = request.args.get('symbol')
+    pattern_type = request.args.get('pattern_type')
+    metric = request.args.get('metric', 'total_profit_pct')
+    min_trades = request.args.get('min_trades', 10, type=int)
+
+    results = auto_tuner.get_best_params_by_symbol(
+        symbol=symbol,
+        pattern_type=pattern_type,
+        metric=metric,
+        min_trades=min_trades
+    )
+
+    return jsonify({
+        'success': True,
+        'results': results
+    })
+
+
+@admin_bp.route('/api/optimization/user-params')
+@admin_required
+def api_get_user_params():
+    """API: Get current user's custom symbol parameters"""
+    from app.models import UserSymbolPreference, Symbol
+
+    current_user = get_current_user()
+    if not current_user:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+    # Get all preferences with custom params
+    prefs = UserSymbolPreference.query.filter(
+        UserSymbolPreference.user_id == current_user.id,
+        db.or_(
+            UserSymbolPreference.custom_rr.isnot(None),
+            UserSymbolPreference.pattern_params.isnot(None)
+        )
+    ).all()
+
+    return jsonify({
+        'success': True,
+        'preferences': [p.to_dict() for p in prefs]
+    })
+
+
+@admin_bp.route('/api/optimization/clear-params', methods=['POST'])
+@admin_required
+def api_clear_user_params():
+    """API: Clear user's custom parameters"""
+    from app.services.auto_tuner import auto_tuner
+
+    current_user = get_current_user()
+    if not current_user:
+        return jsonify({'success': False, 'error': 'Not authenticated'}), 401
+
+    data = request.get_json() or {}
+    symbol = data.get('symbol')  # Optional: clear specific symbol only
+
+    result = auto_tuner.clear_user_custom_params(
+        user_id=current_user.id,
+        symbol=symbol
+    )
+
+    return jsonify(result)

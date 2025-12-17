@@ -41,11 +41,14 @@
     </div>
 </div>
 
-<!-- Create New Job Button -->
-<div class="mb-6">
+<!-- Action Buttons -->
+<div class="mb-6 flex gap-4">
     <button id="createJobBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
         + Create New Job
     </button>
+    <a href="{{ url_for('admin.optimization_compare') }}" class="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg">
+        Compare Parameters
+    </a>
 </div>
 
 <!-- Jobs Table -->
