@@ -189,9 +189,12 @@ class OrderBlockDetector(PatternDetector):
 
         t2 = datetime.now(timezone.utc)
 
-        # For overlap tracking - list of (zone_low, zone_high) per direction
-        seen_bullish = []
-        seen_bearish = []
+        # For overlap tracking - use numpy arrays for fast vectorized checking
+        seen_bullish_lows = []
+        seen_bullish_highs = []
+        seen_bearish_lows = []
+        seen_bearish_highs = []
+        overlap_threshold = Config.DEFAULT_OVERLAP_THRESHOLD
 
         for i in range(3, n):
             current_body_size = body_size[i]
@@ -210,7 +213,8 @@ class OrderBlockDetector(PatternDetector):
             if is_bullish[i]:
                 pattern = self._find_historical_opposing_candle_fast(
                     opens, closes, is_bearish,
-                    i, 'bullish', min_zone, seen_bullish, skip_overlap
+                    i, 'bullish', min_zone, seen_bullish_lows, seen_bullish_highs,
+                    skip_overlap, overlap_threshold
                 )
                 if pattern:
                     pattern['detected_ts'] = detected_ts
@@ -220,7 +224,8 @@ class OrderBlockDetector(PatternDetector):
             elif is_bearish[i]:
                 pattern = self._find_historical_opposing_candle_fast(
                     opens, closes, is_bullish,
-                    i, 'bearish', min_zone, seen_bearish, skip_overlap
+                    i, 'bearish', min_zone, seen_bearish_lows, seen_bearish_highs,
+                    skip_overlap, overlap_threshold
                 )
                 if pattern:
                     pattern['detected_ts'] = detected_ts
@@ -245,10 +250,14 @@ class OrderBlockDetector(PatternDetector):
         current_idx: int,
         direction: str,
         min_zone_pct: float,
-        seen_zones: list,
-        skip_overlap: bool
+        seen_lows: list,
+        seen_highs: list,
+        skip_overlap: bool,
+        overlap_threshold: float
     ) -> Optional[Dict[str, Any]]:
         """Find the last opposing candle for historical detection (no DB access, numpy-optimized)"""
+        import numpy as np
+
         # Look for the last opposing candle in the previous 3 candles
         for j in range(current_idx - 1, max(current_idx - 4, 0), -1):
             if is_opposing[j]:
@@ -262,17 +271,25 @@ class OrderBlockDetector(PatternDetector):
                 if zone_size_pct < min_zone_pct:
                     continue
 
-                # Proper overlap check using _calculate_zone_overlap
-                if not skip_overlap:
-                    has_overlap = False
-                    for seen_low, seen_high in seen_zones:
-                        overlap = self._calculate_zone_overlap(seen_low, seen_high, zone_low, zone_high)
-                        if overlap >= Config.DEFAULT_OVERLAP_THRESHOLD:
-                            has_overlap = True
-                            break
-                    if has_overlap:
+                # Fast vectorized overlap check
+                if not skip_overlap and seen_lows:
+                    s_lows = np.array(seen_lows)
+                    s_highs = np.array(seen_highs)
+                    overlap_lows = np.maximum(s_lows, zone_low)
+                    overlap_highs = np.minimum(s_highs, zone_high)
+                    overlap_sizes = np.maximum(0, overlap_highs - overlap_lows)
+                    seen_sizes = s_highs - s_lows
+                    zone_size = zone_high - zone_low
+                    smaller_sizes = np.minimum(seen_sizes, zone_size)
+                    with np.errstate(divide='ignore', invalid='ignore'):
+                        overlap_pcts = np.where(smaller_sizes > 0, overlap_sizes / smaller_sizes, 0)
+                    if np.any(overlap_pcts >= overlap_threshold):
                         continue
-                    seen_zones.append((zone_low, zone_high))
+                    seen_lows.append(zone_low)
+                    seen_highs.append(zone_high)
+                elif not skip_overlap:
+                    seen_lows.append(zone_low)
+                    seen_highs.append(zone_high)
 
                 return {
                     'pattern_type': self.pattern_type,

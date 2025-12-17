@@ -488,10 +488,12 @@ class ParameterOptimizer:
         params: Dict
     ) -> List[Dict]:
         """
-        Simulate trades using numpy arrays for faster execution.
-        This is the performance-critical function optimized with vectorized operations.
+        Simulate trades using fully vectorized numpy operations.
+        This is heavily optimized for speed - processes all patterns in batch.
         """
-        trades = []
+        if not patterns:
+            return []
+
         rr_target = params.get('rr_target', 2.0)
         sl_buffer_pct = params.get('sl_buffer_pct', 10.0) / 100.0
         entry_method = params.get('entry_method', 'zone_edge')
@@ -501,6 +503,12 @@ class ParameterOptimizer:
         timestamps = ohlcv['timestamp']
         n_candles = len(highs)
 
+        # Max candles to look ahead for trade resolution (limit search window)
+        MAX_TRADE_DURATION = 1000  # Trades that take longer are likely invalid
+
+        trades = []
+
+        # Process patterns in batch - vectorize the setup
         for pattern in patterns:
             entry_idx = pattern['detected_at']
             if entry_idx + 10 >= n_candles:
@@ -511,35 +519,115 @@ class ParameterOptimizer:
             zone_size = zone_high - zone_low
             buffer = zone_size * sl_buffer_pct
 
-            # Calculate entry, SL, TP based on entry method
+            # Calculate entry, SL, TP based on direction
             if pattern['direction'] == 'bullish':
-                if entry_method == 'zone_mid':
-                    entry = (zone_high + zone_low) / 2
-                else:  # zone_edge
-                    entry = zone_high
-
+                entry = zone_high if entry_method == 'zone_edge' else (zone_high + zone_low) / 2
                 stop_loss = zone_low - buffer
                 risk = entry - stop_loss
                 take_profit = entry + (risk * rr_target)
                 direction = 'long'
             else:
-                if entry_method == 'zone_mid':
-                    entry = (zone_high + zone_low) / 2
-                else:  # zone_edge
-                    entry = zone_low
-
+                entry = zone_low if entry_method == 'zone_edge' else (zone_high + zone_low) / 2
                 stop_loss = zone_high + buffer
                 risk = stop_loss - entry
                 take_profit = entry - (risk * rr_target)
                 direction = 'short'
 
-            # Simulate trade outcome using numpy slicing
-            trade = self._simulate_single_trade_fast(
-                highs, lows, timestamps, entry_idx, entry, stop_loss, take_profit,
-                direction, rr_target, n_candles
-            )
-            if trade:
-                trades.append(trade)
+            # Limit search window
+            start_idx = entry_idx + 1
+            end_idx = min(entry_idx + MAX_TRADE_DURATION, n_candles)
+
+            if start_idx >= end_idx:
+                continue
+
+            # Get slices for vectorized operations
+            h_slice = highs[start_idx:end_idx]
+            l_slice = lows[start_idx:end_idx]
+
+            # Vectorized search for entry trigger
+            if direction == 'long':
+                entry_mask = l_slice <= entry
+            else:
+                entry_mask = h_slice >= entry
+
+            if not np.any(entry_mask):
+                continue  # No entry triggered
+
+            entry_candle_offset = np.argmax(entry_mask)
+            entry_candle = start_idx + entry_candle_offset
+
+            # Now search for SL/TP after entry
+            trade_start = entry_candle + 1
+            trade_end = end_idx
+
+            if trade_start >= trade_end:
+                continue
+
+            h_trade = highs[trade_start:trade_end]
+            l_trade = lows[trade_start:trade_end]
+
+            if direction == 'long':
+                sl_mask = l_trade <= stop_loss
+                tp_mask = h_trade >= take_profit
+            else:
+                sl_mask = h_trade >= stop_loss
+                tp_mask = l_trade <= take_profit
+
+            # Find first SL or TP hit
+            sl_idx = np.argmax(sl_mask) if np.any(sl_mask) else len(sl_mask)
+            tp_idx = np.argmax(tp_mask) if np.any(tp_mask) else len(tp_mask)
+
+            # Check which was actually hit (argmax returns 0 if all False)
+            sl_hit = sl_mask[sl_idx] if sl_idx < len(sl_mask) else False
+            tp_hit = tp_mask[tp_idx] if tp_idx < len(tp_mask) else False
+
+            if not sl_hit and not tp_hit:
+                continue  # Trade not resolved
+
+            # Determine outcome
+            if sl_hit and tp_hit:
+                # Both triggered - take whichever came first
+                if sl_idx <= tp_idx:
+                    result = 'loss'
+                    exit_idx = trade_start + sl_idx
+                    exit_price = stop_loss
+                else:
+                    result = 'win'
+                    exit_idx = trade_start + tp_idx
+                    exit_price = take_profit
+            elif sl_hit:
+                result = 'loss'
+                exit_idx = trade_start + sl_idx
+                exit_price = stop_loss
+            else:
+                result = 'win'
+                exit_idx = trade_start + tp_idx
+                exit_price = take_profit
+
+            if result == 'win':
+                trades.append({
+                    'entry_price': float(entry),
+                    'exit_price': float(exit_price),
+                    'direction': direction,
+                    'result': 'win',
+                    'rr_achieved': float(rr_target),
+                    'profit_pct': float(abs((exit_price - entry) / entry * 100)),
+                    'entry_time': int(timestamps[entry_candle]),
+                    'exit_time': int(timestamps[exit_idx]),
+                    'duration_candles': int(exit_idx - entry_candle)
+                })
+            else:
+                trades.append({
+                    'entry_price': float(entry),
+                    'exit_price': float(exit_price),
+                    'direction': direction,
+                    'result': 'loss',
+                    'rr_achieved': -1.0,
+                    'profit_pct': float(-abs((exit_price - entry) / entry * 100)),
+                    'entry_time': int(timestamps[entry_candle]),
+                    'exit_time': int(timestamps[exit_idx]),
+                    'duration_candles': int(exit_idx - entry_candle)
+                })
 
         return trades
 
@@ -556,74 +644,75 @@ class ParameterOptimizer:
         rr_target: float,
         n_candles: int
     ) -> Optional[Dict]:
-        """Simulate a single trade using numpy arrays for speed"""
-        entry_triggered = False
-        entry_candle = None
+        """Simulate a single trade using vectorized numpy operations"""
+        MAX_TRADE_DURATION = 1000
 
-        for j in range(entry_idx + 1, n_candles):
-            if not entry_triggered:
-                if direction == 'long':
-                    if lows[j] <= entry:
-                        entry_triggered = True
-                        entry_candle = j
-                else:
-                    if highs[j] >= entry:
-                        entry_triggered = True
-                        entry_candle = j
+        start_idx = entry_idx + 1
+        end_idx = min(entry_idx + MAX_TRADE_DURATION, n_candles)
+
+        if start_idx >= end_idx:
+            return None
+
+        h_slice = highs[start_idx:end_idx]
+        l_slice = lows[start_idx:end_idx]
+
+        # Vectorized entry search
+        if direction == 'long':
+            entry_mask = l_slice <= entry
+        else:
+            entry_mask = h_slice >= entry
+
+        if not np.any(entry_mask):
+            return None
+
+        entry_offset = np.argmax(entry_mask)
+        entry_candle = start_idx + entry_offset
+
+        # Search for SL/TP after entry
+        trade_start = entry_candle + 1
+        if trade_start >= end_idx:
+            return None
+
+        h_trade = highs[trade_start:end_idx]
+        l_trade = lows[trade_start:end_idx]
+
+        if direction == 'long':
+            sl_mask = l_trade <= stop_loss
+            tp_mask = h_trade >= take_profit
+        else:
+            sl_mask = h_trade >= stop_loss
+            tp_mask = l_trade <= take_profit
+
+        sl_idx = np.argmax(sl_mask) if np.any(sl_mask) else len(sl_mask)
+        tp_idx = np.argmax(tp_mask) if np.any(tp_mask) else len(tp_mask)
+
+        sl_hit = sl_mask[sl_idx] if sl_idx < len(sl_mask) else False
+        tp_hit = tp_mask[tp_idx] if tp_idx < len(tp_mask) else False
+
+        if not sl_hit and not tp_hit:
+            return None
+
+        if sl_hit and tp_hit:
+            if sl_idx <= tp_idx:
+                result, exit_idx, exit_price = 'loss', trade_start + sl_idx, stop_loss
             else:
-                # Check for SL or TP
-                if direction == 'long':
-                    if lows[j] <= stop_loss:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(stop_loss),
-                            'direction': direction,
-                            'result': 'loss',
-                            'rr_achieved': -1.0,
-                            'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
-                            'entry_time': int(timestamps[entry_candle]),
-                            'exit_time': int(timestamps[j]),
-                            'duration_candles': int(j - entry_candle)
-                        }
-                    elif highs[j] >= take_profit:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(take_profit),
-                            'direction': direction,
-                            'result': 'win',
-                            'rr_achieved': float(rr_target),
-                            'profit_pct': float(abs((take_profit - entry) / entry * 100)),
-                            'entry_time': int(timestamps[entry_candle]),
-                            'exit_time': int(timestamps[j]),
-                            'duration_candles': int(j - entry_candle)
-                        }
-                else:
-                    if highs[j] >= stop_loss:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(stop_loss),
-                            'direction': direction,
-                            'result': 'loss',
-                            'rr_achieved': -1.0,
-                            'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
-                            'entry_time': int(timestamps[entry_candle]),
-                            'exit_time': int(timestamps[j]),
-                            'duration_candles': int(j - entry_candle)
-                        }
-                    elif lows[j] <= take_profit:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(take_profit),
-                            'direction': direction,
-                            'result': 'win',
-                            'rr_achieved': float(rr_target),
-                            'profit_pct': float(abs((take_profit - entry) / entry * 100)),
-                            'entry_time': int(timestamps[entry_candle]),
-                            'exit_time': int(timestamps[j]),
-                            'duration_candles': int(j - entry_candle)
-                        }
+                result, exit_idx, exit_price = 'win', trade_start + tp_idx, take_profit
+        elif sl_hit:
+            result, exit_idx, exit_price = 'loss', trade_start + sl_idx, stop_loss
+        else:
+            result, exit_idx, exit_price = 'win', trade_start + tp_idx, take_profit
 
-        return None
+        return {
+            'entry_price': float(entry),
+            'exit_price': float(exit_price),
+            'direction': direction,
+            'result': result,
+            'rr_achieved': float(rr_target) if result == 'win' else -1.0,
+            'profit_pct': float(abs((exit_price - entry) / entry * 100) * (1 if result == 'win' else -1)),
+            'entry_time': int(timestamps[entry_candle]),
+            'exit_time': int(timestamps[exit_idx]),
+            'duration_candles': int(exit_idx - entry_candle)
+        }
 
     def _run_single_optimization(
         self,
@@ -1443,11 +1532,14 @@ class ParameterOptimizer:
         after_timestamp: int = None
     ) -> tuple:
         """
-        Fast trade simulation using numpy arrays, returning both closed and open trades.
+        Fast trade simulation using vectorized numpy, returning both closed and open trades.
 
         Returns:
             (closed_trades, open_trades)
         """
+        if not patterns:
+            return [], []
+
         closed_trades = []
         open_trades = []
         rr_target = params.get('rr_target', 2.0)
@@ -1458,6 +1550,7 @@ class ParameterOptimizer:
         lows = ohlcv['low']
         timestamps = ohlcv['timestamp']
         n_candles = len(highs)
+        MAX_TRADE_DURATION = 1000
 
         for pattern in patterns:
             entry_idx = pattern['detected_at']
@@ -1487,16 +1580,95 @@ class ParameterOptimizer:
                 take_profit = entry - (risk * rr_target)
                 direction = 'short'
 
-            trade = self._simulate_single_trade_with_open_fast(
-                highs, lows, timestamps, entry_idx, entry, stop_loss, take_profit,
-                direction, rr_target, n_candles
-            )
+            # Vectorized trade simulation
+            start_idx = entry_idx + 1
+            end_idx = min(entry_idx + MAX_TRADE_DURATION, n_candles)
 
-            if trade:
-                if trade.get('status') == 'open':
-                    open_trades.append(trade)
+            if start_idx >= end_idx:
+                continue
+
+            h_slice = highs[start_idx:end_idx]
+            l_slice = lows[start_idx:end_idx]
+
+            # Find entry trigger
+            if direction == 'long':
+                entry_mask = l_slice <= entry
+            else:
+                entry_mask = h_slice >= entry
+
+            if not np.any(entry_mask):
+                continue  # No entry triggered
+
+            entry_offset = np.argmax(entry_mask)
+            entry_candle = start_idx + entry_offset
+            entry_time = int(timestamps[entry_candle])
+
+            # Search for SL/TP after entry
+            trade_start = entry_candle + 1
+            if trade_start >= end_idx:
+                # Entry at edge - trade is open
+                open_trades.append({
+                    'status': 'open',
+                    'entry_price': float(entry),
+                    'stop_loss': float(stop_loss),
+                    'take_profit': float(take_profit),
+                    'direction': direction,
+                    'rr_target': float(rr_target),
+                    'entry_time': entry_time,
+                })
+                continue
+
+            h_trade = highs[trade_start:end_idx]
+            l_trade = lows[trade_start:end_idx]
+
+            if direction == 'long':
+                sl_mask = l_trade <= stop_loss
+                tp_mask = h_trade >= take_profit
+            else:
+                sl_mask = h_trade >= stop_loss
+                tp_mask = l_trade <= take_profit
+
+            sl_idx = np.argmax(sl_mask) if np.any(sl_mask) else len(sl_mask)
+            tp_idx = np.argmax(tp_mask) if np.any(tp_mask) else len(tp_mask)
+
+            sl_hit = sl_mask[sl_idx] if sl_idx < len(sl_mask) else False
+            tp_hit = tp_mask[tp_idx] if tp_idx < len(tp_mask) else False
+
+            if not sl_hit and not tp_hit:
+                # Trade not resolved - still open
+                open_trades.append({
+                    'status': 'open',
+                    'entry_price': float(entry),
+                    'stop_loss': float(stop_loss),
+                    'take_profit': float(take_profit),
+                    'direction': direction,
+                    'rr_target': float(rr_target),
+                    'entry_time': entry_time,
+                })
+                continue
+
+            # Determine outcome
+            if sl_hit and tp_hit:
+                if sl_idx <= tp_idx:
+                    result, exit_idx, exit_price = 'loss', trade_start + sl_idx, stop_loss
                 else:
-                    closed_trades.append(trade)
+                    result, exit_idx, exit_price = 'win', trade_start + tp_idx, take_profit
+            elif sl_hit:
+                result, exit_idx, exit_price = 'loss', trade_start + sl_idx, stop_loss
+            else:
+                result, exit_idx, exit_price = 'win', trade_start + tp_idx, take_profit
+
+            closed_trades.append({
+                'entry_price': float(entry),
+                'exit_price': float(exit_price),
+                'direction': direction,
+                'result': result,
+                'rr_achieved': float(rr_target) if result == 'win' else -1.0,
+                'profit_pct': float(abs((exit_price - entry) / entry * 100) * (1 if result == 'win' else -1)),
+                'entry_time': entry_time,
+                'exit_time': int(timestamps[exit_idx]),
+                'duration_candles': int(exit_idx - entry_candle)
+            })
 
         return closed_trades, open_trades
 
@@ -1513,76 +1685,34 @@ class ParameterOptimizer:
         rr_target: float,
         n_candles: int
     ) -> Optional[Dict]:
-        """Fast single trade simulation using numpy, returning open if not resolved"""
-        entry_triggered = False
-        entry_candle = None
-        entry_time = None
+        """Fast single trade simulation using vectorized numpy, returning open if not resolved"""
+        MAX_TRADE_DURATION = 1000
 
-        for j in range(entry_idx + 1, n_candles):
-            if not entry_triggered:
-                if direction == 'long' and lows[j] <= entry:
-                    entry_triggered = True
-                    entry_candle = j
-                    entry_time = int(timestamps[j])
-                elif direction == 'short' and highs[j] >= entry:
-                    entry_triggered = True
-                    entry_candle = j
-                    entry_time = int(timestamps[j])
-            else:
-                # Check for SL or TP
-                if direction == 'long':
-                    if lows[j] <= stop_loss:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(stop_loss),
-                            'direction': direction,
-                            'result': 'loss',
-                            'rr_achieved': -1.0,
-                            'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
-                            'entry_time': entry_time,
-                            'exit_time': int(timestamps[j]),
-                            'duration_candles': int(j - entry_candle)
-                        }
-                    elif highs[j] >= take_profit:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(take_profit),
-                            'direction': direction,
-                            'result': 'win',
-                            'rr_achieved': float(rr_target),
-                            'profit_pct': float(abs((take_profit - entry) / entry * 100)),
-                            'entry_time': entry_time,
-                            'exit_time': int(timestamps[j]),
-                            'duration_candles': int(j - entry_candle)
-                        }
-                else:
-                    if highs[j] >= stop_loss:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(stop_loss),
-                            'direction': direction,
-                            'result': 'loss',
-                            'rr_achieved': -1.0,
-                            'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
-                            'entry_time': entry_time,
-                            'exit_time': int(timestamps[j]),
-                            'duration_candles': int(j - entry_candle)
-                        }
-                    elif lows[j] <= take_profit:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(take_profit),
-                            'direction': direction,
-                            'result': 'win',
-                            'rr_achieved': float(rr_target),
-                            'profit_pct': float(abs((take_profit - entry) / entry * 100)),
-                            'entry_time': entry_time,
-                            'exit_time': int(timestamps[j]),
-                            'duration_candles': int(j - entry_candle)
-                        }
+        start_idx = entry_idx + 1
+        end_idx = min(entry_idx + MAX_TRADE_DURATION, n_candles)
 
-        # Trade not resolved - return as open
-        if entry_triggered:
+        if start_idx >= end_idx:
+            return None
+
+        h_slice = highs[start_idx:end_idx]
+        l_slice = lows[start_idx:end_idx]
+
+        # Vectorized entry search
+        if direction == 'long':
+            entry_mask = l_slice <= entry
+        else:
+            entry_mask = h_slice >= entry
+
+        if not np.any(entry_mask):
+            return None
+
+        entry_offset = np.argmax(entry_mask)
+        entry_candle = start_idx + entry_offset
+        entry_time = int(timestamps[entry_candle])
+
+        # Search for SL/TP after entry
+        trade_start = entry_candle + 1
+        if trade_start >= end_idx:
             return {
                 'status': 'open',
                 'entry_price': float(entry),
@@ -1593,7 +1723,54 @@ class ParameterOptimizer:
                 'entry_time': entry_time,
             }
 
-        return None
+        h_trade = highs[trade_start:end_idx]
+        l_trade = lows[trade_start:end_idx]
+
+        if direction == 'long':
+            sl_mask = l_trade <= stop_loss
+            tp_mask = h_trade >= take_profit
+        else:
+            sl_mask = h_trade >= stop_loss
+            tp_mask = l_trade <= take_profit
+
+        sl_idx = np.argmax(sl_mask) if np.any(sl_mask) else len(sl_mask)
+        tp_idx = np.argmax(tp_mask) if np.any(tp_mask) else len(tp_mask)
+
+        sl_hit = sl_mask[sl_idx] if sl_idx < len(sl_mask) else False
+        tp_hit = tp_mask[tp_idx] if tp_idx < len(tp_mask) else False
+
+        if not sl_hit and not tp_hit:
+            return {
+                'status': 'open',
+                'entry_price': float(entry),
+                'stop_loss': float(stop_loss),
+                'take_profit': float(take_profit),
+                'direction': direction,
+                'rr_target': float(rr_target),
+                'entry_time': entry_time,
+            }
+
+        if sl_hit and tp_hit:
+            if sl_idx <= tp_idx:
+                result, exit_idx, exit_price = 'loss', trade_start + sl_idx, stop_loss
+            else:
+                result, exit_idx, exit_price = 'win', trade_start + tp_idx, take_profit
+        elif sl_hit:
+            result, exit_idx, exit_price = 'loss', trade_start + sl_idx, stop_loss
+        else:
+            result, exit_idx, exit_price = 'win', trade_start + tp_idx, take_profit
+
+        return {
+            'entry_price': float(entry),
+            'exit_price': float(exit_price),
+            'direction': direction,
+            'result': result,
+            'rr_achieved': float(rr_target) if result == 'win' else -1.0,
+            'profit_pct': float(abs((exit_price - entry) / entry * 100) * (1 if result == 'win' else -1)),
+            'entry_time': entry_time,
+            'exit_time': int(timestamps[exit_idx]),
+            'duration_candles': int(exit_idx - entry_candle)
+        }
 
     def _resolve_open_trades_fast(
         self,

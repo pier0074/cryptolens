@@ -339,9 +339,12 @@ class LiquiditySweepDetector(PatternDetector):
 
         t2 = datetime.now(timezone.utc)
 
-        # For overlap tracking - list of (zone_low, zone_high) per direction
-        seen_bullish = []
-        seen_bearish = []
+        # For overlap tracking - use numpy arrays for fast vectorized checking
+        seen_bullish_lows = []
+        seen_bullish_highs = []
+        seen_bearish_lows = []
+        seen_bearish_highs = []
+        overlap_threshold = Config.DEFAULT_OVERLAP_THRESHOLD
 
         # Pre-extract swing indices for fast lookup
         # Swing points are already sorted by index from find_swing_points_fast
@@ -386,16 +389,31 @@ class LiquiditySweepDetector(PatternDetector):
                         if zone_size_pct < min_zone:
                             continue
 
-                        # Proper overlap check using _calculate_zone_overlap
+                        # Fast vectorized overlap check
                         is_valid = True
-                        if not skip_overlap:
-                            for seen_low, seen_high in seen_bullish:
-                                overlap = self._calculate_zone_overlap(seen_low, seen_high, zone_low, zone_high)
-                                if overlap >= Config.DEFAULT_OVERLAP_THRESHOLD:
-                                    is_valid = False
-                                    break
-                            if is_valid:
-                                seen_bullish.append((zone_low, zone_high))
+                        if not skip_overlap and seen_bullish_lows:
+                            # Vectorized overlap calculation
+                            seen_lows = np.array(seen_bullish_lows)
+                            seen_highs = np.array(seen_bullish_highs)
+                            # overlap_low = max(seen_low, zone_low), overlap_high = min(seen_high, zone_high)
+                            overlap_lows = np.maximum(seen_lows, zone_low)
+                            overlap_highs = np.minimum(seen_highs, zone_high)
+                            overlap_sizes = np.maximum(0, overlap_highs - overlap_lows)
+                            # smaller_zone = min(seen_size, zone_size)
+                            seen_sizes = seen_highs - seen_lows
+                            zone_size = zone_high - zone_low
+                            smaller_sizes = np.minimum(seen_sizes, zone_size)
+                            # overlap_pct = overlap_size / smaller_size
+                            with np.errstate(divide='ignore', invalid='ignore'):
+                                overlap_pcts = np.where(smaller_sizes > 0, overlap_sizes / smaller_sizes, 0)
+                            if np.any(overlap_pcts >= overlap_threshold):
+                                is_valid = False
+                            else:
+                                seen_bullish_lows.append(zone_low)
+                                seen_bullish_highs.append(zone_high)
+                        elif not skip_overlap:
+                            seen_bullish_lows.append(zone_low)
+                            seen_bullish_highs.append(zone_high)
 
                         if is_valid:
                             patterns.append({
@@ -430,16 +448,28 @@ class LiquiditySweepDetector(PatternDetector):
                         if zone_size_pct < min_zone:
                             continue
 
-                        # Proper overlap check using _calculate_zone_overlap
+                        # Fast vectorized overlap check
                         is_valid = True
-                        if not skip_overlap:
-                            for seen_low, seen_high in seen_bearish:
-                                overlap = self._calculate_zone_overlap(seen_low, seen_high, zone_low, zone_high)
-                                if overlap >= Config.DEFAULT_OVERLAP_THRESHOLD:
-                                    is_valid = False
-                                    break
-                            if is_valid:
-                                seen_bearish.append((zone_low, zone_high))
+                        if not skip_overlap and seen_bearish_lows:
+                            # Vectorized overlap calculation
+                            seen_lows = np.array(seen_bearish_lows)
+                            seen_highs = np.array(seen_bearish_highs)
+                            overlap_lows = np.maximum(seen_lows, zone_low)
+                            overlap_highs = np.minimum(seen_highs, zone_high)
+                            overlap_sizes = np.maximum(0, overlap_highs - overlap_lows)
+                            seen_sizes = seen_highs - seen_lows
+                            zone_size = zone_high - zone_low
+                            smaller_sizes = np.minimum(seen_sizes, zone_size)
+                            with np.errstate(divide='ignore', invalid='ignore'):
+                                overlap_pcts = np.where(smaller_sizes > 0, overlap_sizes / smaller_sizes, 0)
+                            if np.any(overlap_pcts >= overlap_threshold):
+                                is_valid = False
+                            else:
+                                seen_bearish_lows.append(zone_low)
+                                seen_bearish_highs.append(zone_high)
+                        elif not skip_overlap:
+                            seen_bearish_lows.append(zone_low)
+                            seen_bearish_highs.append(zone_high)
 
                         if is_valid:
                             patterns.append({

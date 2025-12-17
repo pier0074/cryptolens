@@ -1,0 +1,29 @@
+{
+  "timestamp": "2024-12-17T23:48",
+  "candles_total": 1369293,
+  "patterns_total": 17396,
+  "phase1_seconds": 13.6,
+  "phase2_seconds": 19.8,
+  "phase3_seconds": 85.8,
+  "total_seconds": 119.2,
+  "patterns_by_timeframe": {
+    "1m": {"candles": 1029655, "patterns": 4553, "detection_seconds": 13.01},
+    "5m": {"candles": 205930, "patterns": 3971, "detection_seconds": 3.73},
+    "15m": {"candles": 68643, "patterns": 2881, "detection_seconds": 1.59},
+    "30m": {"candles": 34321, "patterns": 2227, "detection_seconds": 0.79},
+    "1h": {"candles": 17160, "patterns": 1680, "detection_seconds": 0.39},
+    "2h": {"candles": 8580, "patterns": 1121, "detection_seconds": 0.16},
+    "4h": {"candles": 4290, "patterns": 753, "detection_seconds": 0.07},
+    "1d": {"candles": 714, "patterns": 210, "detection_seconds": 0.01}
+  },
+  "best_result": {
+    "symbol": "BTC/USDT",
+    "timeframe": "4h", 
+    "pattern_type": "imbalance",
+    "rr_target": 4.0,
+    "sl_buffer_pct": 25.0,
+    "win_rate": 26.64,
+    "total_profit_pct": 97.9,
+    "total_trades": 229
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "timestamp": "2025-12-17T22:59",
+  "candles_total": 1369293,
+  "patterns_total": 17396,
+  "phase1_seconds": 13.6,
+  "phase2_seconds": 20.6,
+  "phase3_seconds": 23.1,
+  "total_seconds": 57.3,
+  "best_result": {
+    "symbol": "BTC/USDT",
+    "timeframe": "4h",
+    "pattern_type": "imbalance",
+    "rr_target": 4.0,
+    "sl_buffer_pct": 25,
+    "win_rate": 26.32,
+    "total_profit_pct": 97.04,
+    "total_trades": 228
+  }
+}
