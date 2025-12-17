@@ -249,6 +249,211 @@ class TestIncrementalOptimization:
             assert result in ['skipped', 'new', 'updated']
 
 
+class TestSweepPhaseFactorization:
+    """Tests for the shared _run_sweep_phase used by both run_job and run_incremental"""
+
+    def test_sweep_phase_returns_results_and_best(self):
+        """Test that _run_sweep_phase returns results list and best result"""
+        opt = ParameterOptimizer()
+
+        # Create mock data cache and pattern cache
+        df = pd.DataFrame({
+            'timestamp': [i * 1000 for i in range(100)],
+            'open': [100.0] * 100,
+            'high': [105.0] * 100,
+            'low': [95.0] * 100,
+            'close': [102.0] * 100,
+        })
+        ohlcv_arrays = opt._df_to_arrays(df)
+        data_cache = {('TEST/USDT', '1h'): (df, ohlcv_arrays, 99000)}
+
+        # Empty pattern cache (no patterns detected)
+        pattern_cache = {('TEST/USDT', '1h', 'imbalance', 0.15, True): []}
+
+        parameter_grid = {
+            'rr_target': [2.0],
+            'sl_buffer_pct': [10.0],
+            'entry_method': ['zone_edge'],
+            'min_zone_pct': [0.15],
+            'use_overlap': [True],
+        }
+
+        results, best = opt._run_sweep_phase(
+            symbols=['TEST/USDT'],
+            timeframes=['1h'],
+            pattern_types=['imbalance'],
+            parameter_grid=parameter_grid,
+            data_cache=data_cache,
+            pattern_cache=pattern_cache,
+        )
+
+        assert isinstance(results, list)
+        assert len(results) == 1
+        assert results[0]['status'] == 'completed'
+        assert results[0]['symbol'] == 'TEST/USDT'
+
+    def test_sweep_phase_with_patterns_produces_trades(self):
+        """Test that sweep phase produces trades when patterns are present"""
+        opt = ParameterOptimizer()
+
+        # Create data with enough candles
+        n = 200
+        df = pd.DataFrame({
+            'timestamp': [i * 1000 for i in range(n)],
+            'open': [100.0] * n,
+            'high': [105.0] * n,
+            'low': [95.0] * n,
+            'close': [102.0] * n,
+        })
+        ohlcv_arrays = opt._df_to_arrays(df)
+        data_cache = {('TEST/USDT', '1h'): (df, ohlcv_arrays, (n - 1) * 1000)}
+
+        # Add a pattern that can be traded
+        patterns = [{
+            'direction': 'bullish',
+            'zone_high': 101.0,
+            'zone_low': 99.0,
+            'detected_at': 10,
+        }]
+        pattern_cache = {('TEST/USDT', '1h', 'imbalance', 0.15, True): patterns}
+
+        parameter_grid = {
+            'rr_target': [2.0],
+            'sl_buffer_pct': [10.0],
+            'entry_method': ['zone_edge'],
+            'min_zone_pct': [0.15],
+            'use_overlap': [True],
+        }
+
+        results, best = opt._run_sweep_phase(
+            symbols=['TEST/USDT'],
+            timeframes=['1h'],
+            pattern_types=['imbalance'],
+            parameter_grid=parameter_grid,
+            data_cache=data_cache,
+            pattern_cache=pattern_cache,
+        )
+
+        assert len(results) == 1
+        assert results[0]['status'] == 'completed'
+        assert 'trades' in results[0]
+        assert 'stats' in results[0]
+
+    def test_sweep_phase_handles_missing_data(self):
+        """Test that sweep phase handles missing data gracefully"""
+        opt = ParameterOptimizer()
+
+        # Empty data cache
+        data_cache = {('TEST/USDT', '1h'): (None, None, None)}
+        pattern_cache = {}
+
+        parameter_grid = {
+            'rr_target': [2.0],
+            'sl_buffer_pct': [10.0],
+            'entry_method': ['zone_edge'],
+            'min_zone_pct': [0.15],
+            'use_overlap': [True],
+        }
+
+        results, best = opt._run_sweep_phase(
+            symbols=['TEST/USDT'],
+            timeframes=['1h'],
+            pattern_types=['imbalance'],
+            parameter_grid=parameter_grid,
+            data_cache=data_cache,
+            pattern_cache=pattern_cache,
+        )
+
+        assert len(results) == 1
+        assert results[0]['status'] == 'failed'
+        assert 'error' in results[0]
+
+    def test_create_run_from_result_creates_new_run(self, app):
+        """Test that _create_run_from_result creates a new OptimizationRun"""
+        with app.app_context():
+            opt = ParameterOptimizer()
+
+            result = {
+                'symbol': 'TEST/USDT',
+                'timeframe': '1h',
+                'pattern_type': 'imbalance',
+                'params': {
+                    'rr_target': 2.0,
+                    'sl_buffer_pct': 10.0,
+                    'entry_method': 'zone_edge',
+                    'min_zone_pct': 0.15,
+                    'use_overlap': True,
+                },
+                'status': 'completed',
+                'trades': [],
+                'stats': {
+                    'total_trades': 0,
+                    'winning_trades': 0,
+                    'losing_trades': 0,
+                    'win_rate': 0,
+                    'avg_rr': 0,
+                    'total_profit_pct': 0,
+                    'max_drawdown': 0,
+                    'sharpe_ratio': 0,
+                    'profit_factor': 0,
+                    'avg_duration': 0,
+                },
+                'last_candle_ts': 1700000000000,
+            }
+
+            run = opt._create_run_from_result(None, result)
+            db.session.commit()
+
+            assert run.id is not None
+            assert run.symbol == 'TEST/USDT'
+            assert run.timeframe == '1h'
+            assert run.rr_target == 2.0
+            assert run.job_id is None  # Incremental mode
+
+    def test_create_run_from_result_updates_existing(self, app, sample_optimization_run):
+        """Test that _create_run_from_result updates an existing run"""
+        with app.app_context():
+            opt = ParameterOptimizer()
+            existing = OptimizationRun.query.get(sample_optimization_run)
+
+            result = {
+                'symbol': 'BTC/USDT',
+                'timeframe': '1h',
+                'pattern_type': 'imbalance',
+                'params': {
+                    'rr_target': 2.0,
+                    'sl_buffer_pct': 10.0,
+                    'entry_method': 'zone_edge',
+                    'min_zone_pct': 0.15,
+                    'use_overlap': True,
+                },
+                'status': 'completed',
+                'trades': [],
+                'stats': {
+                    'total_trades': 200,  # Different from existing
+                    'winning_trades': 120,
+                    'losing_trades': 80,
+                    'win_rate': 60.0,
+                    'avg_rr': 0.8,
+                    'total_profit_pct': 25.0,
+                    'max_drawdown': 3.0,
+                    'sharpe_ratio': 1.5,
+                    'profit_factor': 2.0,
+                    'avg_duration': 15.0,
+                },
+                'last_candle_ts': 1700500000000,
+            }
+
+            run = opt._create_run_from_result(None, result, existing_run=existing)
+            db.session.commit()
+
+            # Should be same run, updated values
+            assert run.id == existing.id
+            assert run.total_trades == 200
+            assert run.win_rate == 60.0
+            assert run.is_incremental is True
+
+
 # ========================================
 # Fixtures
 # ========================================

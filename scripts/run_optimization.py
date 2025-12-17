@@ -374,7 +374,7 @@ def main():
     parser = argparse.ArgumentParser(description='Run parameter optimization')
     parser.add_argument('--symbol', type=str, help='Single symbol to optimize')
     parser.add_argument('--all-symbols', action='store_true', help='Optimize all active symbols')
-    parser.add_argument('--timeframes', type=str, default='5m,15m,30m,1h,2h,4h,1d', help='Comma-separated timeframes')
+    parser.add_argument('--timeframes', type=str, default='1m,5m,15m,30m,1h,2h,4h,1d', help='Comma-separated timeframes')
     parser.add_argument('--patterns', type=str, default='imbalance,order_block,liquidity_sweep',
                         help='Comma-separated pattern types')
     parser.add_argument('--full', '-f', action='store_true',

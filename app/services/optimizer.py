@@ -152,85 +152,37 @@ class ParameterOptimizer:
         data_cache = self._load_candle_data_phase(symbols, timeframes)
         pattern_cache = self._detect_patterns_phase(symbols, timeframes, pattern_types, param_grid, data_cache)
 
-        # Phase 3: Parameter sweep
-        phase3_start = datetime.now(timezone.utc)
-        print(f"\n[Phase 3/3] Running parameter sweep ({job.total_runs:,} combinations)...")
-
-        # ===== PHASE 3: Fast parameter sweep =====
+        # Phase 3: Parameter sweep (shared implementation)
         try:
-            for symbol in symbols:
-                for timeframe in timeframes:
-                    cached = data_cache.get((symbol, timeframe), (None, None, None))
-                    df, ohlcv_arrays = cached[0], cached[1]
+            results, best_sweep_result = self._run_sweep_phase(
+                symbols, timeframes, pattern_types, param_grid,
+                data_cache, pattern_cache, progress_callback
+            )
 
-                    if df is None:
-                        # Mark all runs for this scope as failed
-                        for pattern_type in pattern_types:
-                            for params in param_combinations:
-                                self._create_failed_run(
-                                    job, symbol, timeframe, pattern_type,
-                                    dict(zip(param_keys, params)),
-                                    "Insufficient data"
-                                )
-                                failed += 1
-                                pending_commits += 1
-                        continue
+            # Create OptimizationRun records from sweep results
+            for r in results:
+                if r['status'] == 'completed':
+                    run = self._create_run_from_result(job, r)
+                    completed += 1
+                    if run.total_profit_pct > best_profit:
+                        best_profit = run.total_profit_pct
+                        best_result = run
+                else:
+                    self._create_failed_run(
+                        job, r['symbol'], r['timeframe'], r['pattern_type'],
+                        r['params'], r.get('error', 'Unknown error')
+                    )
+                    failed += 1
 
-                    for pattern_type in pattern_types:
-                        detector = _detectors.get(pattern_type)
-                        if not detector:
-                            for params in param_combinations:
-                                self._create_failed_run(
-                                    job, symbol, timeframe, pattern_type,
-                                    dict(zip(param_keys, params)),
-                                    f"Unknown pattern type: {pattern_type}"
-                                )
-                                failed += 1
-                                pending_commits += 1
-                            continue
+                pending_commits += 1
+                job.completed_runs = completed
+                job.failed_runs = failed
 
-                        for params in param_combinations:
-                            param_dict = dict(zip(param_keys, params))
+                if pending_commits >= BATCH_COMMIT_SIZE:
+                    db.session.commit()
+                    pending_commits = 0
 
-                            # Get cached patterns (already detected in Phase 2)
-                            min_zone_pct = param_dict.get('min_zone_pct', 0.15)
-                            use_overlap = param_dict.get('use_overlap', True)
-                            cache_key = (symbol, timeframe, pattern_type, min_zone_pct, use_overlap)
-                            patterns = pattern_cache.get(cache_key, [])
-
-                            try:
-                                result = self._run_single_optimization_fast(
-                                    job, ohlcv_arrays, symbol, timeframe, pattern_type,
-                                    patterns, param_dict
-                                )
-                                completed += 1
-                                pending_commits += 1
-
-                                # Track best result
-                                if result and result.total_profit_pct > best_profit:
-                                    best_profit = result.total_profit_pct
-                                    best_result = result
-
-                            except Exception as e:
-                                self._create_failed_run(
-                                    job, symbol, timeframe, pattern_type,
-                                    param_dict, str(e)
-                                )
-                                failed += 1
-                                pending_commits += 1
-
-                            # Update progress
-                            job.completed_runs = completed
-                            job.failed_runs = failed
-                            if progress_callback:
-                                progress_callback(completed + failed, job.total_runs)
-
-                            # Batch commit for performance (every BATCH_COMMIT_SIZE runs)
-                            if pending_commits >= BATCH_COMMIT_SIZE:
-                                db.session.commit()
-                                pending_commits = 0
-
-            # Final commit for any remaining
+            # Final commit
             if pending_commits > 0:
                 db.session.commit()
 
@@ -245,9 +197,6 @@ class ParameterOptimizer:
                     'total_profit_pct': best_result.total_profit_pct,
                     'total_trades': best_result.total_trades,
                 }
-
-            phase3_duration = (datetime.now(timezone.utc) - phase3_start).total_seconds()
-            print(f"  ✓ Phase 3 complete: {completed:,} runs in {phase3_duration:.1f}s")
 
             job.status = 'completed'
             job.completed_at = datetime.now(timezone.utc)
@@ -311,6 +260,131 @@ class ParameterOptimizer:
     # =========================================================================
     # SHARED OPTIMIZATION PHASES (used by both run_job and run_incremental)
     # =========================================================================
+
+    def _run_sweep_phase(
+        self,
+        symbols: List[str],
+        timeframes: List[str],
+        pattern_types: List[str],
+        parameter_grid: Dict,
+        data_cache: Dict,
+        pattern_cache: Dict,
+        progress_callback=None
+    ) -> Tuple[List[Dict], Dict]:
+        """
+        Phase 3: Run parameter sweep over all combinations.
+
+        This is the SINGLE implementation used by both run_job and run_incremental.
+        Returns raw results that callers can use to create/update records.
+
+        Returns:
+            Tuple of (results_list, best_result_dict)
+            Each result contains: symbol, timeframe, pattern_type, params, trades, stats
+        """
+        param_keys = list(parameter_grid.keys())
+        param_combinations = list(itertools.product(*parameter_grid.values()))
+        total = len(symbols) * len(timeframes) * len(pattern_types) * len(param_combinations)
+
+        phase3_start = datetime.now(timezone.utc)
+        print(f"\n[Phase 3/3] Running parameter sweep ({total:,} combinations)...", flush=True)
+
+        results = []
+        best_result = None
+        best_profit = float('-inf')
+        processed = 0
+
+        for symbol in symbols:
+            for timeframe in timeframes:
+                cached = data_cache.get((symbol, timeframe), (None, None, None))
+                df, ohlcv_arrays, last_candle_ts = cached[0], cached[1], cached[2] if len(cached) > 2 else None
+
+                if df is None:
+                    # Mark as failed
+                    for pattern_type in pattern_types:
+                        for params in param_combinations:
+                            processed += 1
+                            results.append({
+                                'symbol': symbol,
+                                'timeframe': timeframe,
+                                'pattern_type': pattern_type,
+                                'params': dict(zip(param_keys, params)),
+                                'status': 'failed',
+                                'error': 'Insufficient data',
+                                'last_candle_ts': None,
+                            })
+                            if progress_callback:
+                                progress_callback(processed, total)
+                    continue
+
+                for pattern_type in pattern_types:
+                    detector = _detectors.get(pattern_type)
+                    if not detector:
+                        for params in param_combinations:
+                            processed += 1
+                            results.append({
+                                'symbol': symbol,
+                                'timeframe': timeframe,
+                                'pattern_type': pattern_type,
+                                'params': dict(zip(param_keys, params)),
+                                'status': 'failed',
+                                'error': f'Unknown pattern type: {pattern_type}',
+                                'last_candle_ts': last_candle_ts,
+                            })
+                            if progress_callback:
+                                progress_callback(processed, total)
+                        continue
+
+                    for params in param_combinations:
+                        param_dict = dict(zip(param_keys, params))
+                        processed += 1
+
+                        try:
+                            # Get cached patterns
+                            min_zone_pct = param_dict.get('min_zone_pct', 0.15)
+                            use_overlap = param_dict.get('use_overlap', True)
+                            cache_key = (symbol, timeframe, pattern_type, min_zone_pct, use_overlap)
+                            patterns = pattern_cache.get(cache_key, [])
+
+                            # Simulate trades (single shared implementation)
+                            trades = self._simulate_trades_fast(ohlcv_arrays, patterns, param_dict)
+                            stats = self._calculate_statistics(trades)
+
+                            result = {
+                                'symbol': symbol,
+                                'timeframe': timeframe,
+                                'pattern_type': pattern_type,
+                                'params': param_dict,
+                                'status': 'completed',
+                                'trades': trades,
+                                'stats': stats,
+                                'last_candle_ts': last_candle_ts,
+                            }
+                            results.append(result)
+
+                            # Track best
+                            if stats['total_profit_pct'] > best_profit:
+                                best_profit = stats['total_profit_pct']
+                                best_result = result
+
+                        except Exception as e:
+                            results.append({
+                                'symbol': symbol,
+                                'timeframe': timeframe,
+                                'pattern_type': pattern_type,
+                                'params': param_dict,
+                                'status': 'failed',
+                                'error': str(e),
+                                'last_candle_ts': last_candle_ts,
+                            })
+
+                        if progress_callback:
+                            progress_callback(processed, total)
+
+        phase3_duration = (datetime.now(timezone.utc) - phase3_start).total_seconds()
+        completed = len([r for r in results if r['status'] == 'completed'])
+        print(f"  ✓ Phase 3 complete: {completed:,} runs in {phase3_duration:.1f}s", flush=True)
+
+        return results, best_result
 
     def _load_candle_data_phase(
         self,
@@ -772,9 +846,90 @@ class ParameterOptimizer:
 
         return run
 
+    def _create_run_from_result(
+        self,
+        job: Optional[OptimizationJob],
+        result: Dict,
+        existing_run: Optional[OptimizationRun] = None
+    ) -> OptimizationRun:
+        """
+        Create or update an OptimizationRun from sweep result.
+
+        Args:
+            job: OptimizationJob (can be None for incremental runs)
+            result: Dict from _run_sweep_phase containing stats, trades, params, etc.
+            existing_run: Optional existing run to update (for incremental mode)
+
+        Returns:
+            Created or updated OptimizationRun
+        """
+        stats = result['stats']
+        params = result['params']
+        last_candle_ts = result.get('last_candle_ts')
+
+        # Determine start/end dates
+        if job:
+            start_date = job.start_date
+            end_date = job.end_date
+        else:
+            start_date = datetime.fromtimestamp(last_candle_ts / 1000).strftime('%Y-%m-%d') if last_candle_ts else None
+            end_date = start_date
+
+        if existing_run:
+            # Update existing run
+            run = existing_run
+            run.total_trades = stats['total_trades']
+            run.winning_trades = stats['winning_trades']
+            run.losing_trades = stats['losing_trades']
+            run.win_rate = stats['win_rate']
+            run.avg_rr = stats['avg_rr']
+            run.total_profit_pct = stats['total_profit_pct']
+            run.max_drawdown = stats['max_drawdown']
+            run.sharpe_ratio = stats['sharpe_ratio']
+            run.profit_factor = stats['profit_factor']
+            run.avg_trade_duration = stats['avg_duration']
+            run.results_json = json.dumps(result['trades'][-100:])
+            run.last_candle_timestamp = last_candle_ts
+            run.end_date = end_date
+            run.updated_at = datetime.now(timezone.utc)
+            run.is_incremental = True
+        else:
+            # Create new run
+            run = OptimizationRun(
+                job_id=job.id if job else None,
+                symbol=result['symbol'],
+                timeframe=result['timeframe'],
+                pattern_type=result['pattern_type'],
+                start_date=start_date,
+                end_date=end_date,
+                rr_target=params.get('rr_target', 2.0),
+                sl_buffer_pct=params.get('sl_buffer_pct', 10.0),
+                tp_method=params.get('tp_method', 'fixed_rr'),
+                entry_method=params.get('entry_method', 'zone_edge'),
+                min_zone_pct=params.get('min_zone_pct', 0.15),
+                use_overlap=params.get('use_overlap', True),
+                status='completed',
+                total_trades=stats['total_trades'],
+                winning_trades=stats['winning_trades'],
+                losing_trades=stats['losing_trades'],
+                win_rate=stats['win_rate'],
+                avg_rr=stats['avg_rr'],
+                total_profit_pct=stats['total_profit_pct'],
+                max_drawdown=stats['max_drawdown'],
+                sharpe_ratio=stats['sharpe_ratio'],
+                profit_factor=stats['profit_factor'],
+                avg_trade_duration=stats['avg_duration'],
+                results_json=json.dumps(result['trades'][-100:]),
+                last_candle_timestamp=last_candle_ts,
+                is_incremental=job is None,
+            )
+            db.session.add(run)
+
+        return run
+
     def _create_failed_run(
         self,
-        job: OptimizationJob,
+        job: Optional[OptimizationJob],
         symbol: str,
         timeframe: str,
         pattern_type: str,
@@ -783,12 +938,12 @@ class ParameterOptimizer:
     ) -> OptimizationRun:
         """Create a failed run record"""
         run = OptimizationRun(
-            job_id=job.id,
+            job_id=job.id if job else None,
             symbol=symbol,
             timeframe=timeframe,
             pattern_type=pattern_type,
-            start_date=job.start_date,
-            end_date=job.end_date,
+            start_date=job.start_date if job else None,
+            end_date=job.end_date if job else None,
             rr_target=params.get('rr_target', 2.0),
             sl_buffer_pct=params.get('sl_buffer_pct', 10.0),
             tp_method=params.get('tp_method', 'fixed_rr'),
@@ -1101,14 +1256,10 @@ class ParameterOptimizer:
         progress_callback=None
     ) -> Dict:
         """
-        Run incremental optimization - only process new candles since last run.
+        Run incremental optimization - uses the same simulation as full mode.
 
-        Performance optimizations (matching full optimization):
-        1. Load candle data once per symbol/timeframe (not per parameter!)
-        2. Cache pattern detection per (symbol, timeframe, pattern_type, min_zone_pct, use_overlap)
-        3. Use numpy arrays for fast trade simulation
-        4. Batch DB commits every 50 runs
-        5. Pre-load existing runs into dict for O(1) lookups (instead of individual DB queries)
+        Uses the SAME _run_sweep_phase as run_job for consistent results.
+        The only difference is how records are created/updated.
 
         Returns:
             Summary dict with results
@@ -1116,22 +1267,14 @@ class ParameterOptimizer:
         if parameter_grid is None:
             parameter_grid = QUICK_PARAMETER_GRID
 
-        param_keys = list(parameter_grid.keys())
-        param_combinations = list(itertools.product(*parameter_grid.values()))
-
         updated = 0
         new_runs = 0
-        skipped = 0
         errors = 0
         pending_commits = 0
         best_result = None
         best_profit = float('-inf')
 
-        total = len(symbols) * len(timeframes) * len(pattern_types) * len(param_combinations)
-        processed = 0
-
-        # Pre-load all existing runs into a dict for O(1) lookups (major performance optimization)
-        # Key: (symbol, timeframe, pattern_type, rr_target, sl_buffer_pct) -> OptimizationRun
+        # Pre-load all existing runs into a dict for O(1) lookups
         existing_runs = {}
         all_existing = OptimizationRun.query.filter(
             OptimizationRun.symbol.in_(symbols),
@@ -1147,83 +1290,41 @@ class ParameterOptimizer:
         data_cache = self._load_candle_data_phase(symbols, timeframes)
         pattern_cache = self._detect_patterns_phase(symbols, timeframes, pattern_types, parameter_grid, data_cache)
 
-        # Phase 3: Parameter sweep
-        phase3_start = datetime.now(timezone.utc)
-        print(f"\n[Phase 3/3] Running parameter sweep ({total:,} combinations)...")
+        # Phase 3: Parameter sweep (SAME implementation as run_job)
+        results, best_sweep_result = self._run_sweep_phase(
+            symbols, timeframes, pattern_types, parameter_grid,
+            data_cache, pattern_cache, progress_callback
+        )
 
-        for symbol in symbols:
-            for timeframe in timeframes:
-                df, ohlcv_arrays, last_candle_ts = data_cache.get((symbol, timeframe), (None, None, None))
+        # Create/update records from sweep results
+        for r in results:
+            params = r['params']
+            rr_target = params.get('rr_target', 2.0)
+            sl_buffer_pct = params.get('sl_buffer_pct', 10.0)
+            existing_key = (r['symbol'], r['timeframe'], r['pattern_type'], rr_target, sl_buffer_pct)
+            existing = existing_runs.get(existing_key)
 
-                if df is None:
-                    skipped += len(pattern_types) * len(param_combinations)
-                    processed += len(pattern_types) * len(param_combinations)
-                    if progress_callback:
-                        progress_callback(processed, total)
-                    continue
+            if r['status'] == 'completed':
+                run = self._create_run_from_result(None, r, existing_run=existing)
+                if existing:
+                    updated += 1
+                else:
+                    new_runs += 1
+                    existing_runs[existing_key] = run
 
-                for pattern_type in pattern_types:
-                    detector = _detectors.get(pattern_type)
-                    if not detector:
-                        errors += len(param_combinations)
-                        processed += len(param_combinations)
-                        continue
+                if run.total_profit_pct is not None and run.total_profit_pct > best_profit:
+                    best_profit = run.total_profit_pct
+                    best_result = run
+            else:
+                errors += 1
 
-                    for params in param_combinations:
-                        param_dict = dict(zip(param_keys, params))
-                        processed += 1
-
-                        try:
-                            min_zone_pct = param_dict.get('min_zone_pct', 0.15)
-                            use_overlap = param_dict.get('use_overlap', True)
-                            pattern_cache_key = (symbol, timeframe, pattern_type, min_zone_pct, use_overlap)
-                            patterns = pattern_cache.get(pattern_cache_key, [])
-
-                            rr_target = param_dict.get('rr_target', 2.0)
-                            sl_buffer_pct = param_dict.get('sl_buffer_pct', 10.0)
-                            existing_key = (symbol, timeframe, pattern_type, rr_target, sl_buffer_pct)
-                            existing = existing_runs.get(existing_key)
-
-                            result, run = self._run_incremental_single_fast(
-                                symbol, timeframe, pattern_type,
-                                df, ohlcv_arrays, last_candle_ts, patterns, param_dict,
-                                existing
-                            )
-
-                            if result == 'updated':
-                                updated += 1
-                            elif result == 'new':
-                                new_runs += 1
-                                if run:
-                                    existing_runs[existing_key] = run
-                            else:
-                                skipped += 1
-
-                            if run and run.total_profit_pct is not None and run.total_profit_pct > best_profit:
-                                best_profit = run.total_profit_pct
-                                best_result = run
-
-                            pending_commits += 1
-
-                        except Exception as e:
-                            log_system(
-                                f"Incremental error {symbol}/{timeframe}/{pattern_type}: {e}",
-                                level='ERROR'
-                            )
-                            errors += 1
-
-                        if progress_callback:
-                            progress_callback(processed, total)
-
-                        if pending_commits >= BATCH_COMMIT_SIZE:
-                            db.session.commit()
-                            pending_commits = 0
+            pending_commits += 1
+            if pending_commits >= BATCH_COMMIT_SIZE:
+                db.session.commit()
+                pending_commits = 0
 
         if pending_commits > 0:
             db.session.commit()
-
-        phase3_duration = (datetime.now(timezone.utc) - phase3_start).total_seconds()
-        print(f"  ✓ Phase 3 complete: {updated + new_runs + skipped:,} runs in {phase3_duration:.1f}s")
 
         # Build best result dict
         best_result_dict = None
@@ -1243,9 +1344,9 @@ class ParameterOptimizer:
             'success': True,
             'updated': updated,
             'new_runs': new_runs,
-            'skipped': skipped,
+            'skipped': 0,  # No longer skipping - always recompute
             'errors': errors,
-            'total': total,
+            'total': len(results),
             'best_result': best_result_dict,
         }
 
