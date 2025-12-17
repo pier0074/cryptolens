@@ -395,9 +395,20 @@ aggregate_candles_realtime = aggregate_new_candles
 aggregate_candles_windowed = aggregate_new_candles
 
 
-def get_candles_as_dataframe(symbol: str, timeframe: str, limit: int = 500) -> pd.DataFrame:
+def get_candles_as_dataframe(
+    symbol: str,
+    timeframe: str,
+    limit: int = 500,
+    verified_only: bool = False
+) -> pd.DataFrame:
     """
     Get candles as a pandas DataFrame for analysis (optimized: direct SQL to DataFrame)
+
+    Args:
+        symbol: Trading pair (e.g., 'BTC/USDT')
+        timeframe: Candle timeframe (e.g., '1h', '4h')
+        limit: Maximum number of candles to return
+        verified_only: If True, only return verified candles (recommended for backtesting)
 
     Returns:
         DataFrame with columns: timestamp, open, high, low, close, volume
@@ -406,13 +417,23 @@ def get_candles_as_dataframe(symbol: str, timeframe: str, limit: int = 500) -> p
     if not sym:
         return pd.DataFrame()
 
-    query = text("""
-        SELECT timestamp, open, high, low, close, volume
-        FROM candles
-        WHERE symbol_id = :symbol_id AND timeframe = :timeframe
-        ORDER BY timestamp DESC
-        LIMIT :limit
-    """)
+    if verified_only:
+        query = text("""
+            SELECT timestamp, open, high, low, close, volume
+            FROM candles
+            WHERE symbol_id = :symbol_id AND timeframe = :timeframe
+              AND verified_at IS NOT NULL
+            ORDER BY timestamp DESC
+            LIMIT :limit
+        """)
+    else:
+        query = text("""
+            SELECT timestamp, open, high, low, close, volume
+            FROM candles
+            WHERE symbol_id = :symbol_id AND timeframe = :timeframe
+            ORDER BY timestamp DESC
+            LIMIT :limit
+        """)
 
     df = pd.read_sql(
         query,

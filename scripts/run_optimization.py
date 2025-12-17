@@ -37,24 +37,46 @@ from app.services.optimizer import optimizer
 
 
 def get_date_range_for_symbol(symbol_name, timeframe='1h'):
-    """Get the available date range for a symbol from candles."""
+    """
+    Get the available date range for a symbol from VERIFIED candles only.
+
+    Verified candles have passed health checks and contain accurate data.
+    Using unverified candles could lead to incorrect backtest results.
+    """
     symbol = Symbol.query.filter_by(symbol=symbol_name).first()
     if not symbol:
         return None, None
 
-    # Get earliest and latest candle
+    # Get earliest verified candle
     earliest = Candle.query.filter_by(
         symbol_id=symbol.id,
         timeframe=timeframe
+    ).filter(
+        Candle.verified_at.isnot(None)
     ).order_by(Candle.timestamp.asc()).first()
 
+    # Get latest verified candle (NOT just the latest candle)
     latest = Candle.query.filter_by(
         symbol_id=symbol.id,
         timeframe=timeframe
+    ).filter(
+        Candle.verified_at.isnot(None)
     ).order_by(Candle.timestamp.desc()).first()
 
     if not earliest or not latest:
-        return None, None
+        # Fallback to any candles if no verified candles exist
+        earliest = Candle.query.filter_by(
+            symbol_id=symbol.id,
+            timeframe=timeframe
+        ).order_by(Candle.timestamp.asc()).first()
+
+        latest = Candle.query.filter_by(
+            symbol_id=symbol.id,
+            timeframe=timeframe
+        ).order_by(Candle.timestamp.desc()).first()
+
+        if not earliest or not latest:
+            return None, None
 
     start_date = datetime.fromtimestamp(earliest.timestamp / 1000, tz=timezone.utc)
     end_date = datetime.fromtimestamp(latest.timestamp / 1000, tz=timezone.utc)

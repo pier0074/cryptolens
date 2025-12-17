@@ -276,9 +276,19 @@ class ParameterOptimizer:
     def _get_candle_data(
         self, symbol: str, timeframe: str, start_date: str, end_date: str
     ) -> Optional[pd.DataFrame]:
-        """Get candle data for a symbol/timeframe within date range"""
+        """
+        Get candle data for a symbol/timeframe within date range.
+
+        Uses verified candles only to ensure backtest accuracy.
+        Falls back to all candles if no verified candles exist.
+        """
         try:
-            df = get_candles_as_dataframe(symbol, timeframe, limit=10000)
+            # Try verified candles first (recommended for accurate backtesting)
+            df = get_candles_as_dataframe(symbol, timeframe, limit=50000, verified_only=True)
+
+            if df.empty:
+                # Fallback to all candles if no verified data exists
+                df = get_candles_as_dataframe(symbol, timeframe, limit=50000, verified_only=False)
 
             if df.empty:
                 return None
@@ -994,8 +1004,11 @@ class ParameterOptimizer:
             symbol, timeframe, pattern_type, rr_target, sl_buffer_pct
         )
 
-        # Get all available candles
-        df = get_candles_as_dataframe(symbol, timeframe, limit=10000)
+        # Get all available VERIFIED candles (for accurate incremental updates)
+        df = get_candles_as_dataframe(symbol, timeframe, limit=50000, verified_only=True)
+        if df is None or df.empty:
+            # Fallback to all candles if no verified data
+            df = get_candles_as_dataframe(symbol, timeframe, limit=50000, verified_only=False)
         if df is None or df.empty or len(df) < 20:
             return 'skipped'
 
