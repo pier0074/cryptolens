@@ -25,6 +25,9 @@ from app import db
 class LiquiditySweepDetector(PatternDetector):
     """Detector for Liquidity Sweep patterns"""
 
+    def __init__(self):
+        super().__init__()
+
     @property
     def pattern_type(self) -> str:
         return 'liquidity_sweep'

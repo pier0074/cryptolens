@@ -23,6 +23,9 @@ from app import db
 class OrderBlockDetector(PatternDetector):
     """Detector for Order Block patterns"""
 
+    def __init__(self):
+        super().__init__()
+
     @property
     def pattern_type(self) -> str:
         return 'order_block'

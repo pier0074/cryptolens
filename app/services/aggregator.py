@@ -5,6 +5,7 @@ Aggregates 1m candles into higher timeframes (5m, 15m, 30m, 1h, 2h, 4h, 1d)
 import logging
 import pandas as pd
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from app import db
 from app.models import Symbol, Candle
 
@@ -111,21 +112,25 @@ def aggregate_candles_realtime(symbol: str, from_tf: str = '1m', to_tf: str = '5
     if existing:
         return 0
 
-    # Create the new candle
-    candle = Candle(
-        symbol_id=sym.id,
-        timeframe=to_tf,
-        timestamp=timestamp,
-        open=last_row['open'],
-        high=last_row['high'],
-        low=last_row['low'],
-        close=last_row['close'],
-        volume=last_row['volume']
-    )
-    db.session.add(candle)
-    db.session.commit()
-
-    return 1
+    # Create the new candle with upsert semantics (handle race conditions)
+    try:
+        candle = Candle(
+            symbol_id=sym.id,
+            timeframe=to_tf,
+            timestamp=timestamp,
+            open=last_row['open'],
+            high=last_row['high'],
+            low=last_row['low'],
+            close=last_row['close'],
+            volume=last_row['volume']
+        )
+        db.session.add(candle)
+        db.session.commit()
+        return 1
+    except IntegrityError:
+        # Candle was inserted by another process between check and insert
+        db.session.rollback()
+        return 0
 
 
 def aggregate_candles(symbol: str, from_tf: str = '1m', to_tf: str = '5m',
@@ -222,7 +227,7 @@ def aggregate_candles(symbol: str, from_tf: str = '1m', to_tf: str = '5m',
     if progress_callback:
         progress_callback('checking', 1, 1)
 
-    # Save aggregated candles in batches
+    # Save aggregated candles in batches with proper error handling
     count = 0
     batch_count = 0
     COMMIT_BATCH = 1000
@@ -251,13 +256,29 @@ def aggregate_candles(symbol: str, from_tf: str = '1m', to_tf: str = '5m',
 
         # Commit in batches for performance
         if batch_count >= COMMIT_BATCH:
-            db.session.commit()
+            try:
+                db.session.commit()
+            except IntegrityError:
+                # Handle race condition - some candles already exist
+                db.session.rollback()
+                # Re-fetch existing timestamps and continue
+                existing_timestamps = set(
+                    c.timestamp for c in Candle.query.filter_by(
+                        symbol_id=sym.id,
+                        timeframe=to_tf
+                    ).with_entities(Candle.timestamp).all()
+                )
             batch_count = 0
 
         if progress_callback and idx % 500 == 0:
             progress_callback('saving', idx, total_rows)
 
-    db.session.commit()
+    # Final commit with error handling
+    try:
+        db.session.commit()
+    except IntegrityError:
+        db.session.rollback()
+        logger.warning(f"Some candles already existed for {symbol}/{to_tf}")
 
     if progress_callback:
         progress_callback('saving', total_rows, total_rows)

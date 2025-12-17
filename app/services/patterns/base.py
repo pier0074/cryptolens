@@ -11,6 +11,46 @@ from app.config import Config
 class PatternDetector(ABC):
     """Abstract base class for pattern detection"""
 
+    def __init__(self):
+        # Cache for existing patterns to avoid N+1 queries
+        self._existing_patterns_cache = {}
+
+    def _get_cached_patterns(self, symbol_id: int, timeframe: str, direction: str) -> list:
+        """
+        Get cached active patterns for overlap checking.
+        Call prefetch_existing_patterns() before detection to populate cache.
+        """
+        key = (symbol_id, timeframe, self.pattern_type, direction)
+        return self._existing_patterns_cache.get(key, [])
+
+    def prefetch_existing_patterns(self, symbol_id: int, timeframe: str):
+        """
+        Prefetch all active patterns for a symbol/timeframe to avoid N+1 queries.
+        Call this once before running detection loop.
+        """
+        from app.models import Pattern
+
+        patterns = Pattern.query.filter_by(
+            symbol_id=symbol_id,
+            timeframe=timeframe,
+            pattern_type=self.pattern_type,
+            status='active'
+        ).all()
+
+        # Cache by direction
+        for pattern in patterns:
+            key = (symbol_id, timeframe, self.pattern_type, pattern.direction)
+            if key not in self._existing_patterns_cache:
+                self._existing_patterns_cache[key] = []
+            self._existing_patterns_cache[key].append({
+                'zone_low': pattern.zone_low,
+                'zone_high': pattern.zone_high
+            })
+
+    def clear_pattern_cache(self):
+        """Clear the pattern cache after detection completes."""
+        self._existing_patterns_cache = {}
+
     def is_zone_tradeable(self, zone_low: float, zone_high: float) -> bool:
         """
         Check if a zone is large enough to be tradeable.
@@ -41,6 +81,8 @@ class PatternDetector(ABC):
         Check if there's already an active pattern with overlapping zone.
         This prevents duplicate patterns with nearly identical zones.
 
+        Uses cache if prefetch_existing_patterns() was called, otherwise queries DB.
+
         Args:
             symbol_id: Symbol ID
             timeframe: Timeframe
@@ -52,10 +94,24 @@ class PatternDetector(ABC):
         Returns:
             True if overlapping pattern exists, False otherwise
         """
-        from app.models import Pattern
-
         if threshold is None:
             threshold = self.get_overlap_threshold(timeframe)
+
+        # Try to use cache first (populated by prefetch_existing_patterns)
+        cache_key = (symbol_id, timeframe, self.pattern_type, direction)
+        if cache_key in self._existing_patterns_cache:
+            existing_patterns = self._existing_patterns_cache[cache_key]
+            for existing in existing_patterns:
+                overlap = self._calculate_zone_overlap(
+                    existing['zone_low'], existing['zone_high'],
+                    zone_low, zone_high
+                )
+                if overlap >= threshold:
+                    return True
+            return False
+
+        # Fallback to DB query if cache not populated
+        from app.models import Pattern
 
         existing_patterns = Pattern.query.filter_by(
             symbol_id=symbol_id,

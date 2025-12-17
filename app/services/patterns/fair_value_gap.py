@@ -17,6 +17,9 @@ from app import db
 class FVGDetector(PatternDetector):
     """Detector for Fair Value Gaps (FVG)"""
 
+    def __init__(self):
+        super().__init__()
+
     @property
     def pattern_type(self) -> str:
         return 'imbalance'  # Keep database value for compatibility

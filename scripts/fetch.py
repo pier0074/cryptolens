@@ -74,7 +74,9 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
             logger.warning(f"{symbol_name}: Symbol not found in database")
             return {'symbol': symbol_name, 'new': 0, 'patterns': 0}
 
-        # 1. Save new candles
+        # 1. Save new candles with IntegrityError handling
+        from sqlalchemy.exc import IntegrityError
+
         timestamps = [c[0] for c in ohlcv]
         existing = set(
             c.timestamp for c in Candle.query.filter(
@@ -99,8 +101,13 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
             new_count += 1
 
         if new_count > 0:
-            db.session.commit()
-            logger.debug(f"{symbol_name}: Saved {new_count} new 1m candles")
+            try:
+                db.session.commit()
+                logger.debug(f"{symbol_name}: Saved {new_count} new 1m candles")
+            except IntegrityError:
+                db.session.rollback()
+                logger.warning(f"{symbol_name}: Some candles already existed (race condition)")
+                new_count = 0
 
         # 2. Aggregate ALL higher timeframes
         # Use full aggregation if catching up (many new candles), otherwise realtime (faster)
@@ -113,14 +120,19 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
                 else:
                     aggregate_candles_realtime(symbol_name, '1m', tf)
             except Exception as e:
+                # Ensure session is clean before continuing
+                db.session.rollback()
                 logger.error(f"{symbol_name}: Aggregation failed for {tf}: {e}")
                 if verbose:
                     print(f"  Warning: Aggregation failed for {tf}: {e}")
 
         # 3. Detect patterns on all timeframes
-        # Scan limit = number of candles fetched + context buffer
+        # OPTIMIZED: Load DataFrame once per timeframe, share across all detectors
+        # Also prefetch existing patterns to avoid N+1 queries
         patterns_found = 0
         if new_count > 0:
+            from app.services.aggregator import get_candles_as_dataframe
+
             detectors = get_all_detectors()
             scan_limit = len(ohlcv) + 50  # Fetched candles + context
 
@@ -132,15 +144,35 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
                 }.get(tf, 1)
                 tf_limit = max(50, scan_limit // tf_multiplier + 10)
 
+                # Load DataFrame ONCE per timeframe (not 3x per detector)
+                try:
+                    df = get_candles_as_dataframe(symbol_name, tf, tf_limit)
+                except Exception as e:
+                    logger.error(f"{symbol_name}: Failed to load candles for {tf}: {e}")
+                    continue
+
+                # Prefetch existing patterns for each detector to avoid N+1 queries
                 for detector in detectors:
                     try:
-                        patterns = detector.detect(symbol_name, tf, limit=tf_limit)
+                        detector.prefetch_existing_patterns(sym.id, tf)
+                    except Exception:
+                        pass  # Will fall back to DB queries
+
+                for detector in detectors:
+                    try:
+                        # Pass pre-loaded DataFrame to avoid redundant queries
+                        patterns = detector.detect(symbol_name, tf, limit=tf_limit, df=df)
                         if patterns:
                             patterns_found += len(patterns)
                     except Exception as e:
+                        # Ensure session is clean before continuing
+                        db.session.rollback()
                         logger.error(f"{symbol_name}: Pattern detection failed for {detector.__class__.__name__} on {tf}: {e}")
                         if verbose:
                             print(f"  Warning: Pattern detection failed for {detector.__class__.__name__} on {tf}: {e}")
+                    finally:
+                        # Clear cache after detection
+                        detector.clear_pattern_cache()
 
         # 4. Update pattern status with current price
         if ohlcv:
@@ -152,6 +184,8 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
                         try:
                             detector.update_pattern_status(symbol_name, tf, current_price)
                         except Exception as e:
+                            # Ensure session is clean before continuing
+                            db.session.rollback()
                             logger.error(f"{symbol_name}: Pattern status update failed for {detector.__class__.__name__} on {tf}: {e}")
                             if verbose:
                                 print(f"  Warning: Pattern status update failed for {detector.__class__.__name__} on {tf}: {e}")
