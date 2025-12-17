@@ -327,7 +327,7 @@ class ParameterOptimizer:
         total_candles = 0
         phase_start = datetime.now(timezone.utc)
 
-        print(f"\n[Phase 1/3] Loading candle data ({len(symbols)} symbols × {len(timeframes)} timeframes)...")
+        print(f"\n[Phase 1/3] Loading candle data ({len(symbols)} symbols × {len(timeframes)} timeframes)...", flush=True)
 
         for symbol in symbols:
             for timeframe in timeframes:
@@ -342,13 +342,13 @@ class ParameterOptimizer:
                     last_candle_ts = int(df['timestamp'].max())
                     data_cache[(symbol, timeframe)] = (df, ohlcv_arrays, last_candle_ts)
                     total_candles += len(df)
-                    print(f"  {symbol} {timeframe}: {len(df):,} candles ({query_duration:.2f}s)")
+                    print(f"  {symbol} {timeframe}: {len(df):,} candles ({query_duration:.2f}s)", flush=True)
                 else:
                     data_cache[(symbol, timeframe)] = (None, None, None)
                     print(f"  {symbol} {timeframe}: No data ({query_duration:.2f}s)")
 
         phase_duration = (datetime.now(timezone.utc) - phase_start).total_seconds()
-        print(f"  ✓ Phase 1 complete: {total_candles:,} candles in {phase_duration:.1f}s")
+        print(f"  ✓ Phase 1 complete: {total_candles:,} candles in {phase_duration:.1f}s", flush=True)
 
         return data_cache
 
@@ -373,39 +373,60 @@ class ParameterOptimizer:
         min_zone_pcts = parameter_grid.get('min_zone_pct', [0.15])
         use_overlaps = parameter_grid.get('use_overlap', [True])
 
-        print(f"\n[Phase 2/3] Detecting patterns ({len(pattern_types)} types × {len(timeframes)} timeframes)...")
+        print(f"\n[Phase 2/3] Detecting patterns ({len(pattern_types)} types × {len(timeframes)} timeframes)...", flush=True)
 
         for symbol in symbols:
             for timeframe in timeframes:
                 cached = data_cache.get((symbol, timeframe), (None, None, None))
                 df = cached[0] if len(cached) >= 1 else None
                 if df is None:
+                    print(f"  {symbol} {timeframe}: SKIPPED (no data)", flush=True)
                     continue
 
+                n_candles = len(df)
                 tf_start = datetime.now(timezone.utc)
                 tf_patterns = 0
+                pattern_details = []
+
+                print(f"  {symbol} {timeframe}: Processing {n_candles:,} candles...", flush=True)
+
                 for pattern_type in pattern_types:
                     detector = _detectors.get(pattern_type)
                     if not detector:
+                        print(f"    ⚠ Unknown pattern type: {pattern_type}", flush=True)
                         continue
+
+                    pt_start = datetime.now(timezone.utc)
+                    pt_count = 0
 
                     for min_zone_pct in min_zone_pcts:
                         for use_overlap in use_overlaps:
+                            detect_start = datetime.now(timezone.utc)
                             cache_key = (symbol, timeframe, pattern_type, min_zone_pct, use_overlap)
                             patterns = detector.detect_historical(
                                 df,
                                 min_zone_pct=min_zone_pct,
                                 skip_overlap=not use_overlap
                             )
+                            detect_duration = (datetime.now(timezone.utc) - detect_start).total_seconds()
                             pattern_cache[cache_key] = patterns
+                            pt_count += len(patterns)
                             tf_patterns += len(patterns)
                             total_patterns += len(patterns)
 
+                            # Log if detection takes more than 1 second
+                            if detect_duration > 1.0:
+                                print(f"    → {pattern_type} (zone={min_zone_pct}, overlap={use_overlap}): "
+                                      f"{len(patterns)} patterns in {detect_duration:.2f}s", flush=True)
+
+                    pt_duration = (datetime.now(timezone.utc) - pt_start).total_seconds()
+                    pattern_details.append(f"{pattern_type}:{pt_count}({pt_duration:.1f}s)")
+
                 tf_duration = (datetime.now(timezone.utc) - tf_start).total_seconds()
-                print(f"  {symbol} {timeframe}: {tf_patterns:,} patterns ({tf_duration:.2f}s)")
+                print(f"    ✓ Done: {tf_patterns:,} patterns in {tf_duration:.2f}s [{', '.join(pattern_details)}]", flush=True)
 
         phase_duration = (datetime.now(timezone.utc) - phase_start).total_seconds()
-        print(f"  ✓ Phase 2 complete: {total_patterns:,} patterns in {phase_duration:.1f}s")
+        print(f"  ✓ Phase 2 complete: {total_patterns:,} patterns in {phase_duration:.1f}s", flush=True)
 
         return pattern_cache
 

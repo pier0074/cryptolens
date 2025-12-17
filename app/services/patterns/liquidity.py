@@ -69,6 +69,53 @@ class LiquiditySweepDetector(PatternDetector):
 
         return swing_highs, swing_lows
 
+    def find_swing_points_fast(self, highs: 'np.ndarray', lows: 'np.ndarray',
+                                timestamps: 'np.ndarray', lookback: int = 5) -> tuple:
+        """Find swing highs and swing lows using pandas rolling (vectorized, fast)"""
+        import numpy as np
+
+        n = len(highs)
+        if n < 2 * lookback + 1:
+            return [], []
+
+        window_size = 2 * lookback + 1
+
+        # Use pandas rolling for vectorized max/min
+        high_series = pd.Series(highs)
+        low_series = pd.Series(lows)
+
+        rolling_max = high_series.rolling(window_size, center=True).max().values
+        rolling_min = low_series.rolling(window_size, center=True).min().values
+
+        # Swing high: equals rolling max (close enough for backtesting)
+        is_swing_high = (highs == rolling_max)
+        is_swing_low = (lows == rolling_min)
+
+        # Filter to valid range
+        valid_range = np.zeros(n, dtype=bool)
+        valid_range[lookback:n - lookback] = True
+        is_swing_high = is_swing_high & valid_range
+        is_swing_low = is_swing_low & valid_range
+
+        # Get indices
+        swing_high_indices = np.where(is_swing_high)[0]
+        swing_low_indices = np.where(is_swing_low)[0]
+
+        # Convert to list of dicts
+        swing_highs = [
+            {'index': int(i), 'price': float(highs[i]),
+             'timestamp': int(timestamps[i]) if timestamps is not None else None}
+            for i in swing_high_indices
+        ]
+
+        swing_lows = [
+            {'index': int(i), 'price': float(lows[i]),
+             'timestamp': int(timestamps[i]) if timestamps is not None else None}
+            for i in swing_low_indices
+        ]
+
+        return swing_highs, swing_lows
+
     def detect(
         self,
         symbol: str,
@@ -257,7 +304,7 @@ class LiquiditySweepDetector(PatternDetector):
     ) -> List[Dict[str, Any]]:
         """
         Detect Liquidity Sweep patterns in historical data WITHOUT database interaction.
-        Used for backtesting to match production detection exactly.
+        Uses numpy arrays for fast vectorized detection.
 
         Args:
             df: DataFrame with OHLCV data (must have: timestamp, open, high, low, close, volume)
@@ -268,76 +315,153 @@ class LiquiditySweepDetector(PatternDetector):
             List of detected patterns (dicts with zone_high, zone_low, direction, detected_at, etc.)
         """
         from app.config import Config
+        import numpy as np
+        from datetime import datetime, timezone
 
         if df.empty or len(df) < 20:
             return []
 
+        t0 = datetime.now(timezone.utc)
         min_zone = min_zone_pct if min_zone_pct is not None else Config.MIN_ZONE_PERCENT
         patterns = []
-        seen_zones = []  # For local overlap tracking
 
-        # Find swing points (same as production)
-        swing_highs, swing_lows = self.find_swing_points(df, lookback=3)
+        # Convert to numpy arrays for fast access (MAJOR speedup vs df.iloc)
+        highs = df['high'].values
+        lows = df['low'].values
+        closes = df['close'].values
+        timestamps = df['timestamp'].values if 'timestamp' in df.columns else None
+
+        t1 = datetime.now(timezone.utc)
+        n = len(df)
+
+        # Find swing points using numpy arrays (fast)
+        swing_highs, swing_lows = self.find_swing_points_fast(highs, lows, timestamps, lookback=3)
+
+        t2 = datetime.now(timezone.utc)
+
+        # For overlap tracking - list of (zone_low, zone_high) per direction
+        seen_bullish = []
+        seen_bearish = []
+
+        # Pre-extract swing indices for fast lookup
+        # Swing points are already sorted by index from find_swing_points_fast
+        swing_low_indices = np.array([s['index'] for s in swing_lows], dtype=np.int64)
+        swing_low_prices = np.array([s['price'] for s in swing_lows])
+        swing_high_indices = np.array([s['index'] for s in swing_highs], dtype=np.int64)
+        swing_high_prices = np.array([s['price'] for s in swing_highs])
+
+        n_swing_lows = len(swing_low_indices)
+        n_swing_highs = len(swing_high_indices)
 
         # Scan through all candles (not just recent 10 like production)
-        for i in range(10, len(df)):
-            current = df.iloc[i]
+        for i in range(10, n):
+            current_low = lows[i]
+            current_high = highs[i]
+            current_close = closes[i]
+            current_ts = int(timestamps[i]) if timestamps is not None else None
 
-            # Check for bullish sweep (sweep of lows)
-            for swing_low in swing_lows:
-                # Skip if swing is too recent or too old
-                if swing_low['index'] >= i - 3 or swing_low['index'] < i - 50:
-                    continue
+            # Valid swing range: index in [i-50, i-4] (i.e., >= i-50 and < i-3)
+            min_idx = i - 50
+            max_idx = i - 3
 
-                # Check if current candle swept the low and reversed
-                if current['low'] < swing_low['price'] and current['close'] > swing_low['price']:
-                    zone_low = current['low']
-                    zone_high = swing_low['price']
-                    direction = 'bullish'
+            # Check for bullish sweep (sweep of lows) - use binary search for O(log s)
+            if n_swing_lows > 0:
+                # Binary search to find range of valid swing lows
+                left = np.searchsorted(swing_low_indices, min_idx, side='left')
+                right = np.searchsorted(swing_low_indices, max_idx, side='left')
 
-                    # Validate zone
-                    if self._is_valid_historical_sweep(
-                        zone_low, zone_high, direction, min_zone, seen_zones, skip_overlap
-                    ):
-                        patterns.append({
-                            'pattern_type': self.pattern_type,
-                            'direction': direction,
-                            'zone_high': float(zone_high),
-                            'zone_low': float(zone_low),
-                            'detected_at': i,
-                            'detected_ts': int(current['timestamp']) if 'timestamp' in df.columns else None,
-                            'swept_level': float(swing_low['price'])
-                        })
+                # Check if current candle swept any of these lows and reversed
+                for j in range(left, right):
+                    swing_price = swing_low_prices[j]
+                    if current_low < swing_price and current_close > swing_price:
+                        zone_low = float(current_low)
+                        zone_high = float(swing_price)
+
+                        # Must have positive zone
+                        if zone_high <= zone_low or zone_low <= 0:
+                            continue
+
+                        # Check minimum zone size
+                        zone_size_pct = ((zone_high - zone_low) / zone_low) * 100
+                        if zone_size_pct < min_zone:
+                            continue
+
+                        # Proper overlap check using _calculate_zone_overlap
+                        is_valid = True
                         if not skip_overlap:
-                            seen_zones.append((direction, zone_low, zone_high))
-                    break  # Only one sweep per candle
+                            for seen_low, seen_high in seen_bullish:
+                                overlap = self._calculate_zone_overlap(seen_low, seen_high, zone_low, zone_high)
+                                if overlap >= Config.DEFAULT_OVERLAP_THRESHOLD:
+                                    is_valid = False
+                                    break
+                            if is_valid:
+                                seen_bullish.append((zone_low, zone_high))
 
-            # Check for bearish sweep (sweep of highs)
-            for swing_high in swing_highs:
-                if swing_high['index'] >= i - 3 or swing_high['index'] < i - 50:
-                    continue
+                        if is_valid:
+                            patterns.append({
+                                'pattern_type': self.pattern_type,
+                                'direction': 'bullish',
+                                'zone_high': zone_high,
+                                'zone_low': zone_low,
+                                'detected_at': i,
+                                'detected_ts': current_ts,
+                                'swept_level': float(swing_price)
+                            })
+                        break  # Only one sweep per candle
 
-                if current['high'] > swing_high['price'] and current['close'] < swing_high['price']:
-                    zone_high = current['high']
-                    zone_low = swing_high['price']
-                    direction = 'bearish'
+            # Check for bearish sweep (sweep of highs) - use binary search for O(log s)
+            if n_swing_highs > 0:
+                # Binary search to find range of valid swing highs
+                left = np.searchsorted(swing_high_indices, min_idx, side='left')
+                right = np.searchsorted(swing_high_indices, max_idx, side='left')
 
-                    # Validate zone
-                    if self._is_valid_historical_sweep(
-                        zone_low, zone_high, direction, min_zone, seen_zones, skip_overlap
-                    ):
-                        patterns.append({
-                            'pattern_type': self.pattern_type,
-                            'direction': direction,
-                            'zone_high': float(zone_high),
-                            'zone_low': float(zone_low),
-                            'detected_at': i,
-                            'detected_ts': int(current['timestamp']) if 'timestamp' in df.columns else None,
-                            'swept_level': float(swing_high['price'])
-                        })
+                for j in range(left, right):
+                    swing_price = swing_high_prices[j]
+                    if current_high > swing_price and current_close < swing_price:
+                        zone_high = float(current_high)
+                        zone_low = float(swing_price)
+
+                        # Must have positive zone
+                        if zone_high <= zone_low or zone_low <= 0:
+                            continue
+
+                        # Check minimum zone size
+                        zone_size_pct = ((zone_high - zone_low) / zone_low) * 100
+                        if zone_size_pct < min_zone:
+                            continue
+
+                        # Proper overlap check using _calculate_zone_overlap
+                        is_valid = True
                         if not skip_overlap:
-                            seen_zones.append((direction, zone_low, zone_high))
-                    break  # Only one sweep per candle
+                            for seen_low, seen_high in seen_bearish:
+                                overlap = self._calculate_zone_overlap(seen_low, seen_high, zone_low, zone_high)
+                                if overlap >= Config.DEFAULT_OVERLAP_THRESHOLD:
+                                    is_valid = False
+                                    break
+                            if is_valid:
+                                seen_bearish.append((zone_low, zone_high))
+
+                        if is_valid:
+                            patterns.append({
+                                'pattern_type': self.pattern_type,
+                                'direction': 'bearish',
+                                'zone_high': zone_high,
+                                'zone_low': zone_low,
+                                'detected_at': i,
+                                'detected_ts': current_ts,
+                                'swept_level': float(swing_price)
+                            })
+                        break  # Only one sweep per candle
+
+        t3 = datetime.now(timezone.utc)
+        arr_ms = (t1 - t0).total_seconds() * 1000
+        swing_ms = (t2 - t1).total_seconds() * 1000
+        loop_ms = (t3 - t2).total_seconds() * 1000
+        total_ms = (t3 - t0).total_seconds() * 1000
+        if total_ms > 500:  # Log if >500ms
+            print(f"      [LS] {n:,} candles: arr={arr_ms:.0f}ms, swing={swing_ms:.0f}ms, "
+                  f"loop={loop_ms:.0f}ms, total={total_ms:.0f}ms, swings=({len(swing_highs)}H,{len(swing_lows)}L), "
+                  f"patterns={len(patterns)}", flush=True)
 
         return patterns
 

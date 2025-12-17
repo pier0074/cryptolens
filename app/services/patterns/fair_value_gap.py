@@ -110,7 +110,7 @@ class FVGDetector(PatternDetector):
     ) -> List[Dict[str, Any]]:
         """
         Detect FVG patterns in historical data WITHOUT database interaction.
-        Used for backtesting to match production detection exactly.
+        Uses numpy arrays for fast vectorized detection.
 
         Args:
             df: DataFrame with OHLCV data (must have: timestamp, open, high, low, close, volume)
@@ -121,57 +121,101 @@ class FVGDetector(PatternDetector):
             List of detected patterns (dicts with zone_high, zone_low, direction, detected_at, etc.)
         """
         from app.config import Config
+        import numpy as np
+        from datetime import datetime, timezone
 
         if df.empty or len(df) < 3:
             return []
 
+        t0 = datetime.now(timezone.utc)
         min_zone = min_zone_pct if min_zone_pct is not None else Config.MIN_ZONE_PERCENT
-        patterns = []
-        seen_zones = []  # For local overlap tracking
 
-        for i in range(2, len(df)):
-            c1 = df.iloc[i - 2]  # First candle
-            c3 = df.iloc[i]      # Third candle
+        # Convert to numpy arrays for fast access (MAJOR speedup vs df.iloc)
+        highs = df['high'].values
+        lows = df['low'].values
+        timestamps = df['timestamp'].values if 'timestamp' in df.columns else None
+
+        t1 = datetime.now(timezone.utc)
+        n = len(df)
+        patterns = []
+
+        # For overlap tracking - list of (zone_low, zone_high) per direction
+        seen_bullish = []
+        seen_bearish = []
+
+        for i in range(2, n):
+            c1_high = highs[i - 2]
+            c1_low = lows[i - 2]
+            c3_high = highs[i]
+            c3_low = lows[i]
 
             # Bullish FVG: Gap between c1 high and c3 low
-            if c1['high'] < c3['low']:
-                zone_low = c1['high']
-                zone_high = c3['low']
-                direction = 'bullish'
+            if c1_high < c3_low:
+                zone_low = float(c1_high)
+                zone_high = float(c3_low)
 
-                if self._is_valid_historical_pattern(
-                    zone_low, zone_high, direction, min_zone, seen_zones, skip_overlap
-                ):
-                    patterns.append({
-                        'pattern_type': self.pattern_type,
-                        'direction': direction,
-                        'zone_high': float(zone_high),
-                        'zone_low': float(zone_low),
-                        'detected_at': i,
-                        'detected_ts': int(c3['timestamp']) if 'timestamp' in df.columns else None
-                    })
-                    if not skip_overlap:
-                        seen_zones.append((direction, zone_low, zone_high))
+                # Check minimum zone size
+                if zone_low > 0:
+                    zone_size_pct = ((zone_high - zone_low) / zone_low) * 100
+                    if zone_size_pct >= min_zone:
+                        # Check overlap with already-detected patterns
+                        is_valid = True
+                        if not skip_overlap:
+                            for seen_low, seen_high in seen_bullish:
+                                overlap = self._calculate_zone_overlap(seen_low, seen_high, zone_low, zone_high)
+                                if overlap >= Config.DEFAULT_OVERLAP_THRESHOLD:
+                                    is_valid = False
+                                    break
+                            if is_valid:
+                                seen_bullish.append((zone_low, zone_high))
+
+                        if is_valid:
+                            patterns.append({
+                                'pattern_type': self.pattern_type,
+                                'direction': 'bullish',
+                                'zone_high': zone_high,
+                                'zone_low': zone_low,
+                                'detected_at': i,
+                                'detected_ts': int(timestamps[i]) if timestamps is not None else None
+                            })
 
             # Bearish FVG: Gap between c1 low and c3 high
-            if c1['low'] > c3['high']:
-                zone_high = c1['low']
-                zone_low = c3['high']
-                direction = 'bearish'
+            if c1_low > c3_high:
+                zone_high = float(c1_low)
+                zone_low = float(c3_high)
 
-                if self._is_valid_historical_pattern(
-                    zone_low, zone_high, direction, min_zone, seen_zones, skip_overlap
-                ):
-                    patterns.append({
-                        'pattern_type': self.pattern_type,
-                        'direction': direction,
-                        'zone_high': float(zone_high),
-                        'zone_low': float(zone_low),
-                        'detected_at': i,
-                        'detected_ts': int(c3['timestamp']) if 'timestamp' in df.columns else None
-                    })
-                    if not skip_overlap:
-                        seen_zones.append((direction, zone_low, zone_high))
+                # Check minimum zone size
+                if zone_low > 0:
+                    zone_size_pct = ((zone_high - zone_low) / zone_low) * 100
+                    if zone_size_pct >= min_zone:
+                        # Check overlap with already-detected patterns
+                        is_valid = True
+                        if not skip_overlap:
+                            for seen_low, seen_high in seen_bearish:
+                                overlap = self._calculate_zone_overlap(seen_low, seen_high, zone_low, zone_high)
+                                if overlap >= Config.DEFAULT_OVERLAP_THRESHOLD:
+                                    is_valid = False
+                                    break
+                            if is_valid:
+                                seen_bearish.append((zone_low, zone_high))
+
+                        if is_valid:
+                            patterns.append({
+                                'pattern_type': self.pattern_type,
+                                'direction': 'bearish',
+                                'zone_high': zone_high,
+                                'zone_low': zone_low,
+                                'detected_at': i,
+                                'detected_ts': int(timestamps[i]) if timestamps is not None else None
+                            })
+
+        t2 = datetime.now(timezone.utc)
+        arr_ms = (t1 - t0).total_seconds() * 1000
+        loop_ms = (t2 - t1).total_seconds() * 1000
+        total_ms = (t2 - t0).total_seconds() * 1000
+        if total_ms > 500:  # Log if >500ms
+            print(f"      [FVG] {n:,} candles: arr={arr_ms:.0f}ms, loop={loop_ms:.0f}ms, "
+                  f"total={total_ms:.0f}ms, patterns={len(patterns)}", flush=True)
 
         return patterns
 

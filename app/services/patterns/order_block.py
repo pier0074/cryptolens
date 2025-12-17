@@ -150,7 +150,7 @@ class OrderBlockDetector(PatternDetector):
     ) -> List[Dict[str, Any]]:
         """
         Detect Order Block patterns in historical data WITHOUT database interaction.
-        Used for backtesting to match production detection exactly.
+        Uses numpy arrays for fast vectorized detection.
 
         Args:
             df: DataFrame with OHLCV data (must have: timestamp, open, high, low, close, volume)
@@ -160,74 +160,100 @@ class OrderBlockDetector(PatternDetector):
         Returns:
             List of detected patterns (dicts with zone_high, zone_low, direction, detected_at, etc.)
         """
+        import numpy as np
+        from datetime import datetime, timezone
+
         if df.empty or len(df) < 5:
             return []
 
+        t0 = datetime.now(timezone.utc)
         min_zone = min_zone_pct if min_zone_pct is not None else Config.MIN_ZONE_PERCENT
         patterns = []
-        seen_zones = []  # For local overlap tracking
 
-        # Calculate candle body and move strength
-        df = df.copy()
-        df['body'] = df['close'] - df['open']
-        df['body_size'] = abs(df['body'])
-        df['is_bullish'] = df['body'] > 0
-        df['is_bearish'] = df['body'] < 0
+        # Convert to numpy arrays for fast access (MAJOR speedup vs df.iloc)
+        opens = df['open'].values
+        closes = df['close'].values
+        timestamps = df['timestamp'].values if 'timestamp' in df.columns else None
 
-        # Calculate average body size for comparison
-        avg_body = df['body_size'].rolling(20).mean()
+        t1 = datetime.now(timezone.utc)
+        n = len(df)
 
-        for i in range(3, len(df)):
-            current_body = df.iloc[i]['body_size']
+        # Precompute body metrics as numpy arrays
+        body = closes - opens
+        body_size = np.abs(body)
+        is_bullish = body > 0
+        is_bearish = body < 0
 
-            if pd.isna(avg_body.iloc[i]) or avg_body.iloc[i] == 0:
+        # Calculate rolling average body size (vectorized with pandas - 100x faster than loop)
+        avg_body = pd.Series(body_size).rolling(20).mean().values
+
+        t2 = datetime.now(timezone.utc)
+
+        # For overlap tracking - list of (zone_low, zone_high) per direction
+        seen_bullish = []
+        seen_bearish = []
+
+        for i in range(3, n):
+            current_body_size = body_size[i]
+            avg = avg_body[i]
+
+            if np.isnan(avg) or avg == 0:
                 continue
 
             # Check for strong move (body larger than threshold * average)
-            is_strong_move = current_body > (avg_body.iloc[i] * Config.ORDER_BLOCK_STRENGTH_MULTIPLIER)
-            if not is_strong_move:
+            if current_body_size <= (avg * Config.ORDER_BLOCK_STRENGTH_MULTIPLIER):
                 continue
 
+            detected_ts = int(timestamps[i]) if timestamps is not None else None
+
             # Bullish OB: Last bearish candle before strong bullish move
-            if df.iloc[i]['is_bullish']:
-                pattern = self._find_historical_opposing_candle(
-                    df, i, 'bearish', 'bullish', min_zone, seen_zones, skip_overlap
+            if is_bullish[i]:
+                pattern = self._find_historical_opposing_candle_fast(
+                    opens, closes, is_bearish,
+                    i, 'bullish', min_zone, seen_bullish, skip_overlap
                 )
                 if pattern:
+                    pattern['detected_ts'] = detected_ts
                     patterns.append(pattern)
-                    if not skip_overlap:
-                        seen_zones.append((pattern['direction'], pattern['zone_low'], pattern['zone_high']))
 
             # Bearish OB: Last bullish candle before strong bearish move
-            elif df.iloc[i]['is_bearish']:
-                pattern = self._find_historical_opposing_candle(
-                    df, i, 'bullish', 'bearish', min_zone, seen_zones, skip_overlap
+            elif is_bearish[i]:
+                pattern = self._find_historical_opposing_candle_fast(
+                    opens, closes, is_bullish,
+                    i, 'bearish', min_zone, seen_bearish, skip_overlap
                 )
                 if pattern:
+                    pattern['detected_ts'] = detected_ts
                     patterns.append(pattern)
-                    if not skip_overlap:
-                        seen_zones.append((pattern['direction'], pattern['zone_low'], pattern['zone_high']))
+
+        t3 = datetime.now(timezone.utc)
+        arr_ms = (t1 - t0).total_seconds() * 1000
+        precomp_ms = (t2 - t1).total_seconds() * 1000
+        loop_ms = (t3 - t2).total_seconds() * 1000
+        total_ms = (t3 - t0).total_seconds() * 1000
+        if total_ms > 500:  # Log if >500ms
+            print(f"      [OB] {n:,} candles: arr={arr_ms:.0f}ms, precomp={precomp_ms:.0f}ms, "
+                  f"loop={loop_ms:.0f}ms, total={total_ms:.0f}ms, patterns={len(patterns)}", flush=True)
 
         return patterns
 
-    def _find_historical_opposing_candle(
+    def _find_historical_opposing_candle_fast(
         self,
-        df: pd.DataFrame,
+        opens: 'np.ndarray',
+        closes: 'np.ndarray',
+        is_opposing: 'np.ndarray',
         current_idx: int,
-        candle_type: str,
         direction: str,
         min_zone_pct: float,
         seen_zones: list,
         skip_overlap: bool
     ) -> Optional[Dict[str, Any]]:
-        """Find the last opposing candle for historical detection (no DB access)"""
-        is_opposing = 'is_bearish' if candle_type == 'bearish' else 'is_bullish'
-
+        """Find the last opposing candle for historical detection (no DB access, numpy-optimized)"""
         # Look for the last opposing candle in the previous 3 candles
         for j in range(current_idx - 1, max(current_idx - 4, 0), -1):
-            if df.iloc[j][is_opposing]:
-                zone_high = max(df.iloc[j]['open'], df.iloc[j]['close'])
-                zone_low = min(df.iloc[j]['open'], df.iloc[j]['close'])
+            if is_opposing[j]:
+                zone_high = float(max(opens[j], closes[j]))
+                zone_low = float(min(opens[j], closes[j]))
 
                 # Check minimum zone size
                 if zone_low <= 0:
@@ -236,26 +262,24 @@ class OrderBlockDetector(PatternDetector):
                 if zone_size_pct < min_zone_pct:
                     continue
 
-                # Check overlap with already-detected patterns
+                # Proper overlap check using _calculate_zone_overlap
                 if not skip_overlap:
                     has_overlap = False
-                    for seen_dir, seen_low, seen_high in seen_zones:
-                        if seen_dir != direction:
-                            continue
+                    for seen_low, seen_high in seen_zones:
                         overlap = self._calculate_zone_overlap(seen_low, seen_high, zone_low, zone_high)
-                        if overlap >= 0.7:
+                        if overlap >= Config.DEFAULT_OVERLAP_THRESHOLD:
                             has_overlap = True
                             break
                     if has_overlap:
                         continue
+                    seen_zones.append((zone_low, zone_high))
 
                 return {
                     'pattern_type': self.pattern_type,
                     'direction': direction,
-                    'zone_high': float(zone_high),
-                    'zone_low': float(zone_low),
-                    'detected_at': current_idx,
-                    'detected_ts': int(df.iloc[current_idx]['timestamp']) if 'timestamp' in df.columns else None
+                    'zone_high': zone_high,
+                    'zone_low': zone_low,
+                    'detected_at': current_idx
                 }
 
         return None
