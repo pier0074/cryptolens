@@ -390,7 +390,7 @@ class TestSymbolFiltering:
     def test_filter_symbols_free_user(self, app):
         """Free user should only see BTC/USDT"""
         from app.decorators import filter_symbols_by_tier
-        from app.models import User, Subscription, Symbol
+        from app.models import User, Subscription
 
         with app.app_context():
             # Create a free user
@@ -529,7 +529,7 @@ class TestPortfolioRestrictions:
     def test_pro_portfolio_limit(self, app):
         """Pro user should be limited to 1 portfolio"""
         from app.models import User, Subscription, Portfolio
-        from app.routes.portfolio import can_create_portfolio, get_user_portfolio_count
+        from app.routes.portfolio import get_user_portfolio_count
 
         with app.app_context():
             user = User(
@@ -706,7 +706,7 @@ class TestUserSymbolPreferences:
 
     def test_user_symbol_preference_isolation(self, app):
         """Different users have independent symbol preferences"""
-        from app.models import User, Subscription, Symbol, UserSymbolPreference
+        from app.models import User, Symbol, UserSymbolPreference
 
         with app.app_context():
             # Create two users
@@ -840,7 +840,7 @@ class TestDashboardSignalRestrictions:
 
     def test_free_user_sees_only_btc_signal(self, client, app):
         """Free user should only see 1 BTC signal on dashboard"""
-        from app.models import User, Subscription, Symbol, Signal, Pattern
+        from app.models import User, Subscription, Symbol, Signal
 
         with app.app_context():
             # Create free user
@@ -1222,7 +1222,7 @@ class TestPatternToTradeAPI:
 
     def test_pattern_to_trade_creates_pending_trade(self, client, app):
         """Pattern to trade should create a pending trade with pattern data"""
-        from app.models import User, Subscription, Symbol, Pattern, Portfolio
+        from app.models import User, Subscription, Symbol, Pattern
 
         with app.app_context():
             user = User(

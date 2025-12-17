@@ -3,7 +3,6 @@ System models: Log, Setting, StatsCache, Backtest, Payment, CronJob, CronRun
 """
 from datetime import datetime, timezone, timedelta
 from app import db
-from app.models.base import CRON_JOB_TYPES
 
 
 class Log(db.Model):
@@ -238,7 +237,7 @@ class CronJob(db.Model):
             return None
         success = self.runs.filter(
             CronRun.started_at >= since,
-            CronRun.success == True
+            CronRun.success.is_(True)
         ).count()
         return round((success / total) * 100, 1)
 

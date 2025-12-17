@@ -12,7 +12,7 @@ All endpoints return responses in the format:
 import os
 from functools import wraps
 from typing import Callable, Any
-from flask import Blueprint, request, Response, session, g
+from flask import Blueprint, request, session, g
 from sqlalchemy.orm import joinedload
 from app.models import (
     Symbol, Candle, Pattern, Signal, Setting, User,

@@ -51,15 +51,15 @@ def users():
         )
 
     if status == 'active':
-        query = query.filter(User.is_active == True)
+        query = query.filter(User.is_active.is_(True))
     elif status == 'inactive':
-        query = query.filter(User.is_active == False)
+        query = query.filter(User.is_active.is_(False))
     elif status == 'verified':
-        query = query.filter(User.is_verified == True)
+        query = query.filter(User.is_verified.is_(True))
     elif status == 'unverified':
-        query = query.filter(User.is_verified == False)
+        query = query.filter(User.is_verified.is_(False))
     elif status == 'admin':
-        query = query.filter(User.is_admin == True)
+        query = query.filter(User.is_admin.is_(True))
     elif status == 'locked':
         query = query.filter(User.locked_until > datetime.now(timezone.utc).replace(tzinfo=None))
 
@@ -508,7 +508,7 @@ def crons():
     total_runs_24h = CronRun.query.filter(CronRun.started_at >= since_24h).count()
     failed_runs_24h = CronRun.query.filter(
         CronRun.started_at >= since_24h,
-        CronRun.success == False
+        CronRun.success.is_(False)
     ).count()
 
     return render_template('admin/crons.html',
@@ -873,7 +873,7 @@ def broadcast():
     """Send a broadcast notification"""
     from app.models import (
         NotificationTemplate, BroadcastNotification,
-        NOTIFICATION_TEMPLATE_TYPES, NOTIFICATION_TARGETS
+        NOTIFICATION_TARGETS
     )
 
     templates = NotificationTemplate.query.filter_by(is_active=True).all()
@@ -942,10 +942,10 @@ def test_ntfy_connection():
 
     # Also check user topics
     users = User.query.filter(
-        User.is_active == True,
-        User.is_verified == True,
+        User.is_active.is_(True),
+        User.is_verified.is_(True),
         User.ntfy_topic.isnot(None),
-        User.notify_enabled == True
+        User.notify_enabled.is_(True)
     ).all()
 
     user_info = []
@@ -1064,7 +1064,7 @@ def api_audience_count():
     """Get count of users for a target audience"""
     target = request.args.get('target', 'all')
 
-    query = User.query.filter(User.is_active == True, User.is_verified == True)
+    query = User.query.filter(User.is_active.is_(True), User.is_verified.is_(True))
 
     if target == 'free':
         # Users with free tier
@@ -1257,7 +1257,6 @@ def api_toggle_symbol():
                 'error': f'{symbol.symbol} is mandatory and cannot be disabled'
             }), 400
 
-    old_state = symbol.is_active
     if action == 'toggle':
         symbol.is_active = not symbol.is_active
     elif action == 'enable':
@@ -1884,13 +1883,13 @@ def api_fetch_historical(symbol_id):
                         # Insert new candles
                         new_count = 0
                         for candle in ohlcv:
-                            ts, o, h, l, c, v = candle
+                            ts, o, h, low, c, v = candle
                             if ts not in existing:
                                 app_db.session.add(Candle(
                                     symbol_id=sym.id,
                                     timeframe='1m',
                                     timestamp=ts,
-                                    open=o, high=h, low=l, close=c,
+                                    open=o, high=h, low=low, close=c,
                                     volume=v or 0
                                 ))
                                 new_count += 1
@@ -2008,7 +2007,7 @@ def api_fix_symbol(symbol_id):
             # Create cron run entry
             job = CronJob.query.filter_by(name='symbol_fix').first()
             if not job:
-                job = CronJob(name='symbol_fix', description=f'Fix candle data for symbol', schedule='manual', is_enabled=True)
+                job = CronJob(name='symbol_fix', description='Fix candle data for symbol', schedule='manual', is_enabled=True)
                 app_db.session.add(job)
                 app_db.session.commit()
 
@@ -2393,7 +2392,7 @@ def api_apply_optimization_params():
 
     Premium/Admin feature: Copies best parameters to user's symbol preferences.
     """
-    from app.models import User, Symbol, UserSymbolPreference, OptimizationRun
+    from app.models import Symbol, UserSymbolPreference
     from app.services.auto_tuner import auto_tuner
 
     # Get current user
@@ -2488,7 +2487,7 @@ def api_best_params_by_symbol():
 @admin_required
 def api_get_user_params():
     """API: Get current user's custom symbol parameters"""
-    from app.models import UserSymbolPreference, Symbol
+    from app.models import UserSymbolPreference
 
     current_user = get_current_user()
     if not current_user:

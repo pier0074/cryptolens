@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 from app import db
-from app.models import User, Subscription, SUBSCRIPTION_PLANS
+from app.models import User
 from app.services.logger import log_auth, log_admin
 
 
@@ -189,7 +189,7 @@ def authenticate_user(email: str, password: str) -> Optional[User]:
         password_valid = False
 
     if not user:
-        log_auth(f"Login failed: unknown email", level='WARNING', details={'email': email})
+        log_auth("Login failed: unknown email", level='WARNING', details={'email': email})
         return None
 
     if not password_valid:
@@ -350,8 +350,8 @@ def get_eligible_subscribers():
     users = User.query.options(
         joinedload(User.subscription)
     ).filter(
-        User.is_active == True,
-        User.is_verified == True
+        User.is_active.is_(True),
+        User.is_verified.is_(True)
     ).all()
 
     return [u for u in users if u.has_valid_subscription]

@@ -38,7 +38,7 @@ import time
 import asyncio
 import fcntl
 from datetime import datetime, timezone, timedelta
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -70,9 +70,7 @@ from sqlalchemy import func
 
 # Import shared fetch utilities
 from scripts.utils.fetch_utils import (
-    fetch_symbol_batches,
     create_exchange,
-    save_candles_to_db,
     logger
 )
 
@@ -175,8 +173,6 @@ async def fetch_range_with_save(
     Returns:
         Tuple of (fetched_count, saved_count)
     """
-    from app.models import Candle
-    from app import db
 
     all_candles = []
     total_fetched = 0
@@ -678,9 +674,8 @@ def main():
                 return
 
         # Get symbols and fetch_start_date setting
-        from app import create_app, db
+        from app import create_app
         from app.models import Symbol, Setting
-        from app.config import Config
 
         app = create_app()
         with app.app_context():

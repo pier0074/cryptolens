@@ -8,8 +8,7 @@ import json
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 import pandas as pd
-from app.models import Symbol, Backtest
-from app.config import Config
+from app.models import Backtest
 from app import db
 from app.services.logger import log_backtest
 from app.services.patterns.fair_value_gap import FVGDetector
@@ -125,9 +124,6 @@ def run_backtest(symbol: str, timeframe: str, start_date: str, end_date: str,
         symbol=symbol,
         timeframe=timeframe
     )
-
-    # Get lookback period for this timeframe
-    lookback = LOOKBACK_BY_TIMEFRAME.get(timeframe, DEFAULT_LOOKBACK)
 
     # Run pattern detection and simulation with slippage
     trades = simulate_trades(df, pattern_type, rr_target, sl_buffer_pct, slippage_pct, timeframe)
@@ -277,8 +273,6 @@ def simulate_single_trade(df: pd.DataFrame, entry_idx: int, pattern: Dict,
         slippage_amount = ideal_entry * (slippage_pct / 100.0)
         entry = ideal_entry + slippage_amount  # Worse entry for long
         stop_loss = zone_low - buffer
-        risk = entry - stop_loss
-        take_profit = entry + (risk * rr_target)
         direction = 'long'
     else:
         # For short: entry at zone low, with slippage we get worse price (lower)
@@ -286,8 +280,6 @@ def simulate_single_trade(df: pd.DataFrame, entry_idx: int, pattern: Dict,
         slippage_amount = ideal_entry * (slippage_pct / 100.0)
         entry = ideal_entry - slippage_amount  # Worse entry for short
         stop_loss = zone_high + buffer
-        risk = stop_loss - entry
-        take_profit = entry - (risk * rr_target)
         direction = 'short'
 
     # Look for entry trigger and outcome

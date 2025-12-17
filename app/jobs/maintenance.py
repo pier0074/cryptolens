@@ -28,7 +28,7 @@ def cleanup_old_data_job(
     Returns:
         Dict with data statistics (no deletions)
     """
-    from app import create_app, db
+    from app import create_app
     from app.models import Log, Pattern, Signal, Notification, UserNotification
 
     app = create_app()

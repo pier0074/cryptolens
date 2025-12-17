@@ -1,5 +1,5 @@
 import re
-from flask import Blueprint, render_template, request, jsonify, flash, redirect, url_for
+from flask import Blueprint, request, jsonify, flash, redirect, url_for
 from app.models import Symbol, Setting, UserSymbolPreference
 from app.config import Config
 from app import db
@@ -141,7 +141,6 @@ def test_notification():
     """Send 3 varied test notifications to verify all notification types work"""
     from app.services.notifier import send_notification
     from datetime import datetime, timezone
-    import random
 
     topic = Setting.get('ntfy_topic', Config.NTFY_TOPIC)
     priority = int(Setting.get('ntfy_priority', str(Config.NTFY_PRIORITY)))

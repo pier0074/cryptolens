@@ -10,9 +10,7 @@ Tests for:
 - Authorization checks
 """
 import pytest
-from unittest.mock import patch, MagicMock
-from datetime import datetime, timezone, timedelta
-import json
+from datetime import timedelta
 
 from app.services.auth import hash_api_key
 from app.models import Setting
@@ -271,7 +269,6 @@ class TestPasswordSecurity:
     def test_password_not_stored_in_plaintext(self, app):
         """Test that passwords are hashed, not stored in plaintext"""
         from app.models import User
-        from app import db
 
         with app.app_context():
             user = User.query.filter_by(email='test@example.com').first()

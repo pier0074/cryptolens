@@ -8,9 +8,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
 
-from flask import current_app, render_template_string
+from flask import current_app
 
-from app import db
 from app.models import User
 
 

@@ -3,7 +3,7 @@ Subscription Service
 Handles subscription creation, management, and expiry
 """
 from datetime import datetime, timezone, timedelta
-from typing import Optional, List, Dict
+from typing import List, Dict
 
 from app import db
 from app.models import User, Subscription, SUBSCRIPTION_PLANS, _ensure_utc_naive, _utc_now_naive
@@ -400,8 +400,6 @@ def send_expiry_warnings(days: List[int] = None) -> int:
         days = [7, 3, 1]
 
     from app.services.notifier import send_notification
-    from app.models import Setting
-    from app.config import Config
 
     count = 0
     now = datetime.now(timezone.utc)

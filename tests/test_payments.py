@@ -7,9 +7,9 @@ import json
 import hmac
 import hashlib
 from datetime import datetime, timezone, timedelta
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from app import db
-from app.models import User, Subscription, Payment
+from app.models import User, Subscription
 
 
 class TestLemonSqueezyWebhook:
@@ -319,7 +319,6 @@ class TestWebhookSignatureVerification:
     def test_lemonsqueezy_verify_rejects_when_no_secret(self, app):
         """Test LemonSqueezy verification rejects when secret not configured"""
         with app.app_context():
-            from app.services.payment import verify_lemonsqueezy_webhook
 
             # Without secret configured, should return False
             with patch.dict('os.environ', {'LEMONSQUEEZY_WEBHOOK_SECRET': ''}):

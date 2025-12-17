@@ -309,6 +309,6 @@ def create_app(config_name=None):
         # Setup logging (after DB is ready, so we can read settings)
         from app.models import Setting
         db_log_level = Setting.get('log_level')
-        logger = setup_logging(app, db_log_level)
+        setup_logging(app, db_log_level)
 
     return app

@@ -6,7 +6,6 @@ import sys
 import json
 import logging
 from datetime import datetime, timezone
-from functools import wraps
 
 # Console logger
 console_logger = logging.getLogger('cryptolens')
@@ -61,7 +60,7 @@ def log(category: str, message: str, level: str = 'INFO',
 
     # Database log (in try/except to not break if DB unavailable)
     try:
-        from flask import current_app, has_app_context
+        from flask import has_app_context
         from app import db, create_app
         from app.models import Log
 

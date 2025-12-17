@@ -1,8 +1,7 @@
 """
 Tests for Order Block Pattern Detection
 """
-import pytest
-from app.models import Pattern, Symbol, Candle
+from app.models import Candle
 from app.services.patterns.order_block import OrderBlockDetector
 from app import db
 

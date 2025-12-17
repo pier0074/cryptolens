@@ -18,8 +18,7 @@ import numpy as np
 from app import db
 from app.models import (
     OptimizationJob, OptimizationRun,
-    DEFAULT_PARAMETER_GRID, QUICK_PARAMETER_GRID,
-    Symbol
+    QUICK_PARAMETER_GRID
 )
 from app.services.aggregator import get_candles_as_dataframe
 from app.services.patterns.fair_value_gap import FVGDetector
@@ -980,8 +979,6 @@ class ParameterOptimizer:
         total = len(symbols) * len(timeframes) * len(pattern_types) * len(param_combinations)
         processed = 0
 
-        log_system(f"Starting incremental optimization for {len(symbols)} symbols")
-
         # Pre-load all existing runs into a dict for O(1) lookups (major performance optimization)
         # Key: (symbol, timeframe, pattern_type, rr_target, sl_buffer_pct) -> OptimizationRun
         existing_runs = {}
@@ -995,31 +992,84 @@ class ParameterOptimizer:
             key = (run.symbol, run.timeframe, run.pattern_type, run.rr_target, run.sl_buffer_pct)
             existing_runs[key] = run
 
-        # Pattern cache: (symbol, timeframe, pattern_type, min_zone_pct, use_overlap) -> patterns
-        pattern_cache = {}
-        # Data cache: (symbol, timeframe) -> (df, ohlcv_arrays, last_candle_ts)
+        # ===== PHASE 1: Pre-load all candle data =====
         data_cache = {}
+        total_candles = 0
+        phase1_start = datetime.now(timezone.utc)
+
+        print(f"\n[Phase 1/3] Loading candle data ({len(symbols)} symbols × {len(timeframes)} timeframes)...")
 
         for symbol in symbols:
             for timeframe in timeframes:
-                # Load data ONCE per symbol/timeframe (major optimization)
-                cache_key = (symbol, timeframe)
-                if cache_key not in data_cache:
-                    df = get_candles_as_dataframe(symbol, timeframe, verified_only=True)
-                    if df is None or df.empty:
-                        df = get_candles_as_dataframe(symbol, timeframe, verified_only=False)
+                query_start = datetime.now(timezone.utc)
+                df = get_candles_as_dataframe(symbol, timeframe, verified_only=True)
+                if df is None or df.empty:
+                    df = get_candles_as_dataframe(symbol, timeframe, verified_only=False)
+                query_duration = (datetime.now(timezone.utc) - query_start).total_seconds()
 
-                    if df is None or df.empty or len(df) < 20:
-                        data_cache[cache_key] = (None, None, None)
-                    else:
-                        ohlcv_arrays = self._df_to_arrays(df)
-                        last_candle_ts = int(df['timestamp'].max())
-                        data_cache[cache_key] = (df, ohlcv_arrays, last_candle_ts)
+                if df is not None and len(df) >= 20:
+                    ohlcv_arrays = self._df_to_arrays(df)
+                    last_candle_ts = int(df['timestamp'].max())
+                    data_cache[(symbol, timeframe)] = (df, ohlcv_arrays, last_candle_ts)
+                    total_candles += len(df)
+                    print(f"  {symbol} {timeframe}: {len(df):,} candles ({query_duration:.2f}s)")
+                else:
+                    data_cache[(symbol, timeframe)] = (None, None, None)
+                    print(f"  {symbol} {timeframe}: No data ({query_duration:.2f}s)")
 
-                df, ohlcv_arrays, last_candle_ts = data_cache[cache_key]
+        phase1_duration = (datetime.now(timezone.utc) - phase1_start).total_seconds()
+        print(f"  ✓ Phase 1 complete: {total_candles:,} candles in {phase1_duration:.1f}s")
+
+        # ===== PHASE 2: Pre-detect all patterns =====
+        pattern_cache = {}
+        total_patterns = 0
+        phase2_start = datetime.now(timezone.utc)
+
+        min_zone_pcts = parameter_grid.get('min_zone_pct', [0.15])
+        use_overlaps = parameter_grid.get('use_overlap', [True])
+
+        print(f"\n[Phase 2/3] Detecting patterns ({len(pattern_types)} types × {len(timeframes)} timeframes)...")
+
+        for symbol in symbols:
+            for timeframe in timeframes:
+                df, ohlcv, last_ts = data_cache.get((symbol, timeframe), (None, None, None))
+                if df is None:
+                    continue
+
+                tf_start = datetime.now(timezone.utc)
+                tf_patterns = 0
+                for pattern_type in pattern_types:
+                    detector = _detectors.get(pattern_type)
+                    if not detector:
+                        continue
+
+                    for min_zone_pct in min_zone_pcts:
+                        for use_overlap in use_overlaps:
+                            cache_key = (symbol, timeframe, pattern_type, min_zone_pct, use_overlap)
+                            patterns = detector.detect_historical(
+                                df,
+                                min_zone_pct=min_zone_pct,
+                                skip_overlap=not use_overlap
+                            )
+                            pattern_cache[cache_key] = patterns
+                            tf_patterns += len(patterns)
+                            total_patterns += len(patterns)
+
+                tf_duration = (datetime.now(timezone.utc) - tf_start).total_seconds()
+                print(f"  {symbol} {timeframe}: {tf_patterns:,} patterns ({tf_duration:.2f}s)")
+
+        phase2_duration = (datetime.now(timezone.utc) - phase2_start).total_seconds()
+        print(f"  ✓ Phase 2 complete: {total_patterns:,} patterns in {phase2_duration:.1f}s")
+
+        # ===== PHASE 3: Fast parameter sweep =====
+        phase3_start = datetime.now(timezone.utc)
+        print(f"\n[Phase 3/3] Running parameter sweep ({total:,} combinations)...")
+
+        for symbol in symbols:
+            for timeframe in timeframes:
+                df, ohlcv_arrays, last_candle_ts = data_cache.get((symbol, timeframe), (None, None, None))
 
                 if df is None:
-                    # Skip all runs for this scope
                     skipped += len(pattern_types) * len(param_combinations)
                     processed += len(pattern_types) * len(param_combinations)
                     if progress_callback:
@@ -1038,22 +1088,11 @@ class ParameterOptimizer:
                         processed += 1
 
                         try:
-                            # Get cached patterns or detect new ones
                             min_zone_pct = param_dict.get('min_zone_pct', 0.15)
                             use_overlap = param_dict.get('use_overlap', True)
                             pattern_cache_key = (symbol, timeframe, pattern_type, min_zone_pct, use_overlap)
+                            patterns = pattern_cache.get(pattern_cache_key, [])
 
-                            if pattern_cache_key not in pattern_cache:
-                                patterns = detector.detect_historical(
-                                    df,
-                                    min_zone_pct=min_zone_pct,
-                                    skip_overlap=not use_overlap
-                                )
-                                pattern_cache[pattern_cache_key] = patterns
-                            else:
-                                patterns = pattern_cache[pattern_cache_key]
-
-                            # Lookup existing run from pre-loaded dict (O(1) instead of DB query)
                             rr_target = param_dict.get('rr_target', 2.0)
                             sl_buffer_pct = param_dict.get('sl_buffer_pct', 10.0)
                             existing_key = (symbol, timeframe, pattern_type, rr_target, sl_buffer_pct)
@@ -1069,13 +1108,11 @@ class ParameterOptimizer:
                                 updated += 1
                             elif result == 'new':
                                 new_runs += 1
-                                # Add new run to cache for future lookups
                                 if run:
                                     existing_runs[existing_key] = run
                             else:
                                 skipped += 1
 
-                            # Track best result
                             if run and run.total_profit_pct is not None and run.total_profit_pct > best_profit:
                                 best_profit = run.total_profit_pct
                                 best_result = run
@@ -1092,19 +1129,15 @@ class ParameterOptimizer:
                         if progress_callback:
                             progress_callback(processed, total)
 
-                        # Batch commit for performance (every BATCH_COMMIT_SIZE runs)
                         if pending_commits >= BATCH_COMMIT_SIZE:
                             db.session.commit()
                             pending_commits = 0
 
-        # Final commit for any remaining
         if pending_commits > 0:
             db.session.commit()
 
-        log_system(
-            f"Incremental optimization complete: {updated} updated, {new_runs} new, "
-            f"{skipped} skipped, {errors} errors"
-        )
+        phase3_duration = (datetime.now(timezone.utc) - phase3_start).total_seconds()
+        print(f"  ✓ Phase 3 complete: {updated + new_runs + skipped:,} runs in {phase3_duration:.1f}s")
 
         # Build best result dict
         best_result_dict = None

@@ -24,7 +24,7 @@ def scan_patterns_job(
         Dict with scan results
     """
     from app import create_app, db
-    from app.models import Symbol, Pattern
+    from app.models import Symbol
     from app.services.patterns import scan_all_patterns
 
     app = create_app()
@@ -92,8 +92,8 @@ def process_signals_job(
     Returns:
         Dict with processing results
     """
-    from app import create_app, db
-    from app.models import Symbol, Signal
+    from app import create_app
+    from app.models import Symbol
     from app.services.signal_generator import generate_signals_for_symbol
 
     app = create_app()

@@ -4,12 +4,10 @@ Provides concurrent notification delivery using asyncio and aiohttp
 """
 import asyncio
 import aiohttp
-from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
-import json
 
 from app.config import Config
-from app.constants import HTTP_TIMEOUT_DEFAULT, CIRCUIT_BREAKER_FAIL_MAX
+from app.constants import HTTP_TIMEOUT_DEFAULT
 
 
 # Connection pool settings

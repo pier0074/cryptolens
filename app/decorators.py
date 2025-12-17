@@ -3,7 +3,7 @@ Access Control Decorators
 Decorators for enforcing subscription-based feature access.
 """
 from functools import wraps
-from flask import session, redirect, url_for, flash, request, abort, jsonify, g
+from flask import session, redirect, url_for, flash, request, jsonify
 from app.services.auth import get_user_by_id
 
 # Tier hierarchy for comparison

@@ -14,7 +14,7 @@ from app import db
 from app.services.logger import log_notify, log_error
 from app.constants import (
     CIRCUIT_BREAKER_FAIL_MAX, CIRCUIT_BREAKER_RESET_TIMEOUT,
-    HTTP_TIMEOUT_DEFAULT, PRIORITY_URGENT
+    HTTP_TIMEOUT_DEFAULT
 )
 
 # Circuit breaker for NTFY service
@@ -266,7 +266,7 @@ def notify_signal(signal: Signal, test_mode: bool = False, current_price: float 
             details={'direction': direction_text, 'pattern': pattern_type, 'tf': pattern_tf, 'entry': entry, 'confluence': signal.confluence_score}
         )
     else:
-        log_notify(f"Failed to send notification", symbol=symbol_name, level='ERROR')
+        log_notify("Failed to send notification", symbol=symbol_name, level='ERROR')
 
     db.session.commit()
 
@@ -609,7 +609,7 @@ def notify_all_subscribers(signal: Signal, test_mode: bool = False,
         )
     else:
         log_notify(
-            f"Failed to send notification to any subscriber",
+            "Failed to send notification to any subscriber",
             symbol=symbol_name,
             level='ERROR'
         )

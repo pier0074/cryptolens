@@ -269,7 +269,7 @@ class User(db.Model):
         return UserNotification.query.filter(
             UserNotification.user_id == self.id,
             UserNotification.sent_at >= today_start,
-            UserNotification.success == True
+            UserNotification.success.is_(True)
         ).count()
 
     def can_receive_notification_now(self):

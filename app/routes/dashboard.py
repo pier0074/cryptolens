@@ -3,14 +3,13 @@ Dashboard routes for the main application interface.
 
 Provides the main dashboard with symbol/timeframe matrix and analytics views.
 """
-from flask import Blueprint, render_template, jsonify
+from flask import Blueprint, render_template
 from app.models import Symbol, Pattern, Signal, Candle, SUBSCRIPTION_TIERS
 from app.config import Config
 from app.services.patterns import PATTERN_TYPES
 from app.decorators import login_required, feature_required, get_current_user, get_effective_tier, filter_symbols_by_tier
 from app import db
 from sqlalchemy import func
-from sqlalchemy.orm import joinedload
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 
@@ -217,7 +216,7 @@ def analytics():
         Symbol.symbol,
         func.count(Pattern.id).label('pattern_count')
     ).join(Pattern, Pattern.symbol_id == Symbol.id).filter(
-        Symbol.is_active == True,
+        Symbol.is_active.is_(True),
         Pattern.status == 'active'
     ).group_by(Symbol.id, Symbol.symbol).order_by(
         func.count(Pattern.id).desc()

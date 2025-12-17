@@ -16,7 +16,6 @@ Bearish Liquidity Sweep (Sweep High):
 """
 from typing import List, Dict, Any, Optional
 import pandas as pd
-import numpy as np
 from app.services.patterns.base import PatternDetector
 from app.models import Symbol, Pattern
 from app import db

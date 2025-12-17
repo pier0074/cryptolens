@@ -3,9 +3,8 @@ Tests for Tier-Based Feature Access
 Tests that Free, Pro, and Premium users have correct feature access
 """
 import pytest
-from datetime import datetime, timezone
 from app import db
-from app.models import User, Symbol, Pattern, Signal, Subscription, Candle
+from app.models import User, Subscription
 from app.models.base import SUBSCRIPTION_TIERS
 
 

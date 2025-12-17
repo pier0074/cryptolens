@@ -4,8 +4,7 @@ Tests dashboard, stats, logs, patterns, signals, backtest routes
 """
 import pytest
 from unittest.mock import patch
-from flask import url_for
-from app.models import Symbol, Candle, Pattern, Signal, Log, Backtest, Setting
+from app.models import Signal, Log
 from app import db
 from tests.conftest import login_user
 
@@ -57,7 +56,7 @@ class TestDashboardRoutes:
     def test_analytics_redirects_free_users(self, client, app):
         """Test analytics redirects free tier users"""
         from app.models import User, Subscription
-        from datetime import datetime, timezone, timedelta
+        from datetime import datetime, timezone
 
         # Create a free user
         with app.app_context():

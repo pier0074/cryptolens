@@ -16,7 +16,7 @@ from datetime import datetime, timezone, timedelta
 os.environ['FLASK_ENV'] = 'testing'
 
 from app import create_app, db
-from app.models import Symbol, Candle, Pattern, Signal, User, Subscription, SUBSCRIPTION_PLANS
+from app.models import Symbol, Candle, Pattern, Signal, User, Subscription
 
 
 @pytest.fixture(scope='function')

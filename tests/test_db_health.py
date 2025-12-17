@@ -14,7 +14,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app import create_app, db
-from app.models import Symbol, Candle, KnownGap
+from app.models import Symbol, Candle
 from scripts.db_health import (
     check_candle_ohlcv,
     check_candle_alignment,
@@ -26,9 +26,7 @@ from scripts.db_health import (
     verify_aggregated_candles,
     get_verification_stats,
     reset_verification,
-    BATCH_SIZES,
-    TF_MS,
-    TF_1M_COUNT
+    BATCH_SIZES
 )
 
 

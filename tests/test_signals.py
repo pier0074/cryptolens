@@ -1,11 +1,8 @@
 """
 Tests for Signal Generation
 """
-import pytest
-import json
-from datetime import datetime, timedelta, timezone
 from unittest.mock import patch, MagicMock
-from app.models import Pattern, Symbol, Signal, Setting, Candle
+from app.models import Pattern, Setting, Candle
 from app.services.signals import (
     calculate_atr,
     generate_signal_from_pattern,

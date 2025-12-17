@@ -1,10 +1,8 @@
 """
 Tests for Fair Value Gap (FVG) Pattern Detection
 """
-import pytest
-from app.models import Pattern, Symbol, Candle
-from app.services.patterns.fair_value_gap import FVGDetector, ImbalanceDetector
-from app.config import Config
+from app.models import Pattern, Candle
+from app.services.patterns.fair_value_gap import FVGDetector
 from app import db
 
 

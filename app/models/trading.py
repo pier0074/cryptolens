@@ -1,6 +1,7 @@
 """
 Trading models: Symbol, Candle, Pattern, Signal, Notification
 """
+import json
 from datetime import datetime, timezone
 from app import db
 

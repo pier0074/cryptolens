@@ -2,9 +2,8 @@
 Tests for Services
 Tests scheduler, aggregator, data_fetcher, logger services
 """
-import pytest
 from unittest.mock import patch, MagicMock
-from app.models import Symbol, Candle, Pattern, Log
+from app.models import Candle, Log
 from app import db
 
 

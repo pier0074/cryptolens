@@ -3,7 +3,7 @@ Redis Queue Configuration and Helpers
 """
 import os
 import logging
-from typing import Optional, Callable, Any
+from typing import Optional, Callable
 from redis import Redis
 from rq import Queue
 from rq.job import Job

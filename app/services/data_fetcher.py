@@ -2,7 +2,7 @@
 Data Fetcher Service
 Fetches OHLC candles via CCXT (Binance by default - 1000 candles/request)
 """
-from typing import Tuple, List, Dict, Any, Optional, Callable
+from typing import Tuple
 import ccxt
 import time
 import logging

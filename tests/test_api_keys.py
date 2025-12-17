@@ -16,8 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime, timezone, timedelta
 from app import create_app, db
 from app.models import (
-    User, Symbol, ApiKey, IpRule, ApiKeyUsage, ApiResponse,
-    API_KEY_STATUS, API_KEY_SCOPES
+    User, Symbol, ApiKey, IpRule, ApiKeyUsage, ApiResponse
 )
 
 

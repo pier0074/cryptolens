@@ -4,11 +4,9 @@ Tests for Admin Routes
 Tests the admin panel functionality including user management,
 subscription management, cron jobs, and system settings.
 """
-import pytest
-from datetime import datetime, timezone, timedelta
 from tests.conftest import login_user
 from app import db
-from app.models import User, Subscription, Symbol, CronJob, CronRun
+from app.models import User, Symbol, CronJob
 
 
 class TestAdminAccess:

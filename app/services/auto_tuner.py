@@ -6,7 +6,6 @@ from optimization runs to their symbol notification preferences.
 """
 import logging
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timezone
 
 from app import db
 from app.models import (

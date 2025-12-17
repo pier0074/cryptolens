@@ -7,7 +7,7 @@ import requests
 import signal
 from contextlib import contextmanager
 from datetime import datetime, timezone
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 from app.config import Config
 
 

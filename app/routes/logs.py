@@ -3,7 +3,7 @@ Logs Routes
 View and filter system logs (Admin only)
 """
 from flask import Blueprint, render_template, request, jsonify
-from app.models import Log, LOG_CATEGORIES, LOG_LEVELS, Symbol
+from app.models import LOG_CATEGORIES, LOG_LEVELS, Symbol
 from app.services.logger import get_recent_logs, get_log_stats
 from app.decorators import admin_required
 

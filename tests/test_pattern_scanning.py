@@ -3,9 +3,9 @@ Tests for Pattern Scanning and Deduplication
 Tests scan_all_patterns, scan_symbol, deduplicate_patterns, calculate_zone_overlap
 """
 import pytest
-from datetime import datetime, timezone
+from datetime import datetime
 from app import db
-from app.models import Symbol, Pattern, Candle
+from app.models import Pattern, Candle
 from app.services.patterns import (
     PATTERN_TYPES, OVERLAP_THRESHOLD,
     calculate_zone_overlap, deduplicate_patterns,

@@ -34,7 +34,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app import create_app, db
 from app.models import (
     OptimizationJob, OptimizationRun, Symbol, Candle,
-    DEFAULT_PARAMETER_GRID, QUICK_PARAMETER_GRID
+    QUICK_PARAMETER_GRID
 )
 from app.services.optimizer import optimizer
 

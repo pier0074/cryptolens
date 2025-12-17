@@ -8,9 +8,7 @@ Tests the core fetch functions used by both fetch.py and fetch_historical.py:
 - save_candles_to_db: Database saving with deduplication
 """
 import pytest
-import asyncio
-from datetime import datetime, timezone
-from unittest.mock import Mock, AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, patch
 
 from scripts.utils.fetch_utils import (
     get_all_last_timestamps,
@@ -375,7 +373,7 @@ class TestIntegration:
 
     def test_full_fetch_workflow(self, app):
         """Test the complete fetch workflow with mocked exchange."""
-        from app.models import Symbol, Candle
+        from app.models import Symbol
         from app import db
 
         with app.app_context():

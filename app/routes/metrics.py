@@ -113,8 +113,7 @@ JOB_PROCESSING_TIME = Histogram(
 def update_metrics():
     """Update gauge metrics with current values from database"""
     from flask import current_app
-    from app import db
-    from app.models import Pattern, User, Subscription, Symbol
+    from app.models import Pattern, User, Subscription
 
     try:
         # Pattern counts by type
@@ -161,7 +160,7 @@ def metrics():
 # Middleware functions to record request metrics
 def before_request():
     """Record request start time"""
-    from flask import g, request
+    from flask import g
     g.start_time = time.time()
 
 

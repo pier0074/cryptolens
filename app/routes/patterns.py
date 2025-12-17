@@ -7,8 +7,7 @@ from flask import Blueprint, render_template, request, jsonify
 import json
 from app.models import Symbol, Pattern, Candle, StatsCache
 from app.config import Config
-from app import db
-from app.decorators import feature_required, login_required, limit_query_results, get_current_user, check_feature_limit, filter_symbols_by_tier
+from app.decorators import feature_required, login_required, get_current_user, check_feature_limit, filter_symbols_by_tier
 
 
 def _get_cached_prices():

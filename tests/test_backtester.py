@@ -5,9 +5,8 @@ Tests pattern detection, trade simulation, and statistics calculation
 import pytest
 import pandas as pd
 import numpy as np
-from datetime import datetime, timezone
 from app import db
-from app.models import Symbol, Backtest
+from app.models import Backtest
 from app.services.backtester import (
     run_backtest, simulate_trades, simulate_single_trade,
     calculate_statistics

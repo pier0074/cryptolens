@@ -3,7 +3,7 @@ Portfolio Routes
 CRUD operations for portfolios, trades, and journal entries.
 """
 from flask import Blueprint, render_template, request, jsonify, abort, redirect, url_for, flash
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from app.models import (
     Portfolio, Trade, JournalEntry, TradeTag, Signal, Symbol,
     TRADE_MOODS, TRADE_STATUSES
@@ -435,7 +435,6 @@ def new_trade(portfolio_id):
 def trade_detail(portfolio_id, trade_id):
     """Trade detail view with journal entries"""
     from app.models import Candle
-    from sqlalchemy import func, and_
 
     user = get_current_user()
     portfolio = db.session.get(Portfolio, portfolio_id)

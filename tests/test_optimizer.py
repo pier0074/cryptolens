@@ -7,7 +7,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timezone
 from app import db
-from app.models import Symbol, Candle, OptimizationJob, OptimizationRun
+from app.models import Symbol, Candle, OptimizationRun
 from app.services.optimizer import ParameterOptimizer, optimizer
 from app.services.aggregator import get_candles_as_dataframe
 

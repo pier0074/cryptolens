@@ -3,7 +3,6 @@ Tests for Email Service
 
 Tests the email sending functionality with mocked SMTP.
 """
-import pytest
 from unittest.mock import patch, MagicMock
 from app.services.email import (
     send_email,
@@ -11,8 +10,7 @@ from app.services.email import (
     send_password_reset_email,
     send_welcome_email,
     send_password_changed_email,
-    is_email_configured,
-    EmailError
+    is_email_configured
 )
 
 

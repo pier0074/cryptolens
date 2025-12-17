@@ -3,8 +3,8 @@ Payment Routes
 Handles checkout, webhooks, and payment status for LemonSqueezy and NOWPayments
 """
 from flask import Blueprint, request, jsonify, render_template, redirect, url_for, flash
-from app import db, csrf
-from app.models import User, Payment, SUBSCRIPTION_PLANS
+from app import csrf
+from app.models import Payment, SUBSCRIPTION_PLANS
 from app.decorators import login_required, get_current_user
 from app.services.payment import (
     is_lemonsqueezy_configured,

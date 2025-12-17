@@ -3,7 +3,7 @@ Signal Generation Service
 Generates trade signals from detected patterns
 """
 import json
-from typing import Optional, Dict, List
+from typing import Optional, Dict
 from app.models import Symbol, Pattern, Signal, Setting
 from app.config import Config
 from app import db

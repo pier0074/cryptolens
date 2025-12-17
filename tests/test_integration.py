@@ -35,7 +35,6 @@ class TestPatternDetectionPipeline:
 
     def test_detector_accepts_preloaded_dataframe(self, app, sample_candles_bullish_fvg):
         """Test that detectors accept pre-loaded DataFrame (Phase 3.3 optimization)"""
-        import pandas as pd
         from app.services.patterns.fair_value_gap import FVGDetector as ImbalanceDetector
         from app.services.aggregator import get_candles_as_dataframe
 

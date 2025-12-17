@@ -13,10 +13,10 @@ Test scenarios:
 - Lifetime subscriber: CAN receive notifications (forever)
 """
 import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from datetime import datetime, timezone, timedelta
 from app import db
-from app.models import User, Subscription, Signal, Symbol, Pattern
+from app.models import User, Signal, Pattern
 from app.services.notifier import get_eligible_subscribers, notify_all_subscribers
 
 

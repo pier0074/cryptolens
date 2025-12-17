@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from datetime import datetime, timezone
 from app import create_app, db
 from app.models import Symbol, Candle, Pattern, Signal, StatsCache
-from sqlalchemy import func, and_
+from sqlalchemy import func
 
 
 def compute_stats():

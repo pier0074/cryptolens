@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from flask import Blueprint, render_template, request, redirect, url_for, flash, session, jsonify, g
 from app.services.auth import (
     register_user, authenticate_user, change_password,
-    get_user_by_id, AuthError, validate_password
+    AuthError, validate_password
 )
 from app.services.lockout import record_failed_attempt, is_locked, clear_lockout
 from app.services.subscription import check_subscription_status

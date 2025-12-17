@@ -1,8 +1,7 @@
 """
 Tests for Liquidity Sweep Pattern Detection
 """
-import pytest
-from app.models import Pattern, Symbol, Candle
+from app.models import Candle
 from app.services.patterns.liquidity import LiquiditySweepDetector
 from app import db
 
@@ -13,7 +12,6 @@ class TestSwingPointDetection:
     def test_find_swing_high(self, app, sample_symbol):
         """Test detection of swing highs"""
         with app.app_context():
-            import pandas as pd
             base_time = 1700000000000
 
             # Create pattern: low-low-HIGH-low-low (swing high in middle)

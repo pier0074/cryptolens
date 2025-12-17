@@ -9,7 +9,6 @@ from app.models import (
     User, Subscription, BroadcastNotification, ScheduledNotification
 )
 from app.services.notifier import send_notification
-from app.config import Config
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,10 +27,10 @@ def get_target_users(target_audience: str, custom_topics: str = None) -> list:
     """
     # Base query: active, verified users with ntfy_topic
     query = User.query.filter(
-        User.is_active == True,
-        User.is_verified == True,
+        User.is_active.is_(True),
+        User.is_verified.is_(True),
         User.ntfy_topic.isnot(None),
-        User.notify_enabled == True
+        User.notify_enabled.is_(True)
     )
 
     if target_audience == 'free':

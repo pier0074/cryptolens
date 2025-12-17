@@ -12,7 +12,6 @@ import pandas as pd
 from app.services.patterns.base import PatternDetector
 from app.models import Symbol
 from app.config import Config
-from app import db
 
 
 class FVGDetector(PatternDetector):

@@ -3,11 +3,9 @@ Tests for Broadcast Notification Service
 
 Tests the broadcast notification functionality with mocked notifications.
 """
-import pytest
-from unittest.mock import patch, MagicMock
-from datetime import datetime, timezone
+from unittest.mock import patch
 from app import db
-from app.models import User, Subscription, BroadcastNotification
+from app.models import User, BroadcastNotification
 from app.services.broadcast import (
     get_target_users,
     send_broadcast,

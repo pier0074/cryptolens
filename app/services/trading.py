@@ -2,7 +2,7 @@
 Trading Calculations Service
 Professional SMC/ICT-based SL/TP calculations for each pattern type
 """
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 from dataclasses import dataclass
 import pandas as pd
 

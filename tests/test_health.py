@@ -4,7 +4,6 @@ Tests for Health Check Service
 Tests the health check functionality including database,
 cache, and external service connectivity checks.
 """
-import pytest
 from unittest.mock import patch, MagicMock
 from app.services.health import (
     check_database,

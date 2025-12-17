@@ -2,8 +2,7 @@
 Tests for Notification Service
 Tests send_notification, notify_all_subscribers, per-user notifications, tier filtering
 """
-import pytest
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from unittest.mock import patch, MagicMock
 from app import db
 from app.models import (

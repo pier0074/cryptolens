@@ -1,8 +1,7 @@
 """
 Base utilities and constants for models
 """
-from datetime import datetime, timezone, timedelta
-from app import db
+from datetime import datetime, timezone
 
 
 def _ensure_utc_naive(dt):

@@ -128,7 +128,6 @@ def capture_exception(
     Returns:
         Error log ID if stored successfully, None otherwise
     """
-    from flask import current_app
     from app import db
     from app.models.errors import ErrorLog
 

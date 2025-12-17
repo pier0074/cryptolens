@@ -3,7 +3,7 @@ Pattern Detection Package
 """
 import logging
 from app.services.patterns.base import PatternDetector
-from app.services.patterns.fair_value_gap import FVGDetector, ImbalanceDetector  # ImbalanceDetector is alias for backward compat
+from app.services.patterns.fair_value_gap import FVGDetector, ImbalanceDetector as ImbalanceDetector
 from app.services.patterns.order_block import OrderBlockDetector
 from app.services.patterns.liquidity import LiquiditySweepDetector
 

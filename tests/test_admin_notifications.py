@@ -12,8 +12,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 from app import db
 from app.models import (
-    User, Subscription, NotificationTemplate, BroadcastNotification,
-    ScheduledNotification, NOTIFICATION_TEMPLATE_TYPES, NOTIFICATION_TARGETS
+    User, NotificationTemplate, ScheduledNotification, NOTIFICATION_TEMPLATE_TYPES, NOTIFICATION_TARGETS
 )
 
 

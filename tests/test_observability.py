@@ -2,12 +2,10 @@
 Tests for Observability Features
 Tests request ID tracing, health checks, and dependency monitoring
 """
-import pytest
 from unittest.mock import patch, MagicMock
 from app.services.health import (
     check_database, check_cache, check_exchange_api,
-    check_ntfy_service, get_full_health_status,
-    get_liveness_status, get_readiness_status
+    check_ntfy_service, get_full_health_status
 )
 
 
@@ -322,7 +320,6 @@ class TestLoggerRequestId:
 
     def test_get_request_id_in_context(self, app, client):
         """Test get_request_id returns ID in request context"""
-        from app.services.logger import get_request_id
 
         with client.session_transaction():
             # Make a request to set up context

@@ -2,7 +2,7 @@
 API Documentation Routes
 Serves OpenAPI specification and Swagger UI
 """
-from flask import Blueprint, render_template, render_template_string, send_from_directory, current_app, request, jsonify, flash, redirect, url_for
+from flask import Blueprint, render_template, render_template_string, send_from_directory, current_app, flash, redirect, url_for
 from app.decorators import login_required, feature_required, get_current_user
 from app.models import Setting
 import os
