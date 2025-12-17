@@ -102,6 +102,107 @@ class FVGDetector(PatternDetector):
             return False
         return True
 
+    def detect_historical(
+        self,
+        df: pd.DataFrame,
+        min_zone_pct: float = None,
+        skip_overlap: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Detect FVG patterns in historical data WITHOUT database interaction.
+        Used for backtesting to match production detection exactly.
+
+        Args:
+            df: DataFrame with OHLCV data (must have: timestamp, open, high, low, close, volume)
+            min_zone_pct: Minimum zone size as % of price (None = use Config.MIN_ZONE_PERCENT)
+            skip_overlap: If True, skip overlap detection (faster for backtesting)
+
+        Returns:
+            List of detected patterns (dicts with zone_high, zone_low, direction, detected_at, etc.)
+        """
+        from app.config import Config
+
+        if df.empty or len(df) < 3:
+            return []
+
+        min_zone = min_zone_pct if min_zone_pct is not None else Config.MIN_ZONE_PERCENT
+        patterns = []
+        seen_zones = []  # For local overlap tracking
+
+        for i in range(2, len(df)):
+            c1 = df.iloc[i - 2]  # First candle
+            c3 = df.iloc[i]      # Third candle
+
+            # Bullish FVG: Gap between c1 high and c3 low
+            if c1['high'] < c3['low']:
+                zone_low = c1['high']
+                zone_high = c3['low']
+                direction = 'bullish'
+
+                if self._is_valid_historical_pattern(
+                    zone_low, zone_high, direction, min_zone, seen_zones, skip_overlap
+                ):
+                    patterns.append({
+                        'pattern_type': self.pattern_type,
+                        'direction': direction,
+                        'zone_high': float(zone_high),
+                        'zone_low': float(zone_low),
+                        'detected_at': i,
+                        'detected_ts': int(c3['timestamp']) if 'timestamp' in df.columns else None
+                    })
+                    if not skip_overlap:
+                        seen_zones.append((direction, zone_low, zone_high))
+
+            # Bearish FVG: Gap between c1 low and c3 high
+            if c1['low'] > c3['high']:
+                zone_high = c1['low']
+                zone_low = c3['high']
+                direction = 'bearish'
+
+                if self._is_valid_historical_pattern(
+                    zone_low, zone_high, direction, min_zone, seen_zones, skip_overlap
+                ):
+                    patterns.append({
+                        'pattern_type': self.pattern_type,
+                        'direction': direction,
+                        'zone_high': float(zone_high),
+                        'zone_low': float(zone_low),
+                        'detected_at': i,
+                        'detected_ts': int(c3['timestamp']) if 'timestamp' in df.columns else None
+                    })
+                    if not skip_overlap:
+                        seen_zones.append((direction, zone_low, zone_high))
+
+        return patterns
+
+    def _is_valid_historical_pattern(
+        self,
+        zone_low: float,
+        zone_high: float,
+        direction: str,
+        min_zone_pct: float,
+        seen_zones: list,
+        skip_overlap: bool
+    ) -> bool:
+        """Check if pattern is valid for historical detection (no DB access)"""
+        # Check minimum zone size
+        if zone_low <= 0:
+            return False
+        zone_size_pct = ((zone_high - zone_low) / zone_low) * 100
+        if zone_size_pct < min_zone_pct:
+            return False
+
+        # Check overlap with already-detected patterns (same direction only)
+        if not skip_overlap:
+            for seen_dir, seen_low, seen_high in seen_zones:
+                if seen_dir != direction:
+                    continue
+                overlap = self._calculate_zone_overlap(seen_low, seen_high, zone_low, zone_high)
+                if overlap >= 0.7:  # Default threshold
+                    return False
+
+        return True
+
 
 # Backward compatibility alias
 ImbalanceDetector = FVGDetector

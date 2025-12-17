@@ -10,10 +10,11 @@ from app import db
 from app.models import Symbol, Backtest
 from app.services.backtester import (
     run_backtest, simulate_trades, simulate_single_trade,
-    calculate_statistics, _detect_imbalance_trades,
-    _detect_order_block_trades, _detect_liquidity_sweep_trades,
-    _find_swing_points
+    calculate_statistics
 )
+from app.services.patterns.fair_value_gap import FVGDetector
+from app.services.patterns.order_block import OrderBlockDetector
+from app.services.patterns.liquidity import LiquiditySweepDetector
 
 
 class TestCalculateStatistics:
@@ -208,12 +209,11 @@ class TestSimulateSingleTrade:
             assert 'duration_candles' in trade
 
 
-class TestDetectImbalanceTrades:
-    """Tests for _detect_imbalance_trades function"""
+class TestDetectHistoricalPatterns:
+    """Tests for detect_historical methods on pattern detectors"""
 
-    def test_detects_bullish_fvg(self):
-        """Test detection of bullish FVG pattern"""
-        # Create data with a bullish FVG: c1.high < c3.low
+    def test_fvg_detects_bullish_fvg(self):
+        """Test FVG detector finds bullish FVG pattern"""
         timestamps = [1700000000000 + i * 3600000 for i in range(50)]
         data = {
             'timestamp': timestamps,
@@ -230,13 +230,16 @@ class TestDetectImbalanceTrades:
         df.loc[5, 'low'] = 105.0   # c3 low > c1 high = bullish FVG
         df.loc[5, 'close'] = 108.0
 
-        trades = _detect_imbalance_trades(df, rr_target=2.0)
+        detector = FVGDetector()
+        patterns = detector.detect_historical(df, skip_overlap=True)
 
-        # Should detect at least one pattern (may or may not generate trade)
-        assert isinstance(trades, list)
+        assert isinstance(patterns, list)
+        # Should find at least the bullish FVG we created
+        bullish_patterns = [p for p in patterns if p['direction'] == 'bullish']
+        assert len(bullish_patterns) > 0
 
-    def test_detects_bearish_fvg(self):
-        """Test detection of bearish FVG pattern"""
+    def test_fvg_detects_bearish_fvg(self):
+        """Test FVG detector finds bearish FVG pattern"""
         timestamps = [1700000000000 + i * 3600000 for i in range(50)]
         data = {
             'timestamp': timestamps,
@@ -253,11 +256,12 @@ class TestDetectImbalanceTrades:
         df.loc[5, 'high'] = 95.0   # c3 high < c1 low = bearish FVG
         df.loc[5, 'close'] = 92.0
 
-        trades = _detect_imbalance_trades(df, rr_target=2.0)
+        detector = FVGDetector()
+        patterns = detector.detect_historical(df, skip_overlap=True)
 
-        assert isinstance(trades, list)
+        assert isinstance(patterns, list)
 
-    def test_no_fvg_when_no_gap(self):
+    def test_fvg_no_pattern_when_no_gap(self):
         """Test no FVG detected when candles overlap"""
         timestamps = [1700000000000 + i * 3600000 for i in range(50)]
         data = {
@@ -270,18 +274,15 @@ class TestDetectImbalanceTrades:
         }
         df = pd.DataFrame(data)
 
-        # All candles overlap - no FVG possible
-        trades = _detect_imbalance_trades(df, rr_target=2.0)
+        detector = FVGDetector()
+        patterns = detector.detect_historical(df, skip_overlap=True)
 
-        assert isinstance(trades, list)
-        # May be empty or have trades from other patterns
+        # All candles overlap - should be empty
+        assert isinstance(patterns, list)
+        assert len(patterns) == 0
 
-
-class TestDetectOrderBlockTrades:
-    """Tests for _detect_order_block_trades function"""
-
-    def test_detects_bullish_order_block(self):
-        """Test detection of bullish order block"""
+    def test_order_block_detects_bullish(self):
+        """Test OrderBlock detector finds bullish order block"""
         timestamps = [1700000000000 + i * 3600000 for i in range(50)]
         data = {
             'timestamp': timestamps,
@@ -301,11 +302,12 @@ class TestDetectOrderBlockTrades:
         df.loc[21, 'close'] = 115.0  # Strong bullish move
         df.loc[21, 'high'] = 116.0
 
-        trades = _detect_order_block_trades(df, rr_target=2.0)
+        detector = OrderBlockDetector()
+        patterns = detector.detect_historical(df, skip_overlap=True)
 
-        assert isinstance(trades, list)
+        assert isinstance(patterns, list)
 
-    def test_no_ob_on_weak_move(self):
+    def test_order_block_no_ob_on_weak_move(self):
         """Test no OB detected on weak moves"""
         timestamps = [1700000000000 + i * 3600000 for i in range(50)]
         data = {
@@ -318,17 +320,14 @@ class TestDetectOrderBlockTrades:
         }
         df = pd.DataFrame(data)
 
-        trades = _detect_order_block_trades(df, rr_target=2.0)
+        detector = OrderBlockDetector()
+        patterns = detector.detect_historical(df, skip_overlap=True)
 
-        # Weak moves shouldn't generate OB trades
-        assert isinstance(trades, list)
+        # Weak moves shouldn't generate OB patterns
+        assert isinstance(patterns, list)
 
-
-class TestDetectLiquiditySweepTrades:
-    """Tests for _detect_liquidity_sweep_trades function"""
-
-    def test_finds_swing_points(self):
-        """Test swing point detection helper"""
+    def test_liquidity_sweep_finds_swing_points(self):
+        """Test swing point detection in LiquiditySweep detector"""
         timestamps = [1700000000000 + i * 3600000 for i in range(30)]
         data = {
             'timestamp': timestamps,
@@ -346,12 +345,13 @@ class TestDetectLiquiditySweepTrades:
         # Create a clear swing low at index 15
         df.loc[15, 'low'] = 90.0
 
-        swing_highs, swing_lows = _find_swing_points(df, lookback=3)
+        detector = LiquiditySweepDetector()
+        swing_highs, swing_lows = detector.find_swing_points(df, lookback=3)
 
         assert isinstance(swing_highs, list)
         assert isinstance(swing_lows, list)
 
-    def test_detects_bullish_sweep(self):
+    def test_liquidity_sweep_detects_bullish(self):
         """Test detection of bullish liquidity sweep"""
         timestamps = [1700000000000 + i * 3600000 for i in range(60)]
         data = {
@@ -371,9 +371,10 @@ class TestDetectLiquiditySweepTrades:
         df.loc[40, 'low'] = 88.0   # Sweeps below swing low
         df.loc[40, 'close'] = 95.0  # Closes above the swept level
 
-        trades = _detect_liquidity_sweep_trades(df, rr_target=2.0)
+        detector = LiquiditySweepDetector()
+        patterns = detector.detect_historical(df, skip_overlap=True)
 
-        assert isinstance(trades, list)
+        assert isinstance(patterns, list)
 
 
 class TestSimulateTrades:

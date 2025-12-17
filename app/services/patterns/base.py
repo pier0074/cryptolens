@@ -370,6 +370,27 @@ class PatternDetector(ABC):
         """
         pass
 
+    def detect_historical(
+        self,
+        df: pd.DataFrame,
+        min_zone_pct: float = None,
+        skip_overlap: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Detect patterns in historical data WITHOUT database interaction.
+        Used for backtesting to match production detection exactly.
+
+        Args:
+            df: DataFrame with OHLCV data (must have: timestamp, open, high, low, close, volume)
+            min_zone_pct: Minimum zone size as % of price (None = use Config.MIN_ZONE_PERCENT)
+            skip_overlap: If True, skip overlap detection (faster for backtesting)
+
+        Returns:
+            List of detected patterns (dicts with zone_high, zone_low, direction, detected_at, etc.)
+        """
+        # Default implementation - subclasses should override for specific logic
+        raise NotImplementedError(f"{self.__class__.__name__} must implement detect_historical()")
+
     def get_candles_df(self, symbol: str, timeframe: str, limit: int = 200) -> pd.DataFrame:
         """Get candles as DataFrame"""
         from app.services.aggregator import get_candles_as_dataframe

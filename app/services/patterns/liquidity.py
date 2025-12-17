@@ -249,3 +249,125 @@ class LiquiditySweepDetector(PatternDetector):
         if commit:
             db.session.commit()
         return updated
+
+    def detect_historical(
+        self,
+        df: pd.DataFrame,
+        min_zone_pct: float = None,
+        skip_overlap: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Detect Liquidity Sweep patterns in historical data WITHOUT database interaction.
+        Used for backtesting to match production detection exactly.
+
+        Args:
+            df: DataFrame with OHLCV data (must have: timestamp, open, high, low, close, volume)
+            min_zone_pct: Minimum zone size as % of price (None = use Config.MIN_ZONE_PERCENT)
+            skip_overlap: If True, skip overlap detection (faster for backtesting)
+
+        Returns:
+            List of detected patterns (dicts with zone_high, zone_low, direction, detected_at, etc.)
+        """
+        from app.config import Config
+
+        if df.empty or len(df) < 20:
+            return []
+
+        min_zone = min_zone_pct if min_zone_pct is not None else Config.MIN_ZONE_PERCENT
+        patterns = []
+        seen_zones = []  # For local overlap tracking
+
+        # Find swing points (same as production)
+        swing_highs, swing_lows = self.find_swing_points(df, lookback=3)
+
+        # Scan through all candles (not just recent 10 like production)
+        for i in range(10, len(df)):
+            current = df.iloc[i]
+
+            # Check for bullish sweep (sweep of lows)
+            for swing_low in swing_lows:
+                # Skip if swing is too recent or too old
+                if swing_low['index'] >= i - 3 or swing_low['index'] < i - 50:
+                    continue
+
+                # Check if current candle swept the low and reversed
+                if current['low'] < swing_low['price'] and current['close'] > swing_low['price']:
+                    zone_low = current['low']
+                    zone_high = swing_low['price']
+                    direction = 'bullish'
+
+                    # Validate zone
+                    if self._is_valid_historical_sweep(
+                        zone_low, zone_high, direction, min_zone, seen_zones, skip_overlap
+                    ):
+                        patterns.append({
+                            'pattern_type': self.pattern_type,
+                            'direction': direction,
+                            'zone_high': float(zone_high),
+                            'zone_low': float(zone_low),
+                            'detected_at': i,
+                            'detected_ts': int(current['timestamp']) if 'timestamp' in df.columns else None,
+                            'swept_level': float(swing_low['price'])
+                        })
+                        if not skip_overlap:
+                            seen_zones.append((direction, zone_low, zone_high))
+                    break  # Only one sweep per candle
+
+            # Check for bearish sweep (sweep of highs)
+            for swing_high in swing_highs:
+                if swing_high['index'] >= i - 3 or swing_high['index'] < i - 50:
+                    continue
+
+                if current['high'] > swing_high['price'] and current['close'] < swing_high['price']:
+                    zone_high = current['high']
+                    zone_low = swing_high['price']
+                    direction = 'bearish'
+
+                    # Validate zone
+                    if self._is_valid_historical_sweep(
+                        zone_low, zone_high, direction, min_zone, seen_zones, skip_overlap
+                    ):
+                        patterns.append({
+                            'pattern_type': self.pattern_type,
+                            'direction': direction,
+                            'zone_high': float(zone_high),
+                            'zone_low': float(zone_low),
+                            'detected_at': i,
+                            'detected_ts': int(current['timestamp']) if 'timestamp' in df.columns else None,
+                            'swept_level': float(swing_high['price'])
+                        })
+                        if not skip_overlap:
+                            seen_zones.append((direction, zone_low, zone_high))
+                    break  # Only one sweep per candle
+
+        return patterns
+
+    def _is_valid_historical_sweep(
+        self,
+        zone_low: float,
+        zone_high: float,
+        direction: str,
+        min_zone_pct: float,
+        seen_zones: list,
+        skip_overlap: bool
+    ) -> bool:
+        """Check if sweep pattern is valid for historical detection (no DB access)"""
+        # Must have positive zone
+        if zone_high <= zone_low or zone_low <= 0:
+            return False
+
+        # Check minimum zone size
+        zone_size_pct = ((zone_high - zone_low) / zone_low) * 100
+        if zone_size_pct < min_zone_pct:
+            return False
+
+        # Check overlap with already-detected patterns
+        if not skip_overlap:
+            for seen_dir, seen_low, seen_high in seen_zones:
+                if seen_dir != direction:
+                    continue
+                overlap = self._calculate_zone_overlap(seen_low, seen_high, zone_low, zone_high)
+                if overlap >= 0.7:
+                    return False
+
+        return True
