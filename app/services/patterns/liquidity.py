@@ -75,7 +75,8 @@ class LiquiditySweepDetector(PatternDetector):
         symbol: str,
         timeframe: str,
         limit: int = 200,
-        df: Optional[pd.DataFrame] = None
+        df: Optional[pd.DataFrame] = None,
+        precomputed: dict = None
     ) -> List[Dict[str, Any]]:
         """
         Detect Liquidity Sweeps in the given symbol/timeframe
@@ -85,6 +86,7 @@ class LiquiditySweepDetector(PatternDetector):
             timeframe: Candle timeframe (e.g., '1h')
             limit: Number of candles to analyze
             df: Optional pre-loaded DataFrame (avoids redundant DB queries)
+            precomputed: Optional dict with pre-calculated {'atr', 'swing_high', 'swing_low'}
 
         Returns:
             List of detected liquidity sweep patterns
@@ -133,7 +135,8 @@ class LiquiditySweepDetector(PatternDetector):
 
                     pattern_dict = self.save_pattern(
                         sym.id, timeframe, 'bullish', zone_low, zone_high,
-                        int(current['timestamp']), symbol, df
+                        int(current['timestamp']), symbol, df,
+                        precomputed=precomputed
                     )
                     if pattern_dict:
                         pattern_dict['swept_level'] = swing_low['price']
@@ -162,14 +165,15 @@ class LiquiditySweepDetector(PatternDetector):
 
                     pattern_dict = self.save_pattern(
                         sym.id, timeframe, 'bearish', zone_low, zone_high,
-                        int(current['timestamp']), symbol, df
+                        int(current['timestamp']), symbol, df,
+                        precomputed=precomputed
                     )
                     if pattern_dict:
                         pattern_dict['swept_level'] = swing_high['price']
                         patterns.append(pattern_dict)
                     break  # Only one sweep per candle
 
-        db.session.commit()
+        # Don't commit here - let caller batch commits
         return patterns
 
     def check_fill(self, pattern: Dict[str, Any], current_price: float) -> Dict[str, Any]:
@@ -203,9 +207,15 @@ class LiquiditySweepDetector(PatternDetector):
             else:
                 return {**pattern, 'status': 'active', 'fill_percentage': 50}
 
-    def update_pattern_status(self, symbol: str, timeframe: str, current_price: float) -> int:
+    def update_pattern_status(self, symbol: str, timeframe: str, current_price: float, commit: bool = True) -> int:
         """
         Update the status of all active liquidity sweep patterns
+
+        Args:
+            symbol: Trading pair
+            timeframe: Timeframe
+            current_price: Current market price
+            commit: Whether to commit immediately (False for batching)
 
         Returns:
             Number of patterns updated
@@ -236,5 +246,6 @@ class LiquiditySweepDetector(PatternDetector):
 
             pattern.fill_percentage = result.get('fill_percentage', 0)
 
-        db.session.commit()
+        if commit:
+            db.session.commit()
         return updated

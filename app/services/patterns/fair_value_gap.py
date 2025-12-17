@@ -29,7 +29,8 @@ class FVGDetector(PatternDetector):
         symbol: str,
         timeframe: str,
         limit: int = 200,
-        df: Optional[pd.DataFrame] = None
+        df: Optional[pd.DataFrame] = None,
+        precomputed: dict = None
     ) -> List[Dict[str, Any]]:
         """
         Detect Fair Value Gaps in the given symbol/timeframe
@@ -39,6 +40,7 @@ class FVGDetector(PatternDetector):
             timeframe: Candle timeframe (e.g., '1h')
             limit: Number of candles to analyze
             df: Optional pre-loaded DataFrame (avoids redundant DB queries)
+            precomputed: Optional dict with pre-calculated {'atr', 'swing_high', 'swing_low'}
 
         Returns:
             List of detected FVG patterns
@@ -67,7 +69,8 @@ class FVGDetector(PatternDetector):
 
                 if self._should_save_pattern(sym.id, timeframe, 'bullish', zone_low, zone_high):
                     pattern_dict = self.save_pattern(
-                        sym.id, timeframe, 'bullish', zone_low, zone_high, detected_at, symbol, df
+                        sym.id, timeframe, 'bullish', zone_low, zone_high, detected_at, symbol, df,
+                        precomputed=precomputed
                     )
                     if pattern_dict:
                         patterns.append(pattern_dict)
@@ -80,12 +83,13 @@ class FVGDetector(PatternDetector):
 
                 if self._should_save_pattern(sym.id, timeframe, 'bearish', zone_low, zone_high):
                     pattern_dict = self.save_pattern(
-                        sym.id, timeframe, 'bearish', zone_low, zone_high, detected_at, symbol, df
+                        sym.id, timeframe, 'bearish', zone_low, zone_high, detected_at, symbol, df,
+                        precomputed=precomputed
                     )
                     if pattern_dict:
                         patterns.append(pattern_dict)
 
-        db.session.commit()
+        # Don't commit here - let caller batch commits
         return patterns
 
     def _should_save_pattern(

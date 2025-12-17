@@ -35,7 +35,8 @@ class OrderBlockDetector(PatternDetector):
         symbol: str,
         timeframe: str,
         limit: int = 200,
-        df: Optional[pd.DataFrame] = None
+        df: Optional[pd.DataFrame] = None,
+        precomputed: dict = None
     ) -> List[Dict[str, Any]]:
         """
         Detect Order Blocks in the given symbol/timeframe
@@ -45,6 +46,7 @@ class OrderBlockDetector(PatternDetector):
             timeframe: Candle timeframe (e.g., '1h')
             limit: Number of candles to analyze
             df: Optional pre-loaded DataFrame (avoids redundant DB queries)
+            precomputed: Optional dict with pre-calculated {'atr', 'swing_high', 'swing_low'}
 
         Returns:
             List of detected order block patterns
@@ -59,9 +61,13 @@ class OrderBlockDetector(PatternDetector):
         if not sym:
             return []
 
+        # Store precomputed for use in _find_opposing_candle
+        self._precomputed = precomputed
+
         patterns = []
 
         # Calculate candle body and move strength
+        df = df.copy()  # Avoid modifying original
         df['body'] = df['close'] - df['open']
         df['body_size'] = abs(df['body'])
         df['is_bullish'] = df['body'] > 0
@@ -99,7 +105,8 @@ class OrderBlockDetector(PatternDetector):
                 if pattern:
                     patterns.append(pattern)
 
-        db.session.commit()
+        # Don't commit here - let caller batch commits
+        self._precomputed = None
         return patterns
 
     def _find_opposing_candle(
@@ -129,7 +136,8 @@ class OrderBlockDetector(PatternDetector):
                     continue
 
                 pattern_dict = self.save_pattern(
-                    symbol_id, timeframe, direction, zone_low, zone_high, detected_at, symbol_name, df
+                    symbol_id, timeframe, direction, zone_low, zone_high, detected_at, symbol_name, df,
+                    precomputed=self._precomputed
                 )
                 return pattern_dict
 

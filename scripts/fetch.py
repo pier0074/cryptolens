@@ -62,11 +62,12 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
     """
     import time as _time
     from app.models import Symbol, Candle
-    from app.services.aggregator import aggregate_candles_realtime, aggregate_candles
+    from app.services.aggregator import aggregate_new_candles
     from app.services.patterns import get_all_detectors
     from app import db
 
     _t0 = _time.time()
+    _timings = {}  # Track where time is spent
     with app.app_context():
         # Get symbol
         sym = Symbol.query.filter_by(symbol=symbol_name).first()
@@ -109,29 +110,30 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
                 logger.warning(f"{symbol_name}: Some candles already existed (race condition)")
                 new_count = 0
 
-        # 2. Aggregate ALL higher timeframes
-        # Use full aggregation if catching up (many new candles), otherwise realtime (faster)
-        use_full_aggregation = new_count > 10  # More than 10 minutes of catch-up
-
+        # 2. Aggregate ALL higher timeframes (smart aggregation)
+        # aggregate_new_candles() automatically:
+        # - Finds last aggregated timestamp
+        # - Loads only source candles after that point
+        # - Creates all possible complete target candles
+        # - Skips current incomplete period
+        _t_agg = _time.time()
         for tf in ALL_TIMEFRAMES:
             try:
-                if use_full_aggregation:
-                    aggregate_candles(symbol_name, '1m', tf)
-                else:
-                    aggregate_candles_realtime(symbol_name, '1m', tf)
+                aggregate_new_candles(symbol_name, '1m', tf)
             except Exception as e:
-                # Ensure session is clean before continuing
                 db.session.rollback()
                 logger.error(f"{symbol_name}: Aggregation failed for {tf}: {e}")
                 if verbose:
                     print(f"  Warning: Aggregation failed for {tf}: {e}")
+        _timings['aggregation'] = _time.time() - _t_agg
 
         # 3. Detect patterns on all timeframes
         # OPTIMIZED: Load DataFrame once per timeframe, share across all detectors
-        # Also prefetch existing patterns to avoid N+1 queries
+        # Pre-compute ATR/swings once per timeframe, batch commits
         patterns_found = 0
         if new_count > 0:
             from app.services.aggregator import get_candles_as_dataframe
+            from app.services.trading import calculate_atr, find_swing_high, find_swing_low
 
             detectors = get_all_detectors()
             scan_limit = len(ohlcv) + 50  # Fetched candles + context
@@ -151,7 +153,16 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
                     logger.error(f"{symbol_name}: Failed to load candles for {tf}: {e}")
                     continue
 
-                # Prefetch existing patterns for each detector to avoid N+1 queries
+                # Pre-compute ATR and swings ONCE per timeframe (not per pattern)
+                precomputed = None
+                if df is not None and not df.empty:
+                    precomputed = {
+                        'atr': calculate_atr(df),
+                        'swing_high': find_swing_high(df, len(df) - 1),
+                        'swing_low': find_swing_low(df, len(df) - 1)
+                    }
+
+                # Prefetch existing patterns ONCE for all detectors
                 for detector in detectors:
                     try:
                         detector.prefetch_existing_patterns(sym.id, tf)
@@ -160,8 +171,8 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
 
                 for detector in detectors:
                     try:
-                        # Pass pre-loaded DataFrame to avoid redundant queries
-                        patterns = detector.detect(symbol_name, tf, limit=tf_limit, df=df)
+                        # Pass pre-loaded DataFrame and precomputed values
+                        patterns = detector.detect(symbol_name, tf, limit=tf_limit, df=df, precomputed=precomputed)
                         if patterns:
                             patterns_found += len(patterns)
                     except Exception as e:
@@ -174,7 +185,14 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
                         # Clear cache after detection
                         detector.clear_pattern_cache()
 
-        # 4. Update pattern status with current price
+            # Single commit after all pattern detection (not per detector/timeframe)
+            try:
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"{symbol_name}: Pattern commit failed: {e}")
+
+        # 4. Update pattern status with current price (BATCHED - single commit)
         if ohlcv:
             current_price = ohlcv[-1][4]  # close price
             detectors = get_all_detectors()
@@ -182,13 +200,20 @@ def process_symbol(symbol_name, ohlcv, app, verbose=False):
                 if hasattr(detector, 'update_pattern_status'):
                     for tf in ['1m'] + ALL_TIMEFRAMES:
                         try:
-                            detector.update_pattern_status(symbol_name, tf, current_price)
+                            # Don't commit each call - batch them
+                            detector.update_pattern_status(symbol_name, tf, current_price, commit=False)
                         except Exception as e:
-                            # Ensure session is clean before continuing
                             db.session.rollback()
                             logger.error(f"{symbol_name}: Pattern status update failed for {detector.__class__.__name__} on {tf}: {e}")
                             if verbose:
                                 print(f"  Warning: Pattern status update failed for {detector.__class__.__name__} on {tf}: {e}")
+
+            # Single commit for all status updates
+            try:
+                db.session.commit()
+            except Exception as e:
+                db.session.rollback()
+                logger.error(f"{symbol_name}: Pattern status commit failed: {e}")
 
         _elapsed = _time.time() - _t0
         if verbose and (new_count > 0 or patterns_found > 0):

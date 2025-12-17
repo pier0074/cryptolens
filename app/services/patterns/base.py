@@ -167,7 +167,8 @@ class PatternDetector(ABC):
         zone_high: float,
         detected_at: int,
         symbol_name: str,
-        df: pd.DataFrame = None
+        df: pd.DataFrame = None,
+        precomputed: dict = None
     ) -> Optional[Dict[str, Any]]:
         """
         Common pattern saving logic. Checks for duplicates and saves to DB.
@@ -182,6 +183,7 @@ class PatternDetector(ABC):
             detected_at: Detection timestamp
             symbol_name: Symbol name for return dict
             df: DataFrame with candle data for ATR/swing calculations
+            precomputed: Optional dict with pre-calculated {'atr', 'swing_high', 'swing_low'}
 
         Returns:
             Pattern dict if saved, None if already exists
@@ -201,14 +203,20 @@ class PatternDetector(ABC):
         if existing:
             return None
 
-        # Compute trading levels
-        atr = 0.0
-        swing_high = None
-        swing_low = None
-        if df is not None and not df.empty:
+        # Use precomputed values if available (HUGE performance gain)
+        if precomputed:
+            atr = precomputed.get('atr', 0.0)
+            swing_high = precomputed.get('swing_high')
+            swing_low = precomputed.get('swing_low')
+        elif df is not None and not df.empty:
+            # Fallback to computing (slower path)
             atr = calculate_atr(df)
             swing_high = find_swing_high(df, len(df) - 1)
             swing_low = find_swing_low(df, len(df) - 1)
+        else:
+            atr = 0.0
+            swing_high = None
+            swing_low = None
 
         levels = calculate_trading_levels(
             pattern_type=self.pattern_type,
@@ -286,7 +294,7 @@ class PatternDetector(ABC):
             else:
                 return {**pattern, 'status': 'active', 'fill_percentage': 0}
 
-    def update_pattern_status(self, symbol: str, timeframe: str, current_price: float) -> int:
+    def update_pattern_status(self, symbol: str, timeframe: str, current_price: float, commit: bool = True) -> int:
         """
         Update the status of all active patterns for a symbol/timeframe.
 
@@ -294,6 +302,7 @@ class PatternDetector(ABC):
             symbol: Trading pair (e.g., 'BTC/USDT')
             timeframe: Timeframe (e.g., '1h')
             current_price: Current market price
+            commit: Whether to commit immediately (False for batching)
 
         Returns:
             Number of patterns updated
@@ -327,7 +336,8 @@ class PatternDetector(ABC):
 
             pattern.fill_percentage = result.get('fill_percentage', 0)
 
-        db.session.commit()
+        if commit:
+            db.session.commit()
         return updated
 
     @property
@@ -342,7 +352,8 @@ class PatternDetector(ABC):
         symbol: str,
         timeframe: str,
         limit: int = 200,
-        df: Optional[pd.DataFrame] = None
+        df: Optional[pd.DataFrame] = None,
+        precomputed: dict = None
     ) -> List[Dict[str, Any]]:
         """
         Detect patterns in the given symbol/timeframe
@@ -352,6 +363,7 @@ class PatternDetector(ABC):
             timeframe: Candle timeframe (e.g., '1h')
             limit: Number of candles to analyze
             df: Optional pre-loaded DataFrame (avoids redundant DB queries)
+            precomputed: Optional dict with pre-calculated {'atr', 'swing_high', 'swing_low'}
 
         Returns:
             List of detected patterns
