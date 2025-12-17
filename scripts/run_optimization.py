@@ -71,8 +71,12 @@ def progress_callback(completed, total):
     print(f'\r  [{bar}] {pct}% ({completed}/{total})', end='', flush=True)
 
 
-def run_optimization(symbols, timeframes, pattern_types, verbose=False):
+def run_optimization(symbols, timeframes, pattern_types, verbose=False, incremental=False):
     """Run optimization for given symbols."""
+    if incremental:
+        run_incremental_optimization(symbols, timeframes, pattern_types, verbose)
+        return
+
     # Get date range from first symbol's candles
     start_date, end_date = get_date_range_for_symbol(symbols[0], timeframes[0])
 
@@ -129,6 +133,41 @@ def run_optimization(symbols, timeframes, pattern_types, verbose=False):
         print(f"    RR: {bp['params']['rr_target']}, SL: {bp['params']['sl_buffer_pct']}%")
         print(f"    Win Rate: {bp['win_rate']}%, Profit: {bp['total_profit_pct']}%")
         print(f"    Trades: {bp['total_trades']}")
+
+    print(f"\nView all results: python scripts/run_optimization.py --results")
+    print(f"Or visit: /admin/optimization/results")
+
+
+def run_incremental_optimization(symbols, timeframes, pattern_types, verbose=False):
+    """Run incremental optimization - only process new candles."""
+    print(f"\n{'='*60}")
+    print(f"INCREMENTAL OPTIMIZATION")
+    print(f"{'='*60}")
+    print(f"  Symbols: {', '.join(symbols)}")
+    print(f"  Timeframes: {', '.join(timeframes)}")
+    print(f"  Patterns: {', '.join(pattern_types)}")
+    print(f"  Mode: Incremental (only new candles)")
+    print(f"{'='*60}\n")
+
+    callback = progress_callback if verbose else None
+    result = optimizer.run_incremental(
+        symbols=symbols,
+        timeframes=timeframes,
+        pattern_types=pattern_types,
+        parameter_grid=QUICK_PARAMETER_GRID,
+        progress_callback=callback
+    )
+
+    if verbose:
+        print()  # New line after progress bar
+
+    print(f"\n{'='*60}")
+    print(f"COMPLETED")
+    print(f"{'='*60}")
+    print(f"  Updated existing: {result['updated']}")
+    print(f"  New runs created: {result['new_runs']}")
+    print(f"  Skipped (no new data): {result['skipped']}")
+    print(f"  Errors: {result['errors']}")
 
     print(f"\nView all results: python scripts/run_optimization.py --results")
     print(f"Or visit: /admin/optimization/results")
@@ -217,16 +256,68 @@ def show_best_params():
         print()
 
 
+def reset_optimization_data(confirm_code=None):
+    """Delete all optimization data with safety confirmation."""
+    import random
+    from sqlalchemy import text
+
+    # Count existing data using raw SQL to avoid column issues
+    job_count = db.session.execute(text("SELECT COUNT(*) FROM optimization_jobs")).scalar() or 0
+    run_count = db.session.execute(text("SELECT COUNT(*) FROM optimization_runs")).scalar() or 0
+
+    if job_count == 0 and run_count == 0:
+        print("No optimization data to delete.")
+        return
+
+    print(f"\n{'='*60}")
+    print("⚠️  WARNING: DESTRUCTIVE OPERATION")
+    print(f"{'='*60}")
+    print(f"  This will permanently delete:")
+    print(f"    - {job_count} optimization jobs")
+    print(f"    - {run_count} optimization runs (backtest results)")
+    print(f"\n  This action CANNOT be undone!")
+    print(f"{'='*60}\n")
+
+    # Generate random confirmation code
+    expected_code = str(random.randint(1000, 9999))
+
+    if confirm_code:
+        # Code provided via CLI
+        user_code = confirm_code
+    else:
+        # Interactive mode
+        print(f"  To confirm, type this code: {expected_code}")
+        user_code = input("  Enter code: ").strip()
+
+    if user_code != expected_code:
+        print("\n❌ Confirmation code does not match. Aborting.")
+        return
+
+    # Delete all data using raw SQL
+    print("\nDeleting optimization data...")
+
+    # Delete runs first (foreign key constraint)
+    db.session.execute(text("DELETE FROM optimization_runs"))
+    db.session.execute(text("DELETE FROM optimization_jobs"))
+    db.session.commit()
+
+    print(f"\n✅ Deleted {job_count} jobs and {run_count} runs.")
+    print("   Database optimization data has been reset.")
+
+
 def main():
     parser = argparse.ArgumentParser(description='Run parameter optimization')
     parser.add_argument('--symbol', type=str, help='Single symbol to optimize')
     parser.add_argument('--all-symbols', action='store_true', help='Optimize all active symbols')
-    parser.add_argument('--timeframes', type=str, default='1h,4h', help='Comma-separated timeframes')
-    parser.add_argument('--patterns', type=str, default='imbalance,order_block',
+    parser.add_argument('--timeframes', type=str, default='5m,15m,30m,1h,2h,4h,1d', help='Comma-separated timeframes')
+    parser.add_argument('--patterns', type=str, default='imbalance,order_block,liquidity_sweep',
                         help='Comma-separated pattern types')
+    parser.add_argument('--incremental', '-i', action='store_true',
+                        help='Incremental mode: only process new candles since last run')
     parser.add_argument('--list', action='store_true', help='List all jobs')
     parser.add_argument('--results', action='store_true', help='Show all results')
     parser.add_argument('--best', action='store_true', help='Show best parameters')
+    parser.add_argument('--reset', action='store_true', help='Delete ALL optimization data (requires confirmation)')
     parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed progress')
 
     args = parser.parse_args()
@@ -235,7 +326,9 @@ def main():
     with app.app_context():
         db.create_all()
 
-        if args.list:
+        if args.reset:
+            reset_optimization_data()
+        elif args.list:
             list_jobs()
         elif args.results:
             show_results()
@@ -245,7 +338,7 @@ def main():
             symbols = [args.symbol.strip()]
             timeframes = [t.strip() for t in args.timeframes.split(',')]
             patterns = [p.strip() for p in args.patterns.split(',')]
-            run_optimization(symbols, timeframes, patterns, args.verbose)
+            run_optimization(symbols, timeframes, patterns, args.verbose, args.incremental)
         elif args.all_symbols:
             active_symbols = Symbol.query.filter_by(is_active=True).all()
             if not active_symbols:
@@ -254,14 +347,16 @@ def main():
             symbols = [s.symbol for s in active_symbols]
             timeframes = [t.strip() for t in args.timeframes.split(',')]
             patterns = [p.strip() for p in args.patterns.split(',')]
-            run_optimization(symbols, timeframes, patterns, args.verbose)
+            run_optimization(symbols, timeframes, patterns, args.verbose, args.incremental)
         else:
             parser.print_help()
             print("\nExamples:")
             print("  python scripts/run_optimization.py --symbol BTC/USDT -v")
             print("  python scripts/run_optimization.py --all-symbols -v")
+            print("  python scripts/run_optimization.py --all-symbols -i -v  # Incremental (only new candles)")
             print("  python scripts/run_optimization.py --results")
             print("  python scripts/run_optimization.py --best")
+            print("  python scripts/run_optimization.py --reset              # Delete all data (with confirmation)")
 
 
 if __name__ == '__main__':

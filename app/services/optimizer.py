@@ -626,6 +626,501 @@ class ParameterOptimizer:
             'top_by_winrate': [r.to_dict() for r in top_by_winrate],
         }
 
+    def run_incremental(
+        self,
+        symbols: List[str],
+        timeframes: List[str],
+        pattern_types: List[str],
+        parameter_grid: Dict = None,
+        progress_callback=None
+    ) -> Dict:
+        """
+        Run incremental optimization - only process new candles since last run.
+
+        For each symbol/timeframe/pattern/params combination:
+        1. Find existing completed run
+        2. Load only candles after last_candle_timestamp
+        3. Resolve any open trades from previous run
+        4. Detect new patterns from new candles
+        5. Update cumulative statistics
+
+        Returns:
+            Summary dict with results
+        """
+        if parameter_grid is None:
+            parameter_grid = QUICK_PARAMETER_GRID
+
+        param_keys = list(parameter_grid.keys())
+        param_combinations = list(itertools.product(*parameter_grid.values()))
+
+        updated = 0
+        new_runs = 0
+        skipped = 0
+        errors = 0
+
+        total = len(symbols) * len(timeframes) * len(pattern_types) * len(param_combinations)
+        processed = 0
+
+        log_system(f"Starting incremental optimization for {len(symbols)} symbols")
+
+        for symbol in symbols:
+            for timeframe in timeframes:
+                for pattern_type in pattern_types:
+                    detector = _detectors.get(pattern_type)
+                    if not detector:
+                        errors += len(param_combinations)
+                        processed += len(param_combinations)
+                        continue
+
+                    for params in param_combinations:
+                        param_dict = dict(zip(param_keys, params))
+                        processed += 1
+
+                        try:
+                            result = self._run_incremental_single(
+                                symbol, timeframe, pattern_type, detector, param_dict
+                            )
+
+                            if result == 'updated':
+                                updated += 1
+                            elif result == 'new':
+                                new_runs += 1
+                            else:
+                                skipped += 1
+
+                        except Exception as e:
+                            log_system(
+                                f"Incremental error {symbol}/{timeframe}/{pattern_type}: {e}",
+                                level='ERROR'
+                            )
+                            errors += 1
+
+                        if progress_callback:
+                            progress_callback(processed, total)
+
+                        # Commit periodically
+                        if processed % 20 == 0:
+                            db.session.commit()
+
+        db.session.commit()
+
+        log_system(
+            f"Incremental optimization complete: {updated} updated, {new_runs} new, "
+            f"{skipped} skipped, {errors} errors"
+        )
+
+        return {
+            'success': True,
+            'updated': updated,
+            'new_runs': new_runs,
+            'skipped': skipped,
+            'errors': errors,
+            'total': total,
+        }
+
+    def _run_incremental_single(
+        self,
+        symbol: str,
+        timeframe: str,
+        pattern_type: str,
+        detector,
+        params: Dict
+    ) -> str:
+        """
+        Run incremental optimization for a single parameter combination.
+
+        Returns:
+            'updated' - existing run was updated with new data
+            'new' - no existing run, created new one
+            'skipped' - no new data available
+        """
+        rr_target = params.get('rr_target', 2.0)
+        sl_buffer_pct = params.get('sl_buffer_pct', 10.0)
+
+        # Find existing run
+        existing = OptimizationRun.find_existing(
+            symbol, timeframe, pattern_type, rr_target, sl_buffer_pct
+        )
+
+        # Get all available candles
+        df = get_candles_as_dataframe(symbol, timeframe, limit=10000)
+        if df is None or df.empty or len(df) < 20:
+            return 'skipped'
+
+        last_candle_ts = int(df['timestamp'].max())
+
+        if existing and existing.last_candle_timestamp:
+            # Check if we have new data
+            if last_candle_ts <= existing.last_candle_timestamp:
+                return 'skipped'
+
+            # Get only new candles (plus some overlap for open trades)
+            overlap_candles = 100  # Look back for resolving open trades
+            new_df = df[df['timestamp'] > existing.last_candle_timestamp - (overlap_candles * self._get_timeframe_ms(timeframe))]
+
+            if len(new_df) < 5:
+                return 'skipped'
+
+            # Resolve open trades
+            open_trades = existing.open_trades
+            resolved_trades, still_open = self._resolve_open_trades(
+                new_df, open_trades, rr_target
+            )
+
+            # Detect new patterns from new data only
+            new_patterns_df = df[df['timestamp'] > existing.last_candle_timestamp]
+            if len(new_patterns_df) >= 20:
+                new_patterns = detector.detect_historical(
+                    new_patterns_df,
+                    min_zone_pct=params.get('min_zone_pct', 0.15),
+                    skip_overlap=not params.get('use_overlap', True)
+                )
+
+                # Simulate new trades
+                new_trades, new_open = self._simulate_trades_with_open(
+                    df, new_patterns, params, existing.last_candle_timestamp
+                )
+            else:
+                new_trades = []
+                new_open = []
+
+            # Merge results
+            all_closed_trades = (existing.results or []) + resolved_trades + new_trades
+            all_open_trades = still_open + new_open
+
+            # Recalculate statistics
+            stats = self._calculate_statistics(all_closed_trades)
+
+            # Update existing run
+            existing.total_trades = stats['total_trades']
+            existing.winning_trades = stats['winning_trades']
+            existing.losing_trades = stats['losing_trades']
+            existing.win_rate = stats['win_rate']
+            existing.avg_rr = stats['avg_rr']
+            existing.total_profit_pct = stats['total_profit_pct']
+            existing.max_drawdown = stats['max_drawdown']
+            existing.sharpe_ratio = stats['sharpe_ratio']
+            existing.profit_factor = stats['profit_factor']
+            existing.avg_trade_duration = stats['avg_duration']
+            existing.results_json = json.dumps(all_closed_trades[-100:])
+            existing.open_trades = all_open_trades
+            existing.last_candle_timestamp = last_candle_ts
+            existing.end_date = datetime.fromtimestamp(last_candle_ts / 1000).strftime('%Y-%m-%d')
+            existing.updated_at = datetime.now(timezone.utc)
+            existing.is_incremental = True
+
+            return 'updated'
+
+        else:
+            # No existing run - create new one
+            start_ts = int(df['timestamp'].min())
+            start_date = datetime.fromtimestamp(start_ts / 1000).strftime('%Y-%m-%d')
+            end_date = datetime.fromtimestamp(last_candle_ts / 1000).strftime('%Y-%m-%d')
+
+            patterns = detector.detect_historical(
+                df,
+                min_zone_pct=params.get('min_zone_pct', 0.15),
+                skip_overlap=not params.get('use_overlap', True)
+            )
+
+            trades, open_trades = self._simulate_trades_with_open(df, patterns, params)
+            stats = self._calculate_statistics(trades)
+
+            run = OptimizationRun(
+                job_id=None,  # No job for incremental runs
+                symbol=symbol,
+                timeframe=timeframe,
+                pattern_type=pattern_type,
+                start_date=start_date,
+                end_date=end_date,
+                rr_target=rr_target,
+                sl_buffer_pct=sl_buffer_pct,
+                tp_method=params.get('tp_method', 'fixed_rr'),
+                entry_method=params.get('entry_method', 'zone_edge'),
+                min_zone_pct=params.get('min_zone_pct', 0.15),
+                use_overlap=params.get('use_overlap', True),
+                status='completed',
+                total_trades=stats['total_trades'],
+                winning_trades=stats['winning_trades'],
+                losing_trades=stats['losing_trades'],
+                win_rate=stats['win_rate'],
+                avg_rr=stats['avg_rr'],
+                total_profit_pct=stats['total_profit_pct'],
+                max_drawdown=stats['max_drawdown'],
+                sharpe_ratio=stats['sharpe_ratio'],
+                profit_factor=stats['profit_factor'],
+                avg_trade_duration=stats['avg_duration'],
+                results_json=json.dumps(trades[-100:]),
+                open_trades_json=json.dumps(open_trades),
+                last_candle_timestamp=last_candle_ts,
+                is_incremental=True,
+            )
+            db.session.add(run)
+
+            return 'new'
+
+    def _simulate_trades_with_open(
+        self,
+        df: pd.DataFrame,
+        patterns: List[Dict],
+        params: Dict,
+        after_timestamp: int = None
+    ) -> tuple:
+        """
+        Simulate trades, returning both closed and open trades.
+
+        Returns:
+            (closed_trades, open_trades)
+        """
+        closed_trades = []
+        open_trades = []
+        rr_target = params.get('rr_target', 2.0)
+        sl_buffer_pct = params.get('sl_buffer_pct', 10.0) / 100.0
+        entry_method = params.get('entry_method', 'zone_edge')
+
+        for pattern in patterns:
+            entry_idx = pattern['detected_at']
+
+            # Skip patterns before the after_timestamp if specified
+            if after_timestamp and df.iloc[entry_idx]['timestamp'] <= after_timestamp:
+                continue
+
+            if entry_idx + 5 >= len(df):
+                continue
+
+            zone_high = pattern['zone_high']
+            zone_low = pattern['zone_low']
+            zone_size = zone_high - zone_low
+            buffer = zone_size * sl_buffer_pct
+
+            if pattern['direction'] == 'bullish':
+                entry = zone_high if entry_method == 'zone_edge' else (zone_high + zone_low) / 2
+                stop_loss = zone_low - buffer
+                risk = entry - stop_loss
+                take_profit = entry + (risk * rr_target)
+                direction = 'long'
+            else:
+                entry = zone_low if entry_method == 'zone_edge' else (zone_high + zone_low) / 2
+                stop_loss = zone_high + buffer
+                risk = stop_loss - entry
+                take_profit = entry - (risk * rr_target)
+                direction = 'short'
+
+            trade = self._simulate_single_trade_with_open(
+                df, entry_idx, entry, stop_loss, take_profit, direction, rr_target
+            )
+
+            if trade:
+                if trade.get('status') == 'open':
+                    open_trades.append(trade)
+                else:
+                    closed_trades.append(trade)
+
+        return closed_trades, open_trades
+
+    def _simulate_single_trade_with_open(
+        self,
+        df: pd.DataFrame,
+        entry_idx: int,
+        entry: float,
+        stop_loss: float,
+        take_profit: float,
+        direction: str,
+        rr_target: float
+    ) -> Optional[Dict]:
+        """Simulate a single trade, returning open if not resolved"""
+        entry_triggered = False
+        entry_candle = None
+        entry_time = None
+
+        for j in range(entry_idx + 1, len(df)):
+            candle = df.iloc[j]
+
+            if not entry_triggered:
+                if direction == 'long' and candle['low'] <= entry:
+                    entry_triggered = True
+                    entry_candle = j
+                    entry_time = int(candle['timestamp'])
+                elif direction == 'short' and candle['high'] >= entry:
+                    entry_triggered = True
+                    entry_candle = j
+                    entry_time = int(candle['timestamp'])
+            else:
+                # Check for SL or TP
+                if direction == 'long':
+                    if candle['low'] <= stop_loss:
+                        return {
+                            'entry_price': float(entry),
+                            'exit_price': float(stop_loss),
+                            'direction': direction,
+                            'result': 'loss',
+                            'rr_achieved': -1.0,
+                            'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
+                            'entry_time': entry_time,
+                            'exit_time': int(candle['timestamp']),
+                            'duration_candles': int(j - entry_candle)
+                        }
+                    elif candle['high'] >= take_profit:
+                        return {
+                            'entry_price': float(entry),
+                            'exit_price': float(take_profit),
+                            'direction': direction,
+                            'result': 'win',
+                            'rr_achieved': float(rr_target),
+                            'profit_pct': float(abs((take_profit - entry) / entry * 100)),
+                            'entry_time': entry_time,
+                            'exit_time': int(candle['timestamp']),
+                            'duration_candles': int(j - entry_candle)
+                        }
+                else:
+                    if candle['high'] >= stop_loss:
+                        return {
+                            'entry_price': float(entry),
+                            'exit_price': float(stop_loss),
+                            'direction': direction,
+                            'result': 'loss',
+                            'rr_achieved': -1.0,
+                            'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
+                            'entry_time': entry_time,
+                            'exit_time': int(candle['timestamp']),
+                            'duration_candles': int(j - entry_candle)
+                        }
+                    elif candle['low'] <= take_profit:
+                        return {
+                            'entry_price': float(entry),
+                            'exit_price': float(take_profit),
+                            'direction': direction,
+                            'result': 'win',
+                            'rr_achieved': float(rr_target),
+                            'profit_pct': float(abs((take_profit - entry) / entry * 100)),
+                            'entry_time': entry_time,
+                            'exit_time': int(candle['timestamp']),
+                            'duration_candles': int(j - entry_candle)
+                        }
+
+        # Trade not resolved - return as open
+        if entry_triggered:
+            return {
+                'status': 'open',
+                'entry_price': float(entry),
+                'stop_loss': float(stop_loss),
+                'take_profit': float(take_profit),
+                'direction': direction,
+                'rr_target': float(rr_target),
+                'entry_time': entry_time,
+            }
+
+        return None
+
+    def _resolve_open_trades(
+        self,
+        df: pd.DataFrame,
+        open_trades: List[Dict],
+        rr_target: float
+    ) -> tuple:
+        """
+        Resolve open trades with new candle data.
+
+        Returns:
+            (resolved_trades, still_open_trades)
+        """
+        resolved = []
+        still_open = []
+
+        for trade in open_trades:
+            entry = trade['entry_price']
+            stop_loss = trade['stop_loss']
+            take_profit = trade['take_profit']
+            direction = trade['direction']
+            entry_time = trade['entry_time']
+
+            was_resolved = False
+
+            for idx in range(len(df)):
+                candle = df.iloc[idx]
+
+                # Skip candles before entry
+                if candle['timestamp'] <= entry_time:
+                    continue
+
+                if direction == 'long':
+                    if candle['low'] <= stop_loss:
+                        resolved.append({
+                            'entry_price': entry,
+                            'exit_price': stop_loss,
+                            'direction': direction,
+                            'result': 'loss',
+                            'rr_achieved': -1.0,
+                            'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
+                            'entry_time': entry_time,
+                            'exit_time': int(candle['timestamp']),
+                            'duration_candles': idx
+                        })
+                        was_resolved = True
+                        break
+                    elif candle['high'] >= take_profit:
+                        resolved.append({
+                            'entry_price': entry,
+                            'exit_price': take_profit,
+                            'direction': direction,
+                            'result': 'win',
+                            'rr_achieved': trade['rr_target'],
+                            'profit_pct': float(abs((take_profit - entry) / entry * 100)),
+                            'entry_time': entry_time,
+                            'exit_time': int(candle['timestamp']),
+                            'duration_candles': idx
+                        })
+                        was_resolved = True
+                        break
+                else:
+                    if candle['high'] >= stop_loss:
+                        resolved.append({
+                            'entry_price': entry,
+                            'exit_price': stop_loss,
+                            'direction': direction,
+                            'result': 'loss',
+                            'rr_achieved': -1.0,
+                            'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
+                            'entry_time': entry_time,
+                            'exit_time': int(candle['timestamp']),
+                            'duration_candles': idx
+                        })
+                        was_resolved = True
+                        break
+                    elif candle['low'] <= take_profit:
+                        resolved.append({
+                            'entry_price': entry,
+                            'exit_price': take_profit,
+                            'direction': direction,
+                            'result': 'win',
+                            'rr_achieved': trade['rr_target'],
+                            'profit_pct': float(abs((take_profit - entry) / entry * 100)),
+                            'entry_time': entry_time,
+                            'exit_time': int(candle['timestamp']),
+                            'duration_candles': idx
+                        })
+                        was_resolved = True
+                        break
+
+            if not was_resolved:
+                still_open.append(trade)
+
+        return resolved, still_open
+
+    def _get_timeframe_ms(self, timeframe: str) -> int:
+        """Convert timeframe to milliseconds"""
+        multipliers = {
+            '1m': 60 * 1000,
+            '5m': 5 * 60 * 1000,
+            '15m': 15 * 60 * 1000,
+            '30m': 30 * 60 * 1000,
+            '1h': 60 * 60 * 1000,
+            '2h': 2 * 60 * 60 * 1000,
+            '4h': 4 * 60 * 60 * 1000,
+            '1d': 24 * 60 * 60 * 1000,
+        }
+        return multipliers.get(timeframe, 60 * 60 * 1000)
+
 
 # Singleton instance
 optimizer = ParameterOptimizer()

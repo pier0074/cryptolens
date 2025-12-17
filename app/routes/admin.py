@@ -2139,6 +2139,17 @@ def optimization_results():
     best_result = results[0] if results else None
     best_winrate = max(results, key=lambda r: r.win_rate or 0) if results else None
 
+    # Get date range from results
+    date_range = None
+    if results:
+        start_dates = [r.start_date for r in results if r.start_date]
+        end_dates = [r.end_date for r in results if r.end_date]
+        if start_dates and end_dates:
+            date_range = {
+                'start': min(start_dates),
+                'end': max(end_dates)
+            }
+
     return render_template(
         'admin/optimization_results.html',
         results=results,
@@ -2150,7 +2161,8 @@ def optimization_results():
         sort_by=sort_by,
         min_trades=min_trades,
         best_result=best_result,
-        best_winrate=best_winrate
+        best_winrate=best_winrate,
+        date_range=date_range
     )
 
 

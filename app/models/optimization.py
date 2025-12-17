@@ -10,24 +10,19 @@ from app import db
 # Status constants
 OPTIMIZATION_STATUSES = ['pending', 'running', 'completed', 'failed', 'cancelled']
 
-# Default parameter grids
-DEFAULT_PARAMETER_GRID = {
-    'rr_target': [1.5, 2.0, 2.5, 3.0],
-    'sl_buffer_pct': [5, 10, 15, 20],
-    'min_zone_pct': [0.1, 0.15, 0.2],
-    'tp_method': ['fixed_rr'],
-    'entry_method': ['zone_edge'],
-    'use_overlap': [True]
-}
-
-QUICK_PARAMETER_GRID = {
-    'rr_target': [2.0, 2.5, 3.0],
-    'sl_buffer_pct': [10, 15],
+# Parameter grid for backtesting
+PARAMETER_GRID = {
+    'rr_target': [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0],
+    'sl_buffer_pct': [3, 5, 7, 10, 15, 20, 25, 30],
     'min_zone_pct': [0.15],
     'tp_method': ['fixed_rr'],
     'entry_method': ['zone_edge'],
     'use_overlap': [True]
 }
+
+# Aliases for backwards compatibility
+DEFAULT_PARAMETER_GRID = PARAMETER_GRID
+QUICK_PARAMETER_GRID = PARAMETER_GRID
 
 
 class OptimizationJob(db.Model):
@@ -183,6 +178,13 @@ class OptimizationRun(db.Model):
     results_json = db.Column(db.Text, nullable=True)
     error_message = db.Column(db.Text, nullable=True)
 
+    # Incremental optimization support
+    last_candle_timestamp = db.Column(db.BigInteger, nullable=True)  # Last processed candle ms
+    open_trades_json = db.Column(db.Text, nullable=True)  # Trades pending TP/SL resolution
+    is_incremental = db.Column(db.Boolean, default=False)
+    base_run_id = db.Column(db.Integer, nullable=True)  # Original run this extends
+    updated_at = db.Column(db.DateTime, nullable=True)
+
     created_at = db.Column(db.DateTime, default=lambda: datetime.now(timezone.utc))
 
     # Indexes for fast queries
@@ -190,6 +192,7 @@ class OptimizationRun(db.Model):
         db.Index('idx_opt_run_job', 'job_id'),
         db.Index('idx_opt_run_symbol_pattern', 'symbol', 'pattern_type'),
         db.Index('idx_opt_run_results', 'win_rate', 'total_profit_pct'),
+        db.Index('idx_opt_run_incremental', 'symbol', 'timeframe', 'pattern_type', 'rr_target', 'sl_buffer_pct'),
     )
 
     def __repr__(self):
@@ -203,6 +206,27 @@ class OptimizationRun(db.Model):
     @results.setter
     def results(self, value):
         self.results_json = json.dumps(value) if value else None
+
+    @property
+    def open_trades(self):
+        """Get open trades as list"""
+        return json.loads(self.open_trades_json) if self.open_trades_json else []
+
+    @open_trades.setter
+    def open_trades(self, value):
+        self.open_trades_json = json.dumps(value) if value else None
+
+    @classmethod
+    def find_existing(cls, symbol, timeframe, pattern_type, rr_target, sl_buffer_pct):
+        """Find existing completed run with same parameters for incremental update"""
+        return cls.query.filter(
+            cls.symbol == symbol,
+            cls.timeframe == timeframe,
+            cls.pattern_type == pattern_type,
+            cls.rr_target == rr_target,
+            cls.sl_buffer_pct == sl_buffer_pct,
+            cls.status == 'completed'
+        ).order_by(cls.last_candle_timestamp.desc().nullslast()).first()
 
     @property
     def params_dict(self):

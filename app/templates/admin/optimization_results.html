@@ -68,6 +68,15 @@
     </form>
 </div>
 
+<!-- Date Range Info -->
+{% if date_range %}
+<div class="bg-blue-900/30 border border-blue-700 rounded-lg p-4 mb-6">
+    <p class="text-blue-300 text-sm">
+        <strong>Simulation Period:</strong> {{ date_range.start }} to {{ date_range.end }}
+    </p>
+</div>
+{% endif %}
+
 <!-- Stats Summary -->
 <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
     <div class="bg-card rounded-lg p-4">
