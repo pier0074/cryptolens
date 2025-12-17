@@ -23,7 +23,8 @@ _sweep_detector = LiquiditySweepDetector()
 
 
 def run_backtest(symbol: str, timeframe: str, start_date: str, end_date: str,
-                 pattern_type: str = 'imbalance', rr_target: float = 2.0) -> Dict:
+                 pattern_type: str = 'imbalance', rr_target: float = 2.0,
+                 sl_buffer_pct: float = 10.0) -> Dict:
     """
     Run a backtest for a specific pattern strategy
 
@@ -34,6 +35,7 @@ def run_backtest(symbol: str, timeframe: str, start_date: str, end_date: str,
         end_date: End date (YYYY-MM-DD)
         pattern_type: Pattern type to test
         rr_target: Target risk/reward ratio
+        sl_buffer_pct: Stop loss buffer as percentage of zone size (default 10%)
 
     Returns:
         Backtest results
@@ -81,7 +83,7 @@ def run_backtest(symbol: str, timeframe: str, start_date: str, end_date: str,
     )
 
     # Run pattern detection and simulation
-    trades = simulate_trades(df, pattern_type, rr_target)
+    trades = simulate_trades(df, pattern_type, rr_target, sl_buffer_pct)
 
     # Calculate statistics
     stats = calculate_statistics(trades)
@@ -129,7 +131,8 @@ def run_backtest(symbol: str, timeframe: str, start_date: str, end_date: str,
     }
 
 
-def simulate_trades(df: pd.DataFrame, pattern_type: str, rr_target: float) -> List[Dict]:
+def simulate_trades(df: pd.DataFrame, pattern_type: str, rr_target: float,
+                    sl_buffer_pct: float = 10.0) -> List[Dict]:
     """
     Simulate trades based on detected patterns using production detectors.
 
@@ -137,6 +140,7 @@ def simulate_trades(df: pd.DataFrame, pattern_type: str, rr_target: float) -> Li
         df: DataFrame with OHLCV data
         pattern_type: 'imbalance', 'order_block', or 'liquidity_sweep'
         rr_target: Target risk/reward ratio
+        sl_buffer_pct: Stop loss buffer as percentage of zone size (default 10%)
 
     Returns:
         List of simulated trades
@@ -157,7 +161,7 @@ def simulate_trades(df: pd.DataFrame, pattern_type: str, rr_target: float) -> Li
     # Simulate trades for each detected pattern
     trades = []
     for pattern in patterns:
-        trade = simulate_single_trade(df, pattern['detected_at'], pattern, rr_target)
+        trade = simulate_single_trade(df, pattern['detected_at'], pattern, rr_target, sl_buffer_pct)
         if trade:
             trade['pattern_type'] = pattern_type
             trades.append(trade)
@@ -166,9 +170,18 @@ def simulate_trades(df: pd.DataFrame, pattern_type: str, rr_target: float) -> Li
 
 
 def simulate_single_trade(df: pd.DataFrame, entry_idx: int, pattern: Dict,
-                          rr_target: float) -> Optional[Dict]:
+                          rr_target: float, sl_buffer_pct: float = 10.0) -> Optional[Dict]:
     """
-    Simulate a single trade from pattern detection to outcome
+    Simulate a single trade from pattern detection to outcome.
+
+    This function uses the same logic as the optimizer for consistency.
+
+    Args:
+        df: DataFrame with OHLCV data
+        entry_idx: Index where pattern was detected
+        pattern: Pattern dict with zone_high, zone_low, direction
+        rr_target: Target risk/reward ratio
+        sl_buffer_pct: Stop loss buffer as percentage of zone size
 
     Returns:
         Trade result or None
@@ -177,7 +190,7 @@ def simulate_single_trade(df: pd.DataFrame, entry_idx: int, pattern: Dict,
     zone_high = float(pattern['zone_high'])
     zone_low = float(pattern['zone_low'])
     zone_size = zone_high - zone_low
-    buffer = zone_size * 0.1
+    buffer = zone_size * (sl_buffer_pct / 100.0)
 
     if pattern['direction'] == 'bullish':
         entry = zone_high
