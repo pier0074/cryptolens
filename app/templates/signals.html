@@ -107,7 +107,7 @@
 
                 <div class="flex items-center justify-between">
                     <span class="text-xs text-muted">
-                        {{ signal.created_at.strftime('%Y-%m-%d %H:%M') if signal.created_at else '' }}
+                        {{ signal.created_at_formatted or '' }}
                     </span>
                     <div class="flex items-center space-x-2">
                         {% if signal.status in ['pending', 'notified'] %}

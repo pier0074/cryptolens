@@ -193,7 +193,7 @@
                         {{ signal.pattern_obj.pattern_type|replace('_', ' ')|title }}
                     </span>
                     {% endif %}
-                    <span class="text-xs text-muted">{{ signal.created_at.strftime('%Y-%m-%d %H:%M') if signal.created_at else '' }}</span>
+                    <span class="text-xs text-muted">{{ signal.created_at_formatted or '' }}</span>
                 </div>
                 <div class="text-sm text-muted">
                     Entry: ${{ '%.2f'|format(signal.entry_price) }} |

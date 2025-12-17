@@ -81,12 +81,12 @@
                     {% endif %}
                     <div class="flex justify-between">
                         <span class="text-muted">Created:</span>
-                        <span>{{ signal.created_at.strftime('%Y-%m-%d %H:%M') if signal.created_at else 'N/A' }}</span>
+                        <span>{{ signal.created_at_formatted or 'N/A' }}</span>
                     </div>
                     {% if signal.notified_at %}
                     <div class="flex justify-between">
                         <span class="text-muted">Notified:</span>
-                        <span>{{ signal.notified_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                        <span>{{ signal.notified_at_formatted }}</span>
                     </div>
                     {% endif %}
                 </div>
