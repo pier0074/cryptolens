@@ -147,6 +147,7 @@ def run_optimization(symbols, timeframes, pattern_types, verbose=False, incremen
     print(f"Created job #{job.id}: {job.name}")
     print(f"  Total runs: {job.total_runs}")
     print()
+    print("Phase 1: Loading candle data...")
 
     # Run job with timing
     start_time = datetime.now()

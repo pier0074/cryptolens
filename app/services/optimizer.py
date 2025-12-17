@@ -146,17 +146,61 @@ class ParameterOptimizer:
         best_profit = float('-inf')
         pending_commits = 0
 
+        # ===== PHASE 1: Pre-load all candle data =====
+        # Data cache: (symbol, timeframe) -> (df, ohlcv_arrays)
+        data_cache = {}
+        log_system(f"Loading candle data for {len(symbols)} symbols × {len(timeframes)} timeframes...")
+
+        for symbol in symbols:
+            for timeframe in timeframes:
+                df = self._get_candle_data(symbol, timeframe)
+                if df is not None and len(df) >= 20:
+                    ohlcv_arrays = self._df_to_arrays(df)
+                    data_cache[(symbol, timeframe)] = (df, ohlcv_arrays)
+                    log_system(f"  Loaded {symbol} {timeframe}: {len(df)} candles")
+                else:
+                    data_cache[(symbol, timeframe)] = (None, None)
+
+        # ===== PHASE 2: Pre-detect all patterns =====
         # Pattern cache: (symbol, timeframe, pattern_type, min_zone_pct, use_overlap) -> patterns
         pattern_cache = {}
 
+        # Get unique pattern detection params from parameter grid
+        min_zone_pcts = param_grid.get('min_zone_pct', [0.15])
+        use_overlaps = param_grid.get('use_overlap', [True])
+
+        log_system(f"Detecting patterns for {len(pattern_types)} pattern types...")
+
+        for symbol in symbols:
+            for timeframe in timeframes:
+                df, ohlcv = data_cache.get((symbol, timeframe), (None, None))
+                if df is None:
+                    continue
+
+                for pattern_type in pattern_types:
+                    detector = _detectors.get(pattern_type)
+                    if not detector:
+                        continue
+
+                    for min_zone_pct in min_zone_pcts:
+                        for use_overlap in use_overlaps:
+                            cache_key = (symbol, timeframe, pattern_type, min_zone_pct, use_overlap)
+                            patterns = detector.detect_historical(
+                                df,
+                                min_zone_pct=min_zone_pct,
+                                skip_overlap=not use_overlap
+                            )
+                            pattern_cache[cache_key] = patterns
+
+        log_system(f"Pattern detection complete. Starting parameter sweep...")
+
+        # ===== PHASE 3: Fast parameter sweep =====
         try:
-            # Iterate through all scope combinations
             for symbol in symbols:
                 for timeframe in timeframes:
-                    # Load data once for this symbol/timeframe
-                    df = self._get_candle_data(symbol, timeframe, job.start_date, job.end_date)
+                    df, ohlcv_arrays = data_cache.get((symbol, timeframe), (None, None))
 
-                    if df is None or len(df) < 20:
+                    if df is None:
                         # Mark all runs for this scope as failed
                         for pattern_type in pattern_types:
                             for params in param_combinations:
@@ -168,9 +212,6 @@ class ParameterOptimizer:
                                 failed += 1
                                 pending_commits += 1
                         continue
-
-                    # Convert DataFrame to numpy arrays once for faster trade simulation
-                    ohlcv_arrays = self._df_to_arrays(df)
 
                     for pattern_type in pattern_types:
                         detector = _detectors.get(pattern_type)
@@ -188,20 +229,11 @@ class ParameterOptimizer:
                         for params in param_combinations:
                             param_dict = dict(zip(param_keys, params))
 
-                            # Get cached patterns or detect new ones
+                            # Get cached patterns (already detected in Phase 2)
                             min_zone_pct = param_dict.get('min_zone_pct', 0.15)
                             use_overlap = param_dict.get('use_overlap', True)
                             cache_key = (symbol, timeframe, pattern_type, min_zone_pct, use_overlap)
-
-                            if cache_key not in pattern_cache:
-                                patterns = detector.detect_historical(
-                                    df,
-                                    min_zone_pct=min_zone_pct,
-                                    skip_overlap=not use_overlap
-                                )
-                                pattern_cache[cache_key] = patterns
-                            else:
-                                patterns = pattern_cache[cache_key]
+                            patterns = pattern_cache.get(cache_key, [])
 
                             try:
                                 result = self._run_single_optimization_fast(
