@@ -324,29 +324,35 @@ async def run_fetch_cycle(symbols, app, verbose=False):
 
 def generate_signals_batch(app, verbose=False):
     """Generate signals for all symbols (runs once after all fetches)."""
+    import time as _time
     from app.services.signals import scan_and_generate_signals
 
     with app.app_context():
         try:
+            _t0 = _time.time()
             result = scan_and_generate_signals()
-            if verbose and result['signals_generated'] > 0:
-                print(f"  Generated {result['signals_generated']} signals")
-            logger.info(f"Generated {result['signals_generated']} signals")
+            elapsed = _time.time() - _t0
+            if verbose:
+                print(f"  Generated {result['signals_generated']} signals ({elapsed:.1f}s)")
+            logger.info(f"Generated {result['signals_generated']} signals in {elapsed:.1f}s")
+            result['time'] = elapsed
             return result
         except Exception as e:
             logger.error(f"Signal generation failed: {e}")
             if verbose:
                 print(f"  Signal error: {e}")
-            return {'signals_generated': 0}
+            return {'signals_generated': 0, 'time': 0}
 
 
 def expire_old_patterns(app, verbose=False):
     """Mark expired patterns based on timeframe-specific expiry."""
+    import time as _time
     from app.models import Pattern
     from app.config import Config
     from app import db
 
     with app.app_context():
+        _t0 = _time.time()
         now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
         active_patterns = Pattern.query.filter_by(status='active').all()
 
@@ -365,11 +371,13 @@ def expire_old_patterns(app, verbose=False):
 
         if expired_count > 0:
             db.session.commit()
-            logger.info(f"Expired {expired_count} old patterns")
-            if verbose:
-                print(f"  Expired {expired_count} old patterns")
 
-        return expired_count
+        elapsed = _time.time() - _t0
+        logger.info(f"Expired {expired_count} patterns in {elapsed:.1f}s")
+        if verbose:
+            print(f"  Expired {expired_count} patterns ({elapsed:.1f}s)")
+
+        return {'expired': expired_count, 'time': elapsed}
 
 
 def start_cron_run(app, job_name='fetch'):
@@ -511,7 +519,7 @@ def main():
         signal_result = generate_signals_batch(app, args.verbose)
 
         # 3. Expire old patterns
-        expired = expire_old_patterns(app, args.verbose)
+        expire_result = expire_old_patterns(app, args.verbose)
 
         # Summary
         total_new = sum(r.get('new', 0) for r in results)
@@ -533,8 +541,12 @@ def main():
 
         # Refresh stats cache
         from scripts.compute_stats import compute_stats
+        _t_stats = time.time()
         with app.app_context():
             compute_stats()
+        stats_time = time.time() - _t_stats
+        if args.verbose:
+            print(f"  Stats cache refreshed ({stats_time:.1f}s)")
 
         elapsed = time.time() - start_time
 
@@ -542,8 +554,8 @@ def main():
 
         if args.verbose:
             print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] "
-                  f"new={total_new} patterns={total_patterns} signals={total_signals} "
-                  f"time={elapsed:.1f}s")
+                  f"Total: {total_new} candles, {total_patterns} patterns, {total_signals} signals "
+                  f"({elapsed:.1f}s)")
         else:
             print(f"done. {total_new} candles, {total_patterns} patterns, {total_signals} signals ({elapsed:.1f}s)")
 
