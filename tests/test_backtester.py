@@ -94,6 +94,43 @@ class TestCalculateStatistics:
         # Peak at 10, drops to 0, max drawdown = 10
         assert stats['max_drawdown'] == 10.0
 
+    def test_inconclusive_trades_handling(self):
+        """Test that inconclusive trades are counted separately"""
+        trades = [
+            {'result': 'win', 'rr_achieved': 2.0, 'profit_pct': 4.0, 'duration_candles': 10},
+            {'result': 'loss', 'rr_achieved': -1.0, 'profit_pct': -2.0, 'duration_candles': 5},
+            {'result': 'inconclusive', 'rr_achieved': 0.0, 'profit_pct': 0.0, 'duration_candles': 3},
+            {'result': 'win', 'rr_achieved': 2.0, 'profit_pct': 4.0, 'duration_candles': 12},
+        ]
+        stats = calculate_statistics(trades)
+
+        assert stats['total_trades'] == 4
+        assert stats['winning_trades'] == 2
+        assert stats['losing_trades'] == 1
+        assert stats['inconclusive_trades'] == 1
+        # Win rate including inconclusive: 2/4 = 50%
+        assert stats['win_rate'] == 50.0
+        # Win rate excluding inconclusive: 2/3 = 66.67%
+        assert stats['win_rate_excluding_inconclusive'] == 66.67
+        # Avg RR only from conclusive trades: (2 + -1 + 2) / 3 = 1.0
+        assert stats['avg_rr'] == 1.0
+        # Total profit: 4 - 2 + 0 + 4 = 6
+        assert stats['total_profit_pct'] == 6.0
+
+    def test_all_inconclusive_trades(self):
+        """Test statistics when all trades are inconclusive"""
+        trades = [
+            {'result': 'inconclusive', 'rr_achieved': 0.0, 'profit_pct': 0.0, 'duration_candles': 3},
+            {'result': 'inconclusive', 'rr_achieved': 0.0, 'profit_pct': 0.0, 'duration_candles': 5},
+        ]
+        stats = calculate_statistics(trades)
+
+        assert stats['total_trades'] == 2
+        assert stats['inconclusive_trades'] == 2
+        assert stats['win_rate'] == 0
+        assert stats['win_rate_excluding_inconclusive'] == 0
+        assert stats['avg_rr'] == 0
+
 
 class TestSimulateSingleTrade:
     """Tests for simulate_single_trade function"""
@@ -207,6 +244,112 @@ class TestSimulateSingleTrade:
             assert 'entry_time' in trade
             assert 'exit_time' in trade
             assert 'duration_candles' in trade
+
+    def test_slippage_affects_entry_price(self):
+        """Test that slippage increases entry price for longs"""
+        timestamps = [1700000000000 + i * 3600000 for i in range(50)]
+        data = {
+            'timestamp': timestamps,
+            'open': [100.0] * 50,
+            'high': [105.0] * 50,
+            'low': [95.0] * 50,
+            'close': [101.0] * 50,
+            'volume': [1000.0] * 50
+        }
+        df = pd.DataFrame(data)
+
+        # Entry trigger and TP hit
+        df.loc[15, 'low'] = 99.0
+        df.loc[25, 'high'] = 120.0  # High enough to hit TP with slippage
+
+        pattern = {
+            'direction': 'bullish',
+            'zone_high': 100.0,
+            'zone_low': 98.0,
+            'detected_at': 10
+        }
+
+        # Without slippage
+        trade_no_slip = simulate_single_trade(df, 10, pattern, rr_target=2.0, slippage_pct=0.0)
+        # With 1% slippage
+        trade_with_slip = simulate_single_trade(df, 10, pattern, rr_target=2.0, slippage_pct=1.0)
+
+        if trade_no_slip and trade_with_slip:
+            # Entry price should be higher with slippage for long positions
+            assert trade_with_slip['entry_price'] > trade_no_slip['entry_price']
+
+    def test_same_candle_sl_tp_returns_inconclusive(self):
+        """Test that same-candle SL and TP hit returns inconclusive result"""
+        timestamps = [1700000000000 + i * 3600000 for i in range(50)]
+        data = {
+            'timestamp': timestamps,
+            'open': [100.0] * 50,
+            'high': [102.0] * 50,
+            'low': [98.0] * 50,
+            'close': [101.0] * 50,
+            'volume': [1000.0] * 50
+        }
+        df = pd.DataFrame(data)
+
+        # Set up entry trigger
+        df.loc[15, 'low'] = 99.0  # Entry triggered at zone_high=100
+
+        # Create a candle that hits both SL and TP
+        # For bullish pattern with zone_high=100, zone_low=98, sl_buffer=10%:
+        # SL = 98 - (2 * 0.1) = 97.8
+        # TP = 100 + (2.2 * 2) = 104.4
+        df.loc[20, 'low'] = 97.0   # Hits SL at 97.8
+        df.loc[20, 'high'] = 105.0  # Hits TP at 104.4
+
+        pattern = {
+            'direction': 'bullish',
+            'zone_high': 100.0,
+            'zone_low': 98.0,
+            'detected_at': 10
+        }
+
+        trade = simulate_single_trade(df, 10, pattern, rr_target=2.0)
+
+        assert trade is not None
+        assert trade['result'] == 'inconclusive'
+        assert trade['rr_achieved'] == 0.0
+        assert trade['profit_pct'] == 0.0
+        assert 'note' in trade
+
+    def test_configurable_lookback(self):
+        """Test that lookback parameter limits how far to search for trade completion"""
+        timestamps = [1700000000000 + i * 3600000 for i in range(200)]
+        data = {
+            'timestamp': timestamps,
+            'open': [100.0] * 200,
+            'high': [102.0] * 200,
+            'low': [98.0] * 200,
+            'close': [101.0] * 200,
+            'volume': [1000.0] * 200
+        }
+        df = pd.DataFrame(data)
+
+        # Entry triggered early
+        df.loc[15, 'low'] = 99.0
+
+        # TP hit very late (beyond short lookback)
+        df.loc[150, 'high'] = 120.0
+
+        pattern = {
+            'direction': 'bullish',
+            'zone_high': 100.0,
+            'zone_low': 98.0,
+            'detected_at': 10
+        }
+
+        # With short lookback, trade should not complete
+        trade_short = simulate_single_trade(df, 10, pattern, rr_target=2.0, lookback=50)
+        # With long lookback, trade should complete
+        trade_long = simulate_single_trade(df, 10, pattern, rr_target=2.0, lookback=200)
+
+        assert trade_short is None  # Didn't complete in lookback period
+        if trade_long:
+            assert trade_long['result'] in ['win', 'loss', 'inconclusive']
 
 
 class TestDetectHistoricalPatterns:
@@ -421,15 +564,47 @@ class TestSimulateTrades:
             if trade.get('pattern_type'):
                 assert trade['pattern_type'] == 'liquidity_sweep'
 
-    def test_unknown_pattern_defaults_to_imbalance(self, sample_df):
-        """Test that unknown pattern types default to imbalance"""
-        trades = simulate_trades(sample_df, 'unknown_type', rr_target=2.0)
+    def test_unknown_pattern_raises_error(self, sample_df):
+        """Test that unknown pattern types raise ValueError"""
+        with pytest.raises(ValueError) as exc_info:
+            simulate_trades(sample_df, 'unknown_type', rr_target=2.0)
 
-        assert isinstance(trades, list)
+        assert 'Invalid pattern type' in str(exc_info.value)
+        assert 'unknown_type' in str(exc_info.value)
 
 
 class TestRunBacktest:
     """Integration tests for run_backtest function"""
+
+    def test_run_backtest_invalid_pattern_type(self, app):
+        """Test backtest with invalid pattern type returns error"""
+        with app.app_context():
+            result = run_backtest(
+                symbol='BTC/USDT',
+                timeframe='1h',
+                start_date='2023-01-01',
+                end_date='2023-12-31',
+                pattern_type='invalid_type',
+                rr_target=2.0
+            )
+
+            assert 'error' in result
+            assert 'Invalid pattern type' in result['error']
+
+    def test_run_backtest_invalid_date_format(self, app):
+        """Test backtest with invalid date format returns error"""
+        with app.app_context():
+            result = run_backtest(
+                symbol='BTC/USDT',
+                timeframe='1h',
+                start_date='01-01-2023',  # Wrong format
+                end_date='2023-12-31',
+                pattern_type='imbalance',
+                rr_target=2.0
+            )
+
+            assert 'error' in result
+            assert 'Invalid date format' in result['error']
 
     def test_run_backtest_no_data(self, app):
         """Test backtest with no data returns error"""

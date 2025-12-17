@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Optional
 import pandas as pd
 from app.services.patterns.base import PatternDetector
 from app.models import Symbol
+from app.config import Config
 from app import db
 
 
@@ -198,7 +199,7 @@ class FVGDetector(PatternDetector):
                 if seen_dir != direction:
                     continue
                 overlap = self._calculate_zone_overlap(seen_low, seen_high, zone_low, zone_high)
-                if overlap >= 0.7:  # Default threshold
+                if overlap >= Config.DEFAULT_OVERLAP_THRESHOLD:
                     return False
 
         return True
