@@ -21,7 +21,8 @@ VALID_TABLES = {
     'stats_cache', 'users', 'subscriptions', 'user_notifications',
     'payments', 'notification_templates', 'broadcast_notifications',
     'scheduled_notifications', 'portfolios', 'trades', 'journal_entries',
-    'trade_tags', 'user_symbol_preferences', 'api_keys', 'error_logs'
+    'trade_tags', 'user_symbol_preferences', 'api_keys', 'error_logs',
+    'optimization_jobs', 'optimization_runs'
 }
 
 
@@ -486,6 +487,69 @@ def migrate():
                     })
 
                 changes.append(f"Created {len(templates)} default notification templates")
+
+        # 19. Optimization tables for parameter sweeps
+        if not table_exists('optimization_jobs'):
+            db.session.execute(text("""
+                CREATE TABLE optimization_jobs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name VARCHAR(100) NOT NULL,
+                    description TEXT,
+                    status VARCHAR(20) DEFAULT 'pending',
+                    symbols TEXT NOT NULL,
+                    timeframes TEXT NOT NULL,
+                    pattern_types TEXT NOT NULL,
+                    start_date VARCHAR(20) NOT NULL,
+                    end_date VARCHAR(20) NOT NULL,
+                    parameter_grid TEXT NOT NULL,
+                    total_runs INTEGER DEFAULT 0,
+                    completed_runs INTEGER DEFAULT 0,
+                    failed_runs INTEGER DEFAULT 0,
+                    best_params_json TEXT,
+                    created_at DATETIME,
+                    started_at DATETIME,
+                    completed_at DATETIME
+                )
+            """))
+            changes.append("Created optimization_jobs table")
+
+        if not table_exists('optimization_runs'):
+            db.session.execute(text("""
+                CREATE TABLE optimization_runs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    job_id INTEGER NOT NULL,
+                    symbol VARCHAR(20) NOT NULL,
+                    timeframe VARCHAR(5) NOT NULL,
+                    pattern_type VARCHAR(30) NOT NULL,
+                    start_date VARCHAR(20) NOT NULL,
+                    end_date VARCHAR(20) NOT NULL,
+                    rr_target FLOAT NOT NULL,
+                    sl_buffer_pct FLOAT NOT NULL,
+                    tp_method VARCHAR(20) NOT NULL DEFAULT 'fixed_rr',
+                    entry_method VARCHAR(20) NOT NULL DEFAULT 'zone_edge',
+                    min_zone_pct FLOAT NOT NULL DEFAULT 0.15,
+                    use_overlap BOOLEAN DEFAULT 1,
+                    status VARCHAR(20) DEFAULT 'pending',
+                    total_trades INTEGER DEFAULT 0,
+                    winning_trades INTEGER DEFAULT 0,
+                    losing_trades INTEGER DEFAULT 0,
+                    win_rate FLOAT DEFAULT 0.0,
+                    avg_rr FLOAT DEFAULT 0.0,
+                    total_profit_pct FLOAT DEFAULT 0.0,
+                    max_drawdown FLOAT DEFAULT 0.0,
+                    sharpe_ratio FLOAT DEFAULT 0.0,
+                    profit_factor FLOAT DEFAULT 0.0,
+                    avg_trade_duration FLOAT DEFAULT 0.0,
+                    results_json TEXT,
+                    error_message TEXT,
+                    created_at DATETIME,
+                    FOREIGN KEY (job_id) REFERENCES optimization_jobs (id)
+                )
+            """))
+            db.session.execute(text("CREATE INDEX idx_opt_run_job ON optimization_runs (job_id)"))
+            db.session.execute(text("CREATE INDEX idx_opt_run_symbol_pattern ON optimization_runs (symbol, pattern_type)"))
+            db.session.execute(text("CREATE INDEX idx_opt_run_results ON optimization_runs (win_rate, total_profit_pct)"))
+            changes.append("Created optimization_runs table")
 
         db.session.commit()
 

@@ -2074,3 +2074,183 @@ def api_fix_symbol(symbol_id):
         'message': f'Fix started for {symbol_name}. Check Cron Jobs for progress.',
         'symbol': symbol_name
     })
+
+
+# ============================================================================
+# OPTIMIZATION ROUTES
+# ============================================================================
+
+@admin_bp.route('/optimization')
+@admin_required
+def optimization_index():
+    """List optimization jobs"""
+    from app.models import OptimizationJob
+
+    jobs = OptimizationJob.query.order_by(OptimizationJob.created_at.desc()).all()
+    return render_template('admin/optimization.html', jobs=jobs)
+
+
+@admin_bp.route('/optimization/<int:job_id>')
+@admin_required
+def optimization_detail(job_id):
+    """View optimization job details"""
+    from app.models import OptimizationJob, OptimizationRun
+
+    job = OptimizationJob.query.get_or_404(job_id)
+
+    # Get top runs by profit
+    top_by_profit = OptimizationRun.query.filter(
+        OptimizationRun.job_id == job_id,
+        OptimizationRun.status == 'completed',
+        OptimizationRun.total_trades >= 5
+    ).order_by(
+        OptimizationRun.total_profit_pct.desc()
+    ).limit(20).all()
+
+    # Get top runs by win rate
+    top_by_winrate = OptimizationRun.query.filter(
+        OptimizationRun.job_id == job_id,
+        OptimizationRun.status == 'completed',
+        OptimizationRun.total_trades >= 5
+    ).order_by(
+        OptimizationRun.win_rate.desc()
+    ).limit(20).all()
+
+    return render_template(
+        'admin/optimization_detail.html',
+        job=job,
+        top_by_profit=top_by_profit,
+        top_by_winrate=top_by_winrate
+    )
+
+
+@admin_bp.route('/api/optimization/jobs', methods=['GET'])
+@admin_required
+def api_optimization_jobs():
+    """API: List optimization jobs"""
+    from app.models import OptimizationJob
+
+    jobs = OptimizationJob.query.order_by(OptimizationJob.created_at.desc()).all()
+    return jsonify({
+        'success': True,
+        'jobs': [j.to_dict() for j in jobs]
+    })
+
+
+@admin_bp.route('/api/optimization/jobs', methods=['POST'])
+@admin_required
+def api_create_optimization_job():
+    """API: Create new optimization job"""
+    from app.services.optimizer import optimizer
+    from app.models import QUICK_PARAMETER_GRID, DEFAULT_PARAMETER_GRID
+
+    data = request.get_json()
+    if not data:
+        return jsonify({'success': False, 'error': 'No data provided'}), 400
+
+    try:
+        name = data.get('name', f"Optimization {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}")
+        symbols = data.get('symbols', ['BTC/USDT', 'ETH/USDT'])
+        timeframes = data.get('timeframes', ['1h', '4h'])
+        pattern_types = data.get('pattern_types', ['imbalance', 'order_block'])
+        start_date = data.get('start_date')
+        end_date = data.get('end_date')
+        use_full_grid = data.get('full_grid', False)
+
+        if not start_date:
+            start_dt = datetime.now(timezone.utc) - timedelta(days=90)
+            start_date = start_dt.strftime('%Y-%m-%d')
+        if not end_date:
+            end_date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+
+        param_grid = DEFAULT_PARAMETER_GRID if use_full_grid else QUICK_PARAMETER_GRID
+
+        job = optimizer.create_job(
+            name=name,
+            symbols=symbols,
+            timeframes=timeframes,
+            pattern_types=pattern_types,
+            start_date=start_date,
+            end_date=end_date,
+            parameter_grid=param_grid,
+            description=data.get('description')
+        )
+
+        return jsonify({
+            'success': True,
+            'job': job.to_dict()
+        })
+
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@admin_bp.route('/api/optimization/jobs/<int:job_id>/run', methods=['POST'])
+@admin_required
+def api_run_optimization_job(job_id):
+    """API: Run an optimization job"""
+    from app.services.optimizer import optimizer
+    from app.models import OptimizationJob
+    import threading
+
+    job = OptimizationJob.query.get(job_id)
+    if not job:
+        return jsonify({'success': False, 'error': 'Job not found'}), 404
+
+    if job.status not in ['pending', 'failed']:
+        return jsonify({'success': False, 'error': f'Job is already {job.status}'}), 400
+
+    # Run in background thread
+    def run_job_background(jid):
+        from app import create_app
+        app = create_app()
+        with app.app_context():
+            optimizer.run_job(jid)
+
+    thread = threading.Thread(target=run_job_background, args=(job_id,), daemon=True)
+    thread.start()
+
+    return jsonify({
+        'success': True,
+        'message': 'Job started in background'
+    })
+
+
+@admin_bp.route('/api/optimization/jobs/<int:job_id>', methods=['DELETE'])
+@admin_required
+def api_delete_optimization_job(job_id):
+    """API: Delete an optimization job"""
+    from app.models import OptimizationJob
+
+    job = OptimizationJob.query.get(job_id)
+    if not job:
+        return jsonify({'success': False, 'error': 'Job not found'}), 404
+
+    db.session.delete(job)
+    db.session.commit()
+
+    return jsonify({'success': True})
+
+
+@admin_bp.route('/api/optimization/best-params')
+@admin_required
+def api_best_params():
+    """API: Get best parameters"""
+    from app.services.optimizer import optimizer
+
+    symbol = request.args.get('symbol')
+    pattern_type = request.args.get('pattern_type')
+    timeframe = request.args.get('timeframe')
+    metric = request.args.get('metric', 'total_profit_pct')
+
+    best = optimizer.get_best_params(
+        symbol=symbol,
+        pattern_type=pattern_type,
+        timeframe=timeframe,
+        metric=metric
+    )
+
+    if best:
+        return jsonify({'success': True, 'best': best})
+    else:
+        return jsonify({'success': True, 'best': None, 'message': 'No data available'})

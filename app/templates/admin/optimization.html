@@ -1,0 +1,306 @@
+{% extends "base.html" %}
+
+{% block title %}Parameter Optimization - Admin{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold">Parameter Optimization</h1>
+            <p class="text-gray-400 text-sm mt-1">Find optimal trading parameters through backtesting</p>
+        </div>
+        <a href="{{ url_for('admin.index') }}" class="text-blue-400 hover:text-blue-300">
+            &larr; Back to Admin
+        </a>
+    </div>
+</div>
+
+<!-- Stats Overview -->
+<div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Total Jobs</p>
+        <p class="text-2xl font-bold">{{ jobs|length }}</p>
+    </div>
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Completed</p>
+        <p class="text-2xl font-bold text-green-400">
+            {{ jobs|selectattr('status', 'equalto', 'completed')|list|length }}
+        </p>
+    </div>
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Running</p>
+        <p class="text-2xl font-bold text-yellow-400">
+            {{ jobs|selectattr('status', 'equalto', 'running')|list|length }}
+        </p>
+    </div>
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Pending</p>
+        <p class="text-2xl font-bold text-gray-400">
+            {{ jobs|selectattr('status', 'equalto', 'pending')|list|length }}
+        </p>
+    </div>
+</div>
+
+<!-- Create New Job Button -->
+<div class="mb-6">
+    <button id="createJobBtn" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg">
+        + Create New Job
+    </button>
+</div>
+
+<!-- Jobs Table -->
+<div class="bg-card rounded-lg p-6">
+    <h2 class="text-xl font-semibold mb-4">Optimization Jobs</h2>
+
+    {% if jobs %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-gray-400 border-b border-gray-700">
+                    <th class="text-left py-3 px-4">ID</th>
+                    <th class="text-left py-3 px-4">Name</th>
+                    <th class="text-left py-3 px-4">Status</th>
+                    <th class="text-left py-3 px-4">Progress</th>
+                    <th class="text-left py-3 px-4">Symbols</th>
+                    <th class="text-left py-3 px-4">Created</th>
+                    <th class="text-right py-3 px-4">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for job in jobs %}
+                <tr class="border-b border-gray-800 hover:bg-gray-800/50">
+                    <td class="py-3 px-4 text-gray-400">{{ job.id }}</td>
+                    <td class="py-3 px-4">
+                        <a href="{{ url_for('admin.optimization_detail', job_id=job.id) }}" class="text-blue-400 hover:text-blue-300">
+                            {{ job.name }}
+                        </a>
+                        {% if job.description %}
+                            <div class="text-gray-400 text-xs">{{ job.description[:50] }}</div>
+                        {% endif %}
+                    </td>
+                    <td class="py-3 px-4">
+                        {% if job.status == 'completed' %}
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-green-900 text-green-300">
+                                <span class="w-2 h-2 rounded-full bg-green-400 mr-1.5"></span>
+                                Completed
+                            </span>
+                        {% elif job.status == 'running' %}
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-yellow-900 text-yellow-300">
+                                <span class="w-2 h-2 rounded-full bg-yellow-400 mr-1.5 animate-pulse"></span>
+                                Running
+                            </span>
+                        {% elif job.status == 'failed' %}
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-red-900 text-red-300">
+                                <span class="w-2 h-2 rounded-full bg-red-400 mr-1.5"></span>
+                                Failed
+                            </span>
+                        {% else %}
+                            <span class="inline-flex items-center px-2 py-1 rounded-full text-xs bg-gray-700 text-gray-400">
+                                <span class="w-2 h-2 rounded-full bg-gray-500 mr-1.5"></span>
+                                Pending
+                            </span>
+                        {% endif %}
+                    </td>
+                    <td class="py-3 px-4">
+                        <div class="flex items-center">
+                            <div class="w-24 bg-gray-700 rounded-full h-2 mr-2">
+                                {% set progress = ((job.completed_runs + job.failed_runs) / job.total_runs * 100) if job.total_runs > 0 else 0 %}
+                                <div class="bg-blue-600 h-2 rounded-full" style="width: {{ progress|int }}%"></div>
+                            </div>
+                            <span class="text-xs text-gray-400">{{ job.completed_runs + job.failed_runs }}/{{ job.total_runs }}</span>
+                        </div>
+                    </td>
+                    <td class="py-3 px-4 text-gray-400 text-xs">
+                        {{ job.symbols_list|join(', ')|truncate(30) }}
+                    </td>
+                    <td class="py-3 px-4 text-gray-400">
+                        {% if job.created_at %}
+                            {{ job.created_at.strftime('%Y-%m-%d %H:%M') }}
+                        {% else %}
+                            N/A
+                        {% endif %}
+                    </td>
+                    <td class="py-3 px-4 text-right">
+                        {% if job.status == 'pending' %}
+                            <button onclick="runJob({{ job.id }})" class="text-xs px-2 py-1 rounded bg-green-600 hover:bg-green-700 mr-1">
+                                Run
+                            </button>
+                        {% endif %}
+                        <a href="{{ url_for('admin.optimization_detail', job_id=job.id) }}" class="text-xs px-2 py-1 rounded bg-gray-600 hover:bg-gray-500">
+                            View
+                        </a>
+                        <button onclick="deleteJob({{ job.id }})" class="text-xs px-2 py-1 rounded bg-red-600 hover:bg-red-700 ml-1">
+                            Delete
+                        </button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-center py-8">No optimization jobs yet. Create one to get started!</p>
+    {% endif %}
+</div>
+
+<!-- CLI Usage Instructions -->
+<div class="bg-card rounded-lg p-6 mt-8">
+    <h2 class="text-xl font-semibold mb-4">CLI Usage</h2>
+    <p class="text-gray-400 mb-4">
+        For more control, you can run optimization jobs from the command line:
+    </p>
+
+    <pre class="bg-gray-900 p-4 rounded-lg overflow-x-auto text-sm text-gray-300">
+<span class="text-gray-500"># Create and run a new optimization job</span>
+python scripts/run_optimization.py --new
+
+<span class="text-gray-500"># Run with specific parameters</span>
+python scripts/run_optimization.py --new --symbols BTC/USDT,ETH/USDT --timeframes 1h,4h
+
+<span class="text-gray-500"># Use full parameter grid (slower, more thorough)</span>
+python scripts/run_optimization.py --new --full-grid --verbose
+
+<span class="text-gray-500"># List all jobs</span>
+python scripts/run_optimization.py --list
+
+<span class="text-gray-500"># Show best parameters from all runs</span>
+python scripts/run_optimization.py --best</pre>
+
+    <p class="text-gray-500 text-sm mt-4">
+        Schedule weekly optimization:
+        <code class="bg-gray-800 px-2 py-1 rounded">0 2 * * 0 cd /path/to/cryptolens && venv/bin/python scripts/run_optimization.py --new</code>
+    </p>
+</div>
+
+<!-- Create Job Modal -->
+<div id="createJobModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+    <div class="bg-card rounded-lg p-6 w-full max-w-lg mx-4">
+        <h3 class="text-xl font-semibold mb-4">Create Optimization Job</h3>
+        <form id="createJobForm">
+            <div class="mb-4">
+                <label class="block text-gray-400 text-sm mb-2">Name</label>
+                <input type="text" name="name" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white"
+                       placeholder="Auto-generated if empty">
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-400 text-sm mb-2">Symbols (comma-separated)</label>
+                <input type="text" name="symbols" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white"
+                       value="BTC/USDT, ETH/USDT">
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-400 text-sm mb-2">Timeframes (comma-separated)</label>
+                <input type="text" name="timeframes" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white"
+                       value="1h, 4h">
+            </div>
+            <div class="mb-4">
+                <label class="block text-gray-400 text-sm mb-2">Pattern Types (comma-separated)</label>
+                <input type="text" name="pattern_types" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white"
+                       value="imbalance, order_block">
+            </div>
+            <div class="grid grid-cols-2 gap-4 mb-4">
+                <div>
+                    <label class="block text-gray-400 text-sm mb-2">Start Date</label>
+                    <input type="date" name="start_date" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white">
+                </div>
+                <div>
+                    <label class="block text-gray-400 text-sm mb-2">End Date</label>
+                    <input type="date" name="end_date" class="w-full bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white">
+                </div>
+            </div>
+            <div class="mb-4">
+                <label class="flex items-center text-gray-400">
+                    <input type="checkbox" name="full_grid" class="mr-2">
+                    Use full parameter grid (slower, more combinations)
+                </label>
+            </div>
+            <div class="flex justify-end gap-2">
+                <button type="button" onclick="closeCreateModal()" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded">
+                    Cancel
+                </button>
+                <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded">
+                    Create Job
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+document.getElementById('createJobBtn').addEventListener('click', () => {
+    document.getElementById('createJobModal').classList.remove('hidden');
+    document.getElementById('createJobModal').classList.add('flex');
+});
+
+function closeCreateModal() {
+    document.getElementById('createJobModal').classList.add('hidden');
+    document.getElementById('createJobModal').classList.remove('flex');
+}
+
+document.getElementById('createJobForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const data = {
+        name: form.name.value || undefined,
+        symbols: form.symbols.value.split(',').map(s => s.trim()).filter(s => s),
+        timeframes: form.timeframes.value.split(',').map(s => s.trim()).filter(s => s),
+        pattern_types: form.pattern_types.value.split(',').map(s => s.trim()).filter(s => s),
+        start_date: form.start_date.value || undefined,
+        end_date: form.end_date.value || undefined,
+        full_grid: form.full_grid.checked
+    };
+
+    try {
+        const resp = await fetch('/admin/api/optimization/jobs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        const result = await resp.json();
+        if (result.success) {
+            window.location.reload();
+        } else {
+            alert('Error: ' + result.error);
+        }
+    } catch (err) {
+        alert('Error creating job: ' + err.message);
+    }
+});
+
+async function runJob(jobId) {
+    if (!confirm('Start running this optimization job?')) return;
+
+    try {
+        const resp = await fetch(`/admin/api/optimization/jobs/${jobId}/run`, {
+            method: 'POST'
+        });
+        const result = await resp.json();
+        if (result.success) {
+            alert('Job started in background');
+            window.location.reload();
+        } else {
+            alert('Error: ' + result.error);
+        }
+    } catch (err) {
+        alert('Error starting job: ' + err.message);
+    }
+}
+
+async function deleteJob(jobId) {
+    if (!confirm('Delete this optimization job? This cannot be undone.')) return;
+
+    try {
+        const resp = await fetch(`/admin/api/optimization/jobs/${jobId}`, {
+            method: 'DELETE'
+        });
+        const result = await resp.json();
+        if (result.success) {
+            window.location.reload();
+        } else {
+            alert('Error: ' + result.error);
+        }
+    } catch (err) {
+        alert('Error deleting job: ' + err.message);
+    }
+}
+</script>
+{% endblock %}

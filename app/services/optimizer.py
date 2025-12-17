@@ -1,0 +1,631 @@
+"""
+Parameter Optimizer Service
+Automated parameter sweep for backtesting optimization
+"""
+import json
+import itertools
+from datetime import datetime, timezone
+from typing import Dict, List, Optional
+import pandas as pd
+import numpy as np
+
+from app import db
+from app.models import (
+    OptimizationJob, OptimizationRun,
+    DEFAULT_PARAMETER_GRID, QUICK_PARAMETER_GRID,
+    Symbol
+)
+from app.services.aggregator import get_candles_as_dataframe
+from app.services.patterns.fair_value_gap import FVGDetector
+from app.services.patterns.order_block import OrderBlockDetector
+from app.services.patterns.liquidity import LiquiditySweepDetector
+from app.services.logger import log_system
+
+# Detector instances (reuse to avoid re-initialization)
+_detectors = {
+    'imbalance': FVGDetector(),
+    'order_block': OrderBlockDetector(),
+    'liquidity_sweep': LiquiditySweepDetector(),
+}
+
+
+class ParameterOptimizer:
+    """Automated parameter sweep for backtesting"""
+
+    def __init__(self):
+        self.current_job = None
+
+    def create_job(
+        self,
+        name: str,
+        symbols: List[str],
+        timeframes: List[str],
+        pattern_types: List[str],
+        start_date: str,
+        end_date: str,
+        parameter_grid: Dict = None,
+        description: str = None
+    ) -> OptimizationJob:
+        """
+        Create a new optimization job.
+
+        Args:
+            name: Job name
+            symbols: List of trading pairs
+            timeframes: List of timeframes
+            pattern_types: List of pattern types
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            parameter_grid: Optional custom parameter grid
+            description: Optional job description
+
+        Returns:
+            Created OptimizationJob
+        """
+        if parameter_grid is None:
+            parameter_grid = QUICK_PARAMETER_GRID
+
+        # Calculate total combinations
+        param_combinations = list(itertools.product(*parameter_grid.values()))
+        scope_combinations = len(symbols) * len(timeframes) * len(pattern_types)
+        total_runs = len(param_combinations) * scope_combinations
+
+        job = OptimizationJob(
+            name=name,
+            description=description,
+            status='pending',
+            symbols=json.dumps(symbols),
+            timeframes=json.dumps(timeframes),
+            pattern_types=json.dumps(pattern_types),
+            start_date=start_date,
+            end_date=end_date,
+            parameter_grid=json.dumps(parameter_grid),
+            total_runs=total_runs,
+            completed_runs=0,
+            failed_runs=0,
+        )
+        db.session.add(job)
+        db.session.commit()
+
+        log_system(f"Created optimization job '{name}' with {total_runs} runs")
+
+        return job
+
+    def run_job(self, job_id: int, progress_callback=None) -> Dict:
+        """
+        Execute all runs for a job.
+
+        Args:
+            job_id: Job ID to execute
+            progress_callback: Optional callback(completed, total) for progress updates
+
+        Returns:
+            Summary dict with results
+        """
+        job = OptimizationJob.query.get(job_id)
+        if not job:
+            return {'error': f'Job {job_id} not found'}
+
+        if job.status not in ['pending', 'failed']:
+            return {'error': f'Job {job_id} is already {job.status}'}
+
+        job.status = 'running'
+        job.started_at = datetime.now(timezone.utc)
+        db.session.commit()
+
+        log_system(f"Starting optimization job {job_id}: {job.name}")
+
+        symbols = job.symbols_list
+        timeframes = job.timeframes_list
+        pattern_types = job.pattern_types_list
+        param_grid = job.parameter_grid_dict
+
+        # Generate all parameter combinations
+        param_keys = list(param_grid.keys())
+        param_combinations = list(itertools.product(*param_grid.values()))
+
+        completed = 0
+        failed = 0
+        best_result = None
+        best_profit = float('-inf')
+
+        try:
+            # Iterate through all scope combinations
+            for symbol in symbols:
+                for timeframe in timeframes:
+                    # Load data once for this symbol/timeframe
+                    df = self._get_candle_data(symbol, timeframe, job.start_date, job.end_date)
+
+                    if df is None or len(df) < 20:
+                        # Mark all runs for this scope as failed
+                        for pattern_type in pattern_types:
+                            for params in param_combinations:
+                                self._create_failed_run(
+                                    job, symbol, timeframe, pattern_type,
+                                    dict(zip(param_keys, params)),
+                                    "Insufficient data"
+                                )
+                                failed += 1
+                        continue
+
+                    for pattern_type in pattern_types:
+                        # Detect patterns once (reuse for all parameter combinations)
+                        detector = _detectors.get(pattern_type)
+                        if not detector:
+                            for params in param_combinations:
+                                self._create_failed_run(
+                                    job, symbol, timeframe, pattern_type,
+                                    dict(zip(param_keys, params)),
+                                    f"Unknown pattern type: {pattern_type}"
+                                )
+                                failed += 1
+                            continue
+
+                        for params in param_combinations:
+                            param_dict = dict(zip(param_keys, params))
+
+                            try:
+                                result = self._run_single_optimization(
+                                    job, df, symbol, timeframe, pattern_type,
+                                    detector, param_dict
+                                )
+                                completed += 1
+
+                                # Track best result
+                                if result and result.total_profit_pct > best_profit:
+                                    best_profit = result.total_profit_pct
+                                    best_result = result
+
+                            except Exception as e:
+                                self._create_failed_run(
+                                    job, symbol, timeframe, pattern_type,
+                                    param_dict, str(e)
+                                )
+                                failed += 1
+
+                            # Update progress
+                            job.completed_runs = completed
+                            job.failed_runs = failed
+                            if progress_callback:
+                                progress_callback(completed + failed, job.total_runs)
+
+                            # Commit periodically to save progress
+                            if (completed + failed) % 10 == 0:
+                                db.session.commit()
+
+            # Update best params
+            if best_result:
+                job.best_params = {
+                    'params': best_result.params_dict,
+                    'symbol': best_result.symbol,
+                    'timeframe': best_result.timeframe,
+                    'pattern_type': best_result.pattern_type,
+                    'win_rate': best_result.win_rate,
+                    'total_profit_pct': best_result.total_profit_pct,
+                    'total_trades': best_result.total_trades,
+                }
+
+            job.status = 'completed'
+            job.completed_at = datetime.now(timezone.utc)
+            db.session.commit()
+
+            log_system(
+                f"Completed optimization job {job_id}: {completed} completed, {failed} failed"
+            )
+
+            return {
+                'success': True,
+                'job_id': job_id,
+                'completed': completed,
+                'failed': failed,
+                'best_params': job.best_params,
+            }
+
+        except Exception as e:
+            job.status = 'failed'
+            db.session.commit()
+            log_system(f"Optimization job {job_id} failed: {str(e)}", level='ERROR')
+            return {'error': str(e)}
+
+    def _get_candle_data(
+        self, symbol: str, timeframe: str, start_date: str, end_date: str
+    ) -> Optional[pd.DataFrame]:
+        """Get candle data for a symbol/timeframe within date range"""
+        try:
+            df = get_candles_as_dataframe(symbol, timeframe, limit=10000)
+
+            if df.empty:
+                return None
+
+            # Filter by date range
+            start_ts = int(datetime.strptime(start_date, '%Y-%m-%d').timestamp() * 1000)
+            end_ts = int(datetime.strptime(end_date, '%Y-%m-%d').timestamp() * 1000)
+
+            df = df[(df['timestamp'] >= start_ts) & (df['timestamp'] <= end_ts)]
+
+            return df if len(df) >= 20 else None
+
+        except Exception:
+            return None
+
+    def _run_single_optimization(
+        self,
+        job: OptimizationJob,
+        df: pd.DataFrame,
+        symbol: str,
+        timeframe: str,
+        pattern_type: str,
+        detector,
+        params: Dict
+    ) -> OptimizationRun:
+        """Run a single optimization with specific parameters"""
+        # Detect patterns
+        use_overlap = params.get('use_overlap', True)
+        min_zone_pct = params.get('min_zone_pct', 0.15)
+
+        patterns = detector.detect_historical(
+            df,
+            min_zone_pct=min_zone_pct,
+            skip_overlap=not use_overlap
+        )
+
+        # Simulate trades
+        trades = self._simulate_trades(df, patterns, params)
+
+        # Calculate statistics
+        stats = self._calculate_statistics(trades)
+
+        # Create run record
+        run = OptimizationRun(
+            job_id=job.id,
+            symbol=symbol,
+            timeframe=timeframe,
+            pattern_type=pattern_type,
+            start_date=job.start_date,
+            end_date=job.end_date,
+            rr_target=params.get('rr_target', 2.0),
+            sl_buffer_pct=params.get('sl_buffer_pct', 10.0),
+            tp_method=params.get('tp_method', 'fixed_rr'),
+            entry_method=params.get('entry_method', 'zone_edge'),
+            min_zone_pct=min_zone_pct,
+            use_overlap=use_overlap,
+            status='completed',
+            total_trades=stats['total_trades'],
+            winning_trades=stats['winning_trades'],
+            losing_trades=stats['losing_trades'],
+            win_rate=stats['win_rate'],
+            avg_rr=stats['avg_rr'],
+            total_profit_pct=stats['total_profit_pct'],
+            max_drawdown=stats['max_drawdown'],
+            sharpe_ratio=stats['sharpe_ratio'],
+            profit_factor=stats['profit_factor'],
+            avg_trade_duration=stats['avg_duration'],
+            results_json=json.dumps(trades[:100]),  # Store first 100 trades
+        )
+        db.session.add(run)
+
+        return run
+
+    def _create_failed_run(
+        self,
+        job: OptimizationJob,
+        symbol: str,
+        timeframe: str,
+        pattern_type: str,
+        params: Dict,
+        error_message: str
+    ) -> OptimizationRun:
+        """Create a failed run record"""
+        run = OptimizationRun(
+            job_id=job.id,
+            symbol=symbol,
+            timeframe=timeframe,
+            pattern_type=pattern_type,
+            start_date=job.start_date,
+            end_date=job.end_date,
+            rr_target=params.get('rr_target', 2.0),
+            sl_buffer_pct=params.get('sl_buffer_pct', 10.0),
+            tp_method=params.get('tp_method', 'fixed_rr'),
+            entry_method=params.get('entry_method', 'zone_edge'),
+            min_zone_pct=params.get('min_zone_pct', 0.15),
+            use_overlap=params.get('use_overlap', True),
+            status='failed',
+            error_message=error_message,
+        )
+        db.session.add(run)
+        return run
+
+    def _simulate_trades(self, df: pd.DataFrame, patterns: List[Dict], params: Dict) -> List[Dict]:
+        """Simulate trades for detected patterns"""
+        trades = []
+        rr_target = params.get('rr_target', 2.0)
+        sl_buffer_pct = params.get('sl_buffer_pct', 10.0) / 100.0
+        entry_method = params.get('entry_method', 'zone_edge')
+
+        for pattern in patterns:
+            entry_idx = pattern['detected_at']
+            if entry_idx + 10 >= len(df):
+                continue
+
+            zone_high = pattern['zone_high']
+            zone_low = pattern['zone_low']
+            zone_size = zone_high - zone_low
+            buffer = zone_size * sl_buffer_pct
+
+            # Calculate entry, SL, TP based on entry method
+            if pattern['direction'] == 'bullish':
+                if entry_method == 'zone_mid':
+                    entry = (zone_high + zone_low) / 2
+                else:  # zone_edge
+                    entry = zone_high
+
+                stop_loss = zone_low - buffer
+                risk = entry - stop_loss
+                take_profit = entry + (risk * rr_target)
+                direction = 'long'
+            else:
+                if entry_method == 'zone_mid':
+                    entry = (zone_high + zone_low) / 2
+                else:  # zone_edge
+                    entry = zone_low
+
+                stop_loss = zone_high + buffer
+                risk = stop_loss - entry
+                take_profit = entry - (risk * rr_target)
+                direction = 'short'
+
+            # Simulate trade outcome
+            trade = self._simulate_single_trade(
+                df, entry_idx, entry, stop_loss, take_profit, direction, rr_target
+            )
+            if trade:
+                trades.append(trade)
+
+        return trades
+
+    def _simulate_single_trade(
+        self,
+        df: pd.DataFrame,
+        entry_idx: int,
+        entry: float,
+        stop_loss: float,
+        take_profit: float,
+        direction: str,
+        rr_target: float
+    ) -> Optional[Dict]:
+        """Simulate a single trade"""
+        entry_triggered = False
+        entry_candle = None
+
+        for j in range(entry_idx + 1, min(entry_idx + 100, len(df))):
+            candle = df.iloc[j]
+
+            if not entry_triggered:
+                if direction == 'long':
+                    if candle['low'] <= entry:
+                        entry_triggered = True
+                        entry_candle = j
+                else:
+                    if candle['high'] >= entry:
+                        entry_triggered = True
+                        entry_candle = j
+            else:
+                # Check for SL or TP
+                if direction == 'long':
+                    if candle['low'] <= stop_loss:
+                        return {
+                            'entry_price': float(entry),
+                            'exit_price': float(stop_loss),
+                            'direction': direction,
+                            'result': 'loss',
+                            'rr_achieved': -1.0,
+                            'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
+                            'entry_time': int(df.iloc[entry_candle]['timestamp']),
+                            'exit_time': int(candle['timestamp']),
+                            'duration_candles': int(j - entry_candle)
+                        }
+                    elif candle['high'] >= take_profit:
+                        return {
+                            'entry_price': float(entry),
+                            'exit_price': float(take_profit),
+                            'direction': direction,
+                            'result': 'win',
+                            'rr_achieved': float(rr_target),
+                            'profit_pct': float(abs((take_profit - entry) / entry * 100)),
+                            'entry_time': int(df.iloc[entry_candle]['timestamp']),
+                            'exit_time': int(candle['timestamp']),
+                            'duration_candles': int(j - entry_candle)
+                        }
+                else:
+                    if candle['high'] >= stop_loss:
+                        return {
+                            'entry_price': float(entry),
+                            'exit_price': float(stop_loss),
+                            'direction': direction,
+                            'result': 'loss',
+                            'rr_achieved': -1.0,
+                            'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
+                            'entry_time': int(df.iloc[entry_candle]['timestamp']),
+                            'exit_time': int(candle['timestamp']),
+                            'duration_candles': int(j - entry_candle)
+                        }
+                    elif candle['low'] <= take_profit:
+                        return {
+                            'entry_price': float(entry),
+                            'exit_price': float(take_profit),
+                            'direction': direction,
+                            'result': 'win',
+                            'rr_achieved': float(rr_target),
+                            'profit_pct': float(abs((take_profit - entry) / entry * 100)),
+                            'entry_time': int(df.iloc[entry_candle]['timestamp']),
+                            'exit_time': int(candle['timestamp']),
+                            'duration_candles': int(j - entry_candle)
+                        }
+
+        return None
+
+    def _calculate_statistics(self, trades: List[Dict]) -> Dict:
+        """Calculate performance statistics from trades"""
+        if not trades:
+            return {
+                'total_trades': 0,
+                'winning_trades': 0,
+                'losing_trades': 0,
+                'win_rate': 0,
+                'avg_rr': 0,
+                'total_profit_pct': 0,
+                'max_drawdown': 0,
+                'sharpe_ratio': 0,
+                'profit_factor': 0,
+                'avg_duration': 0,
+            }
+
+        winning = [t for t in trades if t['result'] == 'win']
+        losing = [t for t in trades if t['result'] == 'loss']
+
+        total_trades = len(trades)
+        winning_trades = len(winning)
+        losing_trades = len(losing)
+        win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
+
+        # Average R:R
+        avg_rr = sum(t['rr_achieved'] for t in trades) / total_trades if total_trades > 0 else 0
+
+        # Total profit
+        profits = [t['profit_pct'] for t in trades]
+        total_profit_pct = sum(profits)
+
+        # Max drawdown
+        cumulative = 0
+        peak = 0
+        max_dd = 0
+        for t in trades:
+            cumulative += t['profit_pct']
+            peak = max(peak, cumulative)
+            dd = peak - cumulative
+            max_dd = max(max_dd, dd)
+
+        # Sharpe ratio (simplified)
+        if len(profits) > 1:
+            returns_std = np.std(profits)
+            avg_return = np.mean(profits)
+            sharpe_ratio = (avg_return / returns_std) if returns_std > 0 else 0
+        else:
+            sharpe_ratio = 0
+
+        # Profit factor
+        gross_wins = sum(t['profit_pct'] for t in winning) if winning else 0
+        gross_losses = abs(sum(t['profit_pct'] for t in losing)) if losing else 1
+        profit_factor = gross_wins / gross_losses if gross_losses > 0 else gross_wins
+
+        # Average duration
+        avg_duration = sum(t['duration_candles'] for t in trades) / total_trades if total_trades > 0 else 0
+
+        return {
+            'total_trades': total_trades,
+            'winning_trades': winning_trades,
+            'losing_trades': losing_trades,
+            'win_rate': round(win_rate, 2),
+            'avg_rr': round(avg_rr, 2),
+            'total_profit_pct': round(total_profit_pct, 2),
+            'max_drawdown': round(max_dd, 2),
+            'sharpe_ratio': round(sharpe_ratio, 2),
+            'profit_factor': round(profit_factor, 2),
+            'avg_duration': round(avg_duration, 1),
+        }
+
+    def get_best_params(
+        self,
+        symbol: str = None,
+        pattern_type: str = None,
+        timeframe: str = None,
+        metric: str = 'total_profit_pct',
+        min_trades: int = 10
+    ) -> Optional[Dict]:
+        """
+        Get best parameters from completed runs.
+
+        Args:
+            symbol: Filter by symbol (optional)
+            pattern_type: Filter by pattern type (optional)
+            timeframe: Filter by timeframe (optional)
+            metric: Metric to optimize ('total_profit_pct', 'win_rate', 'sharpe_ratio', 'profit_factor')
+            min_trades: Minimum trades required
+
+        Returns:
+            Dict with best parameters and results
+        """
+        query = OptimizationRun.query.filter(
+            OptimizationRun.status == 'completed',
+            OptimizationRun.total_trades >= min_trades
+        )
+
+        if symbol:
+            query = query.filter(OptimizationRun.symbol == symbol)
+        if pattern_type:
+            query = query.filter(OptimizationRun.pattern_type == pattern_type)
+        if timeframe:
+            query = query.filter(OptimizationRun.timeframe == timeframe)
+
+        # Order by metric
+        if metric == 'win_rate':
+            query = query.order_by(OptimizationRun.win_rate.desc())
+        elif metric == 'sharpe_ratio':
+            query = query.order_by(OptimizationRun.sharpe_ratio.desc())
+        elif metric == 'profit_factor':
+            query = query.order_by(OptimizationRun.profit_factor.desc())
+        else:  # default: total_profit_pct
+            query = query.order_by(OptimizationRun.total_profit_pct.desc())
+
+        best_run = query.first()
+
+        if not best_run:
+            return None
+
+        return {
+            'run_id': best_run.id,
+            'symbol': best_run.symbol,
+            'timeframe': best_run.timeframe,
+            'pattern_type': best_run.pattern_type,
+            'params': best_run.params_dict,
+            'total_trades': best_run.total_trades,
+            'win_rate': best_run.win_rate,
+            'total_profit_pct': best_run.total_profit_pct,
+            'max_drawdown': best_run.max_drawdown,
+            'sharpe_ratio': best_run.sharpe_ratio,
+            'profit_factor': best_run.profit_factor,
+        }
+
+    def get_job_summary(self, job_id: int) -> Optional[Dict]:
+        """Get summary of a job's results"""
+        job = OptimizationJob.query.get(job_id)
+        if not job:
+            return None
+
+        # Get top runs by profit
+        top_by_profit = OptimizationRun.query.filter(
+            OptimizationRun.job_id == job_id,
+            OptimizationRun.status == 'completed',
+            OptimizationRun.total_trades >= 5
+        ).order_by(
+            OptimizationRun.total_profit_pct.desc()
+        ).limit(10).all()
+
+        # Get top runs by win rate
+        top_by_winrate = OptimizationRun.query.filter(
+            OptimizationRun.job_id == job_id,
+            OptimizationRun.status == 'completed',
+            OptimizationRun.total_trades >= 5
+        ).order_by(
+            OptimizationRun.win_rate.desc()
+        ).limit(10).all()
+
+        return {
+            'job': job.to_dict(),
+            'top_by_profit': [r.to_dict() for r in top_by_profit],
+            'top_by_winrate': [r.to_dict() for r in top_by_winrate],
+        }
+
+
+# Singleton instance
+optimizer = ParameterOptimizer()

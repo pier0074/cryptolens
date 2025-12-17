@@ -1,0 +1,263 @@
+{% extends "base.html" %}
+
+{% block title %}{{ job.name }} - Optimization{% endblock %}
+
+{% block content %}
+<div class="mb-6">
+    <div class="flex items-center justify-between">
+        <div>
+            <h1 class="text-2xl font-bold">{{ job.name }}</h1>
+            <p class="text-gray-400 text-sm mt-1">{{ job.description or 'Parameter optimization job' }}</p>
+        </div>
+        <a href="{{ url_for('admin.optimization_index') }}" class="text-blue-400 hover:text-blue-300">
+            &larr; Back to Optimization
+        </a>
+    </div>
+</div>
+
+<!-- Job Stats -->
+<div class="grid grid-cols-1 md:grid-cols-5 gap-4 mb-8">
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Status</p>
+        <p class="text-xl font-bold {% if job.status == 'completed' %}text-green-400{% elif job.status == 'running' %}text-yellow-400{% elif job.status == 'failed' %}text-red-400{% else %}text-gray-400{% endif %}">
+            {{ job.status|title }}
+        </p>
+    </div>
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Progress</p>
+        <p class="text-xl font-bold">
+            {{ job.completed_runs }}/{{ job.total_runs }}
+            <span class="text-sm text-gray-400">
+                ({% if job.total_runs > 0 %}{{ ((job.completed_runs / job.total_runs) * 100)|round(1) }}%{% else %}0%{% endif %})
+            </span>
+        </p>
+    </div>
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Failed Runs</p>
+        <p class="text-xl font-bold {% if job.failed_runs > 0 %}text-red-400{% else %}text-green-400{% endif %}">
+            {{ job.failed_runs }}
+        </p>
+    </div>
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Created</p>
+        <p class="text-xl font-bold">
+            {% if job.created_at %}{{ job.created_at.strftime('%Y-%m-%d') }}{% else %}N/A{% endif %}
+        </p>
+    </div>
+    <div class="bg-card rounded-lg p-4">
+        <p class="text-gray-400 text-sm">Completed</p>
+        <p class="text-xl font-bold">
+            {% if job.completed_at %}{{ job.completed_at.strftime('%Y-%m-%d') }}{% else %}-{% endif %}
+        </p>
+    </div>
+</div>
+
+<!-- Job Configuration -->
+<div class="bg-card rounded-lg p-6 mb-6">
+    <h2 class="text-xl font-semibold mb-4">Configuration</h2>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div>
+            <p class="text-gray-400 text-sm mb-2">Symbols</p>
+            <div class="flex flex-wrap gap-2">
+                {% for symbol in job.symbols_list %}
+                    <span class="px-2 py-1 bg-blue-900 text-blue-300 rounded text-xs">{{ symbol }}</span>
+                {% endfor %}
+            </div>
+        </div>
+        <div>
+            <p class="text-gray-400 text-sm mb-2">Timeframes</p>
+            <div class="flex flex-wrap gap-2">
+                {% for tf in job.timeframes_list %}
+                    <span class="px-2 py-1 bg-purple-900 text-purple-300 rounded text-xs">{{ tf }}</span>
+                {% endfor %}
+            </div>
+        </div>
+        <div>
+            <p class="text-gray-400 text-sm mb-2">Pattern Types</p>
+            <div class="flex flex-wrap gap-2">
+                {% for pt in job.pattern_types_list %}
+                    <span class="px-2 py-1 bg-green-900 text-green-300 rounded text-xs">{{ pt }}</span>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-4">
+        <div>
+            <p class="text-gray-400 text-sm mb-2">Date Range</p>
+            <p class="text-white">{{ job.start_date or 'N/A' }} to {{ job.end_date or 'N/A' }}</p>
+        </div>
+        <div>
+            <p class="text-gray-400 text-sm mb-2">Actions</p>
+            {% if job.status == 'pending' %}
+                <button onclick="runJob({{ job.id }})" class="px-3 py-1 bg-green-600 hover:bg-green-700 rounded text-sm">
+                    Run Job
+                </button>
+            {% endif %}
+            <button onclick="deleteJob({{ job.id }})" class="px-3 py-1 bg-red-600 hover:bg-red-700 rounded text-sm ml-2">
+                Delete Job
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Top Results by Profit -->
+<div class="bg-card rounded-lg p-6 mb-6">
+    <h2 class="text-xl font-semibold mb-4">Top Results by Profit</h2>
+
+    {% if top_by_profit %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-gray-400 border-b border-gray-700">
+                    <th class="text-left py-3 px-4">Symbol</th>
+                    <th class="text-left py-3 px-4">TF</th>
+                    <th class="text-left py-3 px-4">Pattern</th>
+                    <th class="text-right py-3 px-4">RR</th>
+                    <th class="text-right py-3 px-4">SL%</th>
+                    <th class="text-right py-3 px-4">Trades</th>
+                    <th class="text-right py-3 px-4">Win Rate</th>
+                    <th class="text-right py-3 px-4">Profit</th>
+                    <th class="text-right py-3 px-4">Sharpe</th>
+                    <th class="text-right py-3 px-4">Max DD</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in top_by_profit %}
+                <tr class="border-b border-gray-800 hover:bg-gray-800/50">
+                    <td class="py-3 px-4 font-medium">{{ run.symbol }}</td>
+                    <td class="py-3 px-4 text-gray-400">{{ run.timeframe }}</td>
+                    <td class="py-3 px-4">
+                        <span class="px-2 py-0.5 {% if run.pattern_type == 'imbalance' %}bg-blue-900 text-blue-300{% elif run.pattern_type == 'order_block' %}bg-purple-900 text-purple-300{% else %}bg-green-900 text-green-300{% endif %} rounded text-xs">
+                            {{ run.pattern_type }}
+                        </span>
+                    </td>
+                    <td class="py-3 px-4 text-right">{{ run.rr_target }}</td>
+                    <td class="py-3 px-4 text-right">{{ run.sl_buffer_pct }}%</td>
+                    <td class="py-3 px-4 text-right">{{ run.total_trades }}</td>
+                    <td class="py-3 px-4 text-right {% if run.win_rate and run.win_rate >= 50 %}text-green-400{% elif run.win_rate %}text-red-400{% endif %}">
+                        {% if run.win_rate %}{{ run.win_rate|round(1) }}%{% else %}-{% endif %}
+                    </td>
+                    <td class="py-3 px-4 text-right font-medium {% if run.total_profit_pct and run.total_profit_pct > 0 %}text-green-400{% elif run.total_profit_pct %}text-red-400{% endif %}">
+                        {% if run.total_profit_pct %}{{ run.total_profit_pct|round(2) }}%{% else %}-{% endif %}
+                    </td>
+                    <td class="py-3 px-4 text-right text-gray-400">
+                        {% if run.sharpe_ratio %}{{ run.sharpe_ratio|round(2) }}{% else %}-{% endif %}
+                    </td>
+                    <td class="py-3 px-4 text-right text-red-400">
+                        {% if run.max_drawdown_pct %}{{ run.max_drawdown_pct|round(2) }}%{% else %}-{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-center py-8">No completed runs with sufficient trades yet.</p>
+    {% endif %}
+</div>
+
+<!-- Top Results by Win Rate -->
+<div class="bg-card rounded-lg p-6">
+    <h2 class="text-xl font-semibold mb-4">Top Results by Win Rate</h2>
+
+    {% if top_by_winrate %}
+    <div class="overflow-x-auto">
+        <table class="w-full text-sm">
+            <thead>
+                <tr class="text-gray-400 border-b border-gray-700">
+                    <th class="text-left py-3 px-4">Symbol</th>
+                    <th class="text-left py-3 px-4">TF</th>
+                    <th class="text-left py-3 px-4">Pattern</th>
+                    <th class="text-right py-3 px-4">RR</th>
+                    <th class="text-right py-3 px-4">SL%</th>
+                    <th class="text-right py-3 px-4">Trades</th>
+                    <th class="text-right py-3 px-4">Win Rate</th>
+                    <th class="text-right py-3 px-4">Profit</th>
+                    <th class="text-right py-3 px-4">P Factor</th>
+                    <th class="text-right py-3 px-4">Avg W/L</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for run in top_by_winrate %}
+                <tr class="border-b border-gray-800 hover:bg-gray-800/50">
+                    <td class="py-3 px-4 font-medium">{{ run.symbol }}</td>
+                    <td class="py-3 px-4 text-gray-400">{{ run.timeframe }}</td>
+                    <td class="py-3 px-4">
+                        <span class="px-2 py-0.5 {% if run.pattern_type == 'imbalance' %}bg-blue-900 text-blue-300{% elif run.pattern_type == 'order_block' %}bg-purple-900 text-purple-300{% else %}bg-green-900 text-green-300{% endif %} rounded text-xs">
+                            {{ run.pattern_type }}
+                        </span>
+                    </td>
+                    <td class="py-3 px-4 text-right">{{ run.rr_target }}</td>
+                    <td class="py-3 px-4 text-right">{{ run.sl_buffer_pct }}%</td>
+                    <td class="py-3 px-4 text-right">{{ run.total_trades }}</td>
+                    <td class="py-3 px-4 text-right font-medium {% if run.win_rate and run.win_rate >= 50 %}text-green-400{% elif run.win_rate %}text-red-400{% endif %}">
+                        {% if run.win_rate %}{{ run.win_rate|round(1) }}%{% else %}-{% endif %}
+                    </td>
+                    <td class="py-3 px-4 text-right {% if run.total_profit_pct and run.total_profit_pct > 0 %}text-green-400{% elif run.total_profit_pct %}text-red-400{% endif %}">
+                        {% if run.total_profit_pct %}{{ run.total_profit_pct|round(2) }}%{% else %}-{% endif %}
+                    </td>
+                    <td class="py-3 px-4 text-right text-gray-400">
+                        {% if run.profit_factor %}{{ run.profit_factor|round(2) }}{% else %}-{% endif %}
+                    </td>
+                    <td class="py-3 px-4 text-right text-gray-400">
+                        {% if run.avg_win_pct and run.avg_loss_pct %}
+                            <span class="text-green-400">{{ run.avg_win_pct|round(2) }}</span> /
+                            <span class="text-red-400">{{ run.avg_loss_pct|round(2) }}</span>
+                        {% else %}-{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}
+    <p class="text-gray-400 text-center py-8">No completed runs with sufficient trades yet.</p>
+    {% endif %}
+</div>
+
+<!-- Parameter Grid Info -->
+<div class="bg-card rounded-lg p-6 mt-6">
+    <h2 class="text-xl font-semibold mb-4">Parameter Grid</h2>
+    <p class="text-gray-400 text-sm mb-4">Parameters tested in this optimization job:</p>
+    <pre class="bg-gray-900 p-4 rounded-lg overflow-x-auto text-sm text-gray-300">{{ job.parameter_grid|tojson(indent=2) }}</pre>
+</div>
+
+<script>
+async function runJob(jobId) {
+    if (!confirm('Start running this optimization job?')) return;
+
+    try {
+        const resp = await fetch(`/admin/api/optimization/jobs/${jobId}/run`, {
+            method: 'POST'
+        });
+        const result = await resp.json();
+        if (result.success) {
+            alert('Job started in background');
+            window.location.reload();
+        } else {
+            alert('Error: ' + result.error);
+        }
+    } catch (err) {
+        alert('Error starting job: ' + err.message);
+    }
+}
+
+async function deleteJob(jobId) {
+    if (!confirm('Delete this optimization job? This cannot be undone.')) return;
+
+    try {
+        const resp = await fetch(`/admin/api/optimization/jobs/${jobId}`, {
+            method: 'DELETE'
+        });
+        const result = await resp.json();
+        if (result.success) {
+            window.location.href = '{{ url_for("admin.optimization_index") }}';
+        } else {
+            alert('Error: ' + result.error);
+        }
+    } catch (err) {
+        alert('Error deleting job: ' + err.message);
+    }
+}
+</script>
+{% endblock %}

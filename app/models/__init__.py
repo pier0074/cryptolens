@@ -72,6 +72,15 @@ from app.models.errors import (
     ErrorStats,
 )
 
+# Optimization models
+from app.models.optimization import (
+    OptimizationJob,
+    OptimizationRun,
+    OPTIMIZATION_STATUSES,
+    DEFAULT_PARAMETER_GRID,
+    QUICK_PARAMETER_GRID,
+)
+
 # API models
 from app.models.api import (
     ApiKey,
@@ -134,6 +143,12 @@ __all__ = [
     # Error tracking models
     'ErrorLog',
     'ErrorStats',
+    # Optimization models
+    'OptimizationJob',
+    'OptimizationRun',
+    'OPTIMIZATION_STATUSES',
+    'DEFAULT_PARAMETER_GRID',
+    'QUICK_PARAMETER_GRID',
     # API models
     'ApiKey',
     'IpRule',
