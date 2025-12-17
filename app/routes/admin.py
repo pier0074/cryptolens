@@ -2093,8 +2093,10 @@ def optimization_index():
 @admin_bp.route('/optimization/results')
 @admin_required
 def optimization_results():
-    """View all optimization results with filters"""
+    """View all optimization results with filters and comparison heatmaps"""
     from app.models import OptimizationRun
+    from app.services.auto_tuner import auto_tuner
+    from sqlalchemy import func
 
     # Get filter parameters
     filter_symbol = request.args.get('symbol', '')
@@ -2102,19 +2104,24 @@ def optimization_results():
     filter_timeframe = request.args.get('timeframe', '')
     sort_by = request.args.get('sort', 'profit')
     min_trades = request.args.get('min_trades', 5, type=int)
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 50, type=int)
+    per_page = min(per_page, 100)  # Cap at 100
 
-    # Build query
-    query = OptimizationRun.query.filter(
+    # Base filter conditions
+    base_filters = [
         OptimizationRun.status == 'completed',
         OptimizationRun.total_trades >= min_trades
-    )
-
+    ]
     if filter_symbol:
-        query = query.filter(OptimizationRun.symbol == filter_symbol)
+        base_filters.append(OptimizationRun.symbol == filter_symbol)
     if filter_pattern:
-        query = query.filter(OptimizationRun.pattern_type == filter_pattern)
+        base_filters.append(OptimizationRun.pattern_type == filter_pattern)
     if filter_timeframe:
-        query = query.filter(OptimizationRun.timeframe == filter_timeframe)
+        base_filters.append(OptimizationRun.timeframe == filter_timeframe)
+
+    # Build paginated query
+    query = OptimizationRun.query.filter(*base_filters)
 
     # Sort
     if sort_by == 'winrate':
@@ -2126,33 +2133,60 @@ def optimization_results():
     else:
         query = query.order_by(OptimizationRun.total_profit_pct.desc())
 
-    results = query.all()
+    # Paginate results
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    results = pagination.items
 
-    # Get available filter options
+    # Get total count for stats (use SQL count, not len)
+    total_count = OptimizationRun.query.filter(*base_filters).count()
+
+    # Get profitable count using SQL
+    profitable_count = OptimizationRun.query.filter(
+        *base_filters,
+        OptimizationRun.total_profit_pct > 0
+    ).count()
+
+    # Get available filter options (cached query)
     symbols = db.session.query(OptimizationRun.symbol).distinct().all()
-    symbols = sorted([s[0] for s in symbols])
+    symbols = sorted([s[0] for s in symbols if s[0]])
 
     timeframes = db.session.query(OptimizationRun.timeframe).distinct().all()
-    timeframes = sorted([t[0] for t in timeframes])
+    timeframes = sorted([t[0] for t in timeframes if t[0]])
 
-    # Get best results
-    best_result = results[0] if results else None
-    best_winrate = max(results, key=lambda r: r.win_rate or 0) if results else None
+    # Get best results using SQL (not Python iteration)
+    best_result = OptimizationRun.query.filter(*base_filters).order_by(
+        OptimizationRun.total_profit_pct.desc()
+    ).first()
 
-    # Get date range from results
+    best_winrate = OptimizationRun.query.filter(*base_filters).order_by(
+        OptimizationRun.win_rate.desc()
+    ).first()
+
+    # Get date range using SQL aggregate
     date_range = None
-    if results:
-        start_dates = [r.start_date for r in results if r.start_date]
-        end_dates = [r.end_date for r in results if r.end_date]
-        if start_dates and end_dates:
-            date_range = {
-                'start': min(start_dates),
-                'end': max(end_dates)
-            }
+    date_stats = db.session.query(
+        func.min(OptimizationRun.start_date),
+        func.max(OptimizationRun.end_date)
+    ).filter(*base_filters).first()
+    if date_stats and date_stats[0] and date_stats[1]:
+        date_range = {
+            'start': date_stats[0],
+            'end': date_stats[1]
+        }
+
+    # Get comparison heatmap data if a symbol is selected
+    comparison_data = None
+    if filter_symbol:
+        comparison_data = auto_tuner.get_comparison_data(
+            symbol=filter_symbol,
+            pattern_type=filter_pattern or 'imbalance',
+            timeframe=filter_timeframe if filter_timeframe else None
+        )
 
     return render_template(
         'admin/optimization_results.html',
         results=results,
+        pagination=pagination,
         symbols=symbols,
         timeframes=timeframes,
         filter_symbol=filter_symbol,
@@ -2162,7 +2196,10 @@ def optimization_results():
         min_trades=min_trades,
         best_result=best_result,
         best_winrate=best_winrate,
-        date_range=date_range
+        date_range=date_range,
+        total_count=total_count,
+        profitable_count=profitable_count,
+        comparison_data=comparison_data
     )
 
 
@@ -2335,38 +2372,18 @@ def api_best_params():
 @admin_bp.route('/optimization/compare')
 @admin_required
 def optimization_compare():
-    """Parameter comparison heatmap page"""
-    from app.models import OptimizationRun, Symbol
-    from app.services.auto_tuner import auto_tuner
-
-    # Get filter parameters
+    """Redirect to results page with comparison (pages merged)"""
+    # Get filter parameters and redirect to results page
     symbol = request.args.get('symbol', 'BTC/USDT')
     pattern_type = request.args.get('pattern_type', 'imbalance')
     timeframe = request.args.get('timeframe', '')
 
-    # Get available symbols and timeframes for filters
-    symbols = db.session.query(OptimizationRun.symbol).distinct().all()
-    symbols = sorted([s[0] for s in symbols]) if symbols else ['BTC/USDT']
-
-    timeframes = db.session.query(OptimizationRun.timeframe).distinct().all()
-    timeframes = sorted([t[0] for t in timeframes]) if timeframes else []
-
-    # Get comparison data
-    data = auto_tuner.get_comparison_data(
+    return redirect(url_for(
+        'admin.optimization_results',
         symbol=symbol,
         pattern_type=pattern_type,
-        timeframe=timeframe if timeframe else None
-    )
-
-    return render_template(
-        'admin/optimization_compare.html',
-        symbol=symbol,
-        pattern_type=pattern_type,
-        timeframe=timeframe,
-        symbols=symbols,
-        timeframes=timeframes,
-        data=data
-    )
+        timeframe=timeframe
+    ))
 
 
 @admin_bp.route('/api/optimization/apply-params', methods=['POST'])

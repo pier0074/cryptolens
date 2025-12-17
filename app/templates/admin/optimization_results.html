@@ -7,7 +7,7 @@
     <div class="flex items-center justify-between">
         <div>
             <h1 class="text-2xl font-bold">Optimization Results</h1>
-            <p class="text-gray-400 text-sm mt-1">All backtesting results with best parameters highlighted</p>
+            <p class="text-gray-400 text-sm mt-1">All backtesting results with comparison heatmaps</p>
         </div>
         <a href="{{ url_for('admin.optimization_index') }}" class="text-blue-400 hover:text-blue-300">
             &larr; Back to Jobs
@@ -81,7 +81,7 @@
 <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
     <div class="bg-card rounded-lg p-4">
         <p class="text-gray-400 text-sm">Total Results</p>
-        <p class="text-2xl font-bold">{{ results|length }}</p>
+        <p class="text-2xl font-bold">{{ total_count }}</p>
     </div>
     <div class="bg-card rounded-lg p-4">
         <p class="text-gray-400 text-sm">Best Profit</p>
@@ -98,7 +98,7 @@
     <div class="bg-card rounded-lg p-4">
         <p class="text-gray-400 text-sm">Profitable Configs</p>
         <p class="text-2xl font-bold">
-            {{ results|selectattr('total_profit_pct', 'gt', 0)|list|length }} / {{ results|length }}
+            {{ profitable_count }} / {{ total_count }}
         </p>
     </div>
 </div>
@@ -131,9 +131,124 @@
 </div>
 {% endif %}
 
+<!-- Parameter Comparison Heatmaps (shown when symbol is selected) -->
+{% if comparison_data and comparison_data.success %}
+<div class="bg-card rounded-lg p-6 mb-6">
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-semibold">Parameter Comparison: {{ filter_symbol }}</h2>
+        <span class="text-gray-400 text-sm">{{ filter_pattern or 'imbalance' }}{% if filter_timeframe %} ({{ filter_timeframe }}){% endif %}</span>
+    </div>
+
+    <!-- Best Parameters Summary -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+        <div class="bg-gray-800 rounded-lg p-4">
+            <h3 class="text-sm font-semibold mb-2 text-green-400">Best by Profit</h3>
+            {% if comparison_data.best_by_profit.rr %}
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-400">RR: {{ comparison_data.best_by_profit.rr }} | SL: {{ comparison_data.best_by_profit.sl }}%</span>
+                    <span class="text-xl font-bold text-green-400">{{ comparison_data.best_by_profit.value }}%</span>
+                </div>
+            {% else %}
+                <p class="text-gray-500">No data</p>
+            {% endif %}
+        </div>
+        <div class="bg-gray-800 rounded-lg p-4">
+            <h3 class="text-sm font-semibold mb-2 text-blue-400">Best by Win Rate</h3>
+            {% if comparison_data.best_by_winrate.rr %}
+                <div class="flex justify-between items-center">
+                    <span class="text-gray-400">RR: {{ comparison_data.best_by_winrate.rr }} | SL: {{ comparison_data.best_by_winrate.sl }}%</span>
+                    <span class="text-xl font-bold text-blue-400">{{ comparison_data.best_by_winrate.value }}%</span>
+                </div>
+            {% else %}
+                <p class="text-gray-500">No data</p>
+            {% endif %}
+        </div>
+    </div>
+
+    <!-- Heatmaps Grid -->
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- Win Rate Heatmap -->
+        <div>
+            <h3 class="text-sm font-semibold mb-2 text-gray-300">Win Rate by RR vs SL%</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs">
+                    <thead>
+                        <tr>
+                            <th class="py-1 px-2 text-left text-gray-500">RR\SL</th>
+                            {% for sl in comparison_data.sl_values %}
+                                <th class="py-1 px-2 text-center text-gray-500">{{ sl }}%</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for i in range(comparison_data.rr_values|length) %}
+                        <tr>
+                            <td class="py-1 px-2 font-medium text-gray-400">{{ comparison_data.rr_values[i] }}</td>
+                            {% for j in range(comparison_data.sl_values|length) %}
+                                {% set val = comparison_data.win_rate_grid[i][j] %}
+                                {% set is_best = comparison_data.best_by_winrate.rr == comparison_data.rr_values[i] and comparison_data.best_by_winrate.sl == comparison_data.sl_values[j] %}
+                                <td class="py-1 px-2 text-center {% if val is not none %}{% if val >= 55 %}bg-green-900/50 text-green-300{% elif val >= 45 %}bg-yellow-900/50 text-yellow-300{% else %}bg-red-900/50 text-red-300{% endif %}{% endif %} {% if is_best %}ring-2 ring-blue-400{% endif %}">
+                                    {% if val is not none %}{{ val }}%{% else %}-{% endif %}
+                                </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Profit Heatmap -->
+        <div>
+            <h3 class="text-sm font-semibold mb-2 text-gray-300">Profit by RR vs SL%</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-xs">
+                    <thead>
+                        <tr>
+                            <th class="py-1 px-2 text-left text-gray-500">RR\SL</th>
+                            {% for sl in comparison_data.sl_values %}
+                                <th class="py-1 px-2 text-center text-gray-500">{{ sl }}%</th>
+                            {% endfor %}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for i in range(comparison_data.rr_values|length) %}
+                        <tr>
+                            <td class="py-1 px-2 font-medium text-gray-400">{{ comparison_data.rr_values[i] }}</td>
+                            {% for j in range(comparison_data.sl_values|length) %}
+                                {% set val = comparison_data.profit_grid[i][j] %}
+                                {% set is_best = comparison_data.best_by_profit.rr == comparison_data.rr_values[i] and comparison_data.best_by_profit.sl == comparison_data.sl_values[j] %}
+                                <td class="py-1 px-2 text-center {% if val is not none %}{% if val > 10 %}bg-green-900/50 text-green-300{% elif val > 0 %}bg-green-900/30 text-green-200{% elif val > -10 %}bg-red-900/30 text-red-200{% else %}bg-red-900/50 text-red-300{% endif %}{% endif %} {% if is_best %}ring-2 ring-green-400{% endif %}">
+                                    {% if val is not none %}{{ val }}%{% else %}-{% endif %}
+                                </td>
+                            {% endfor %}
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    <p class="text-gray-500 text-xs mt-3">Select a symbol to see parameter comparison heatmaps. Blue ring = best win rate, green ring = best profit.</p>
+</div>
+{% elif filter_symbol %}
+<div class="bg-card rounded-lg p-4 mb-6 text-center text-gray-400">
+    <p>No comparison data available for {{ filter_symbol }}. Run more optimization tests to generate heatmap data.</p>
+</div>
+{% else %}
+<div class="bg-gray-800/50 rounded-lg p-4 mb-6 text-center text-gray-400">
+    <p>Select a specific symbol to view parameter comparison heatmaps.</p>
+</div>
+{% endif %}
+
 <!-- Results Table -->
 <div class="bg-card rounded-lg p-6">
-    <h2 class="text-xl font-semibold mb-4">All Results</h2>
+    <div class="flex items-center justify-between mb-4">
+        <h2 class="text-xl font-semibold">All Results</h2>
+        <span class="text-gray-400 text-sm">
+            Showing {{ ((pagination.page - 1) * pagination.per_page) + 1 }}-{{ [pagination.page * pagination.per_page, pagination.total]|min }} of {{ pagination.total }}
+        </span>
+    </div>
 
     {% if results %}
     <div class="overflow-x-auto">
@@ -194,6 +309,46 @@
             </tbody>
         </table>
     </div>
+
+    <!-- Pagination -->
+    {% if pagination.pages > 1 %}
+    <div class="mt-6 flex items-center justify-between">
+        <div class="text-gray-400 text-sm">
+            Page {{ pagination.page }} of {{ pagination.pages }}
+        </div>
+        <div class="flex gap-2">
+            {% if pagination.has_prev %}
+                <a href="{{ url_for('admin.optimization_results', page=pagination.prev_num, symbol=filter_symbol, pattern_type=filter_pattern, timeframe=filter_timeframe, sort=sort_by, min_trades=min_trades) }}"
+                   class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm">
+                    &larr; Previous
+                </a>
+            {% endif %}
+
+            {% for page_num in pagination.iter_pages(left_edge=1, right_edge=1, left_current=2, right_current=2) %}
+                {% if page_num %}
+                    {% if page_num == pagination.page %}
+                        <span class="px-3 py-1 bg-blue-600 rounded text-sm">{{ page_num }}</span>
+                    {% else %}
+                        <a href="{{ url_for('admin.optimization_results', page=page_num, symbol=filter_symbol, pattern_type=filter_pattern, timeframe=filter_timeframe, sort=sort_by, min_trades=min_trades) }}"
+                           class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm">
+                            {{ page_num }}
+                        </a>
+                    {% endif %}
+                {% else %}
+                    <span class="px-3 py-1 text-gray-500">...</span>
+                {% endif %}
+            {% endfor %}
+
+            {% if pagination.has_next %}
+                <a href="{{ url_for('admin.optimization_results', page=pagination.next_num, symbol=filter_symbol, pattern_type=filter_pattern, timeframe=filter_timeframe, sort=sort_by, min_trades=min_trades) }}"
+                   class="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm">
+                    Next &rarr;
+                </a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
     {% else %}
     <p class="text-gray-400 text-center py-8">No optimization results found. Run an optimization first:</p>
     <pre class="bg-gray-900 p-4 rounded-lg text-sm text-gray-300 mt-4">python scripts/run_optimization.py --symbol BTC/USDT -v

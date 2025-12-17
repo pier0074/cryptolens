@@ -439,9 +439,8 @@ class ParameterOptimizer:
         """Simulate a single trade using numpy arrays for speed"""
         entry_triggered = False
         entry_candle = None
-        max_lookback = min(entry_idx + 100, n_candles)
 
-        for j in range(entry_idx + 1, max_lookback):
+        for j in range(entry_idx + 1, n_candles):
             if not entry_triggered:
                 if direction == 'long':
                     if lows[j] <= entry:
@@ -655,7 +654,7 @@ class ParameterOptimizer:
         entry_triggered = False
         entry_candle = None
 
-        for j in range(entry_idx + 1, min(entry_idx + 100, len(df))):
+        for j in range(entry_idx + 1, len(df)):
             candle = df.iloc[j]
 
             if not entry_triggered:
