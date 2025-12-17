@@ -144,7 +144,7 @@ class OptimizationRun(db.Model):
     __tablename__ = 'optimization_runs'
 
     id = db.Column(db.Integer, primary_key=True)
-    job_id = db.Column(db.Integer, db.ForeignKey('optimization_jobs.id'), nullable=False)
+    job_id = db.Column(db.Integer, db.ForeignKey('optimization_jobs.id'), nullable=True)  # Nullable for incremental runs
 
     # Scope
     symbol = db.Column(db.String(20), nullable=False)
@@ -219,6 +219,8 @@ class OptimizationRun(db.Model):
     @classmethod
     def find_existing(cls, symbol, timeframe, pattern_type, rr_target, sl_buffer_pct):
         """Find existing completed run with same parameters for incremental update"""
+        from sqlalchemy import case
+        # MySQL doesn't support NULLS LAST, use CASE to sort NULLs to end
         return cls.query.filter(
             cls.symbol == symbol,
             cls.timeframe == timeframe,
@@ -226,7 +228,10 @@ class OptimizationRun(db.Model):
             cls.rr_target == rr_target,
             cls.sl_buffer_pct == sl_buffer_pct,
             cls.status == 'completed'
-        ).order_by(cls.last_candle_timestamp.desc().nullslast()).first()
+        ).order_by(
+            case((cls.last_candle_timestamp.is_(None), 1), else_=0),
+            cls.last_candle_timestamp.desc()
+        ).first()
 
     @property
     def params_dict(self):
