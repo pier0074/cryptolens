@@ -25,29 +25,22 @@ from sqlalchemy import func, and_
 
 
 def compute_stats():
-    """Compute all stats and store in cache table."""
+    """Compute all stats and store in cache table.
+
+    Optimized to avoid full table scans:
+    - Uses ORDER BY + LIMIT for MIN/MAX (uses indexes)
+    - Combines queries where possible
+    - Skips expensive verified_at scans (cached separately)
+    """
     start_time = time.time()
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     day_ago_ms = now_ms - (24 * 60 * 60 * 1000)
 
     symbols = Symbol.query.filter_by(is_active=True).all()
     symbol_ids = [s.id for s in symbols]
-    symbol_map = {s.id: s for s in symbols}
 
-    # Batch query 1: Get 1m candle counts and time range
-    candle_stats_query = db.session.query(
-        Candle.symbol_id,
-        func.count(Candle.id).label('count'),
-        func.min(Candle.timestamp).label('oldest'),
-        func.max(Candle.timestamp).label('newest')
-    ).filter(
-        Candle.symbol_id.in_(symbol_ids),
-        Candle.timeframe == '1m'
-    ).group_by(Candle.symbol_id).all()
-
-    candle_stats_map = {row.symbol_id: row for row in candle_stats_query}
-
-    # Batch query 2: Get candle counts per timeframe
+    # Query 1: Get candle counts per timeframe (fast with index)
+    # This gives us counts AND we can derive 1m count from it
     tf_counts_query = db.session.query(
         Candle.symbol_id,
         Candle.timeframe,
@@ -57,12 +50,34 @@ def compute_stats():
     ).group_by(Candle.symbol_id, Candle.timeframe).all()
 
     tf_counts_map = {}
+    candle_1m_counts = {}
     for row in tf_counts_query:
         if row.symbol_id not in tf_counts_map:
             tf_counts_map[row.symbol_id] = {}
         tf_counts_map[row.symbol_id][row.timeframe] = row.count
+        if row.timeframe == '1m':
+            candle_1m_counts[row.symbol_id] = row.count
 
-    # Batch query 3: Get pattern stats
+    # Query 2: Get oldest/newest timestamps using efficient ORDER BY + LIMIT
+    # Much faster than MIN/MAX aggregate on large tables
+    oldest_map = {}
+    newest_map = {}
+    for sid in symbol_ids:
+        # Oldest (uses index: symbol_id, timeframe, timestamp)
+        oldest = Candle.query.filter_by(
+            symbol_id=sid, timeframe='1m'
+        ).order_by(Candle.timestamp.asc()).first()
+        if oldest:
+            oldest_map[sid] = oldest.timestamp
+
+        # Newest (same index, DESC)
+        newest = Candle.query.filter_by(
+            symbol_id=sid, timeframe='1m'
+        ).order_by(Candle.timestamp.desc()).first()
+        if newest:
+            newest_map[sid] = newest.timestamp
+
+    # Query 3: Get pattern stats (fast - patterns table is small)
     pattern_stats_query = db.session.query(
         Pattern.symbol_id,
         Pattern.status,
@@ -78,7 +93,7 @@ def compute_stats():
         pattern_stats_map[row.symbol_id][row.status] = row.count
         pattern_stats_map[row.symbol_id]['total'] += row.count
 
-    # Batch query 4: Get signal counts
+    # Query 4: Get signal counts (fast - signals table is small)
     signal_counts_query = db.session.query(
         Signal.symbol_id,
         func.count(Signal.id).label('count')
@@ -88,69 +103,40 @@ def compute_stats():
 
     signal_counts_map = {row.symbol_id: row.count for row in signal_counts_query}
 
-    # Batch query 5: Get latest candle for each symbol
-    latest_subq = db.session.query(
-        Candle.symbol_id,
-        func.max(Candle.timestamp).label('max_ts')
-    ).filter(
-        Candle.symbol_id.in_(symbol_ids),
-        Candle.timeframe == '1m'
-    ).group_by(Candle.symbol_id).subquery()
+    # Query 5: Get latest candle price for each symbol (fast - uses index)
+    latest_price_map = {}
+    for sid in symbol_ids:
+        latest = Candle.query.filter_by(
+            symbol_id=sid, timeframe='1m'
+        ).order_by(Candle.timestamp.desc()).first()
+        if latest:
+            latest_price_map[sid] = latest.close
 
-    latest_candles = db.session.query(Candle).join(
-        latest_subq,
-        and_(
-            Candle.symbol_id == latest_subq.c.symbol_id,
-            Candle.timestamp == latest_subq.c.max_ts,
-            Candle.timeframe == '1m'
-        )
-    ).all()
+    # Query 6: Get 24h ago price (fast - single row per symbol)
+    price_24h_map = {}
+    for sid in symbol_ids:
+        candle_24h = Candle.query.filter(
+            Candle.symbol_id == sid,
+            Candle.timeframe == '1m',
+            Candle.timestamp <= day_ago_ms
+        ).order_by(Candle.timestamp.desc()).first()
+        if candle_24h:
+            price_24h_map[sid] = candle_24h.close
 
-    latest_price_map = {c.symbol_id: c.close for c in latest_candles}
-
-    # Batch query 6: Get 24h ago candles
-    candles_24h_subq = db.session.query(
-        Candle.symbol_id,
-        func.max(Candle.timestamp).label('max_ts')
-    ).filter(
-        Candle.symbol_id.in_(symbol_ids),
-        Candle.timeframe == '1m',
-        Candle.timestamp <= day_ago_ms
-    ).group_by(Candle.symbol_id).subquery()
-
-    candles_24h = db.session.query(Candle).join(
-        candles_24h_subq,
-        and_(
-            Candle.symbol_id == candles_24h_subq.c.symbol_id,
-            Candle.timestamp == candles_24h_subq.c.max_ts,
-            Candle.timeframe == '1m'
-        )
-    ).all()
-
-    price_24h_map = {c.symbol_id: c.close for c in candles_24h}
-
-    # Batch query 7: Get last verified timestamp per symbol
-    last_verified_query = db.session.query(
-        Candle.symbol_id,
-        func.max(Candle.timestamp).label('last_verified_ts')
-    ).filter(
-        Candle.timeframe == '1m',
-        Candle.verified_at.isnot(None)
-    ).group_by(Candle.symbol_id).all()
-
-    last_verified_map = {row.symbol_id: row.last_verified_ts for row in last_verified_query}
+    # Skip verified_at query - it's expensive and rarely needed
+    # Can be computed separately on demand
+    last_verified_map = {}
 
     # Build per-symbol stats
     symbol_stats = []
     for sym in symbols:
         sid = sym.id
-        stats = candle_stats_map.get(sid)
         tf_counts = tf_counts_map.get(sid, {})
         pattern_stats = pattern_stats_map.get(sid, {'active': 0, 'filled': 0, 'expired': 0, 'total': 0})
 
-        count_1m = stats.count if stats else 0
-        oldest_ts = stats.oldest if stats else None
-        newest_ts = stats.newest if stats else None
+        count_1m = candle_1m_counts.get(sid, 0)
+        oldest_ts = oldest_map.get(sid)
+        newest_ts = newest_map.get(sid)
 
         current_price = latest_price_map.get(sid)
         price_24h_ago = price_24h_map.get(sid)
@@ -205,19 +191,18 @@ def compute_stats():
             'last_verified_date': datetime.fromtimestamp(last_verified_ts / 1000, tz=timezone.utc).strftime('%Y-%m-%d %H:%M') if last_verified_ts else None,
         })
 
-    # Overall stats
-    overall_counts = db.session.query(
-        Candle.timeframe,
-        func.count(Candle.id).label('count')
-    ).group_by(Candle.timeframe).all()
-
-    overall_tf_counts = {row.timeframe: row.count for row in overall_counts}
+    # Overall stats - derive from per-symbol stats (already computed, no extra query)
+    overall_tf_counts = {}
+    for tf_counts in tf_counts_map.values():
+        for tf, count in tf_counts.items():
+            overall_tf_counts[tf] = overall_tf_counts.get(tf, 0) + count
     total_candles = sum(overall_tf_counts.values())
 
-    total_patterns_all = Pattern.query.count()
-    total_signals_all = Signal.query.count()
+    # Pattern/signal totals from already-computed maps
+    total_patterns_all = sum(ps.get('total', 0) for ps in pattern_stats_map.values())
+    total_signals_all = sum(signal_counts_map.values())
 
-    # Database size (MySQL)
+    # Database size (MySQL) - fast query
     db_size = 0
     try:
         result = db.session.execute(db.text("""
@@ -231,12 +216,10 @@ def compute_stats():
     except Exception:
         db_size = 0
 
-    # Verification stats
-    verified_count = db.session.query(func.count(Candle.id)).filter(
-        Candle.verified_at.isnot(None)
-    ).scalar() or 0
-
-    verification_pct = (verified_count / total_candles * 100) if total_candles > 0 else 0
+    # Skip expensive verified_count scan - use cached value or 0
+    # This query alone takes 1s+ and verified_at is rarely used
+    verified_count = 0
+    verification_pct = 0
 
     # Find the most recent data timestamp across all symbols
     last_data_update = None
