@@ -149,7 +149,10 @@ class ParameterOptimizer:
         # ===== PHASE 1: Pre-load all candle data =====
         # Data cache: (symbol, timeframe) -> (df, ohlcv_arrays)
         data_cache = {}
-        log_system(f"Loading candle data for {len(symbols)} symbols × {len(timeframes)} timeframes...")
+        total_candles = 0
+        phase1_start = datetime.now(timezone.utc)
+
+        print(f"\n[Phase 1/3] Loading candle data ({len(symbols)} symbols × {len(timeframes)} timeframes)...")
 
         for symbol in symbols:
             for timeframe in timeframes:
@@ -157,19 +160,26 @@ class ParameterOptimizer:
                 if df is not None and len(df) >= 20:
                     ohlcv_arrays = self._df_to_arrays(df)
                     data_cache[(symbol, timeframe)] = (df, ohlcv_arrays)
-                    log_system(f"  Loaded {symbol} {timeframe}: {len(df)} candles")
+                    total_candles += len(df)
+                    print(f"  {symbol} {timeframe}: {len(df):,} candles")
                 else:
                     data_cache[(symbol, timeframe)] = (None, None)
+                    print(f"  {symbol} {timeframe}: No data")
+
+        phase1_duration = (datetime.now(timezone.utc) - phase1_start).total_seconds()
+        print(f"  → Total: {total_candles:,} candles loaded in {phase1_duration:.1f}s")
 
         # ===== PHASE 2: Pre-detect all patterns =====
         # Pattern cache: (symbol, timeframe, pattern_type, min_zone_pct, use_overlap) -> patterns
         pattern_cache = {}
+        total_patterns = 0
+        phase2_start = datetime.now(timezone.utc)
 
         # Get unique pattern detection params from parameter grid
         min_zone_pcts = param_grid.get('min_zone_pct', [0.15])
         use_overlaps = param_grid.get('use_overlap', [True])
 
-        log_system(f"Detecting patterns for {len(pattern_types)} pattern types...")
+        print(f"\n[Phase 2/3] Detecting patterns ({len(pattern_types)} types × {len(timeframes)} timeframes)...")
 
         for symbol in symbols:
             for timeframe in timeframes:
@@ -177,6 +187,7 @@ class ParameterOptimizer:
                 if df is None:
                     continue
 
+                tf_patterns = 0
                 for pattern_type in pattern_types:
                     detector = _detectors.get(pattern_type)
                     if not detector:
@@ -191,8 +202,15 @@ class ParameterOptimizer:
                                 skip_overlap=not use_overlap
                             )
                             pattern_cache[cache_key] = patterns
+                            tf_patterns += len(patterns)
+                            total_patterns += len(patterns)
 
-        log_system(f"Pattern detection complete. Starting parameter sweep...")
+                print(f"  {symbol} {timeframe}: {tf_patterns:,} patterns")
+
+        phase2_duration = (datetime.now(timezone.utc) - phase2_start).total_seconds()
+        print(f"  → Total: {total_patterns:,} patterns detected in {phase2_duration:.1f}s")
+
+        print(f"\n[Phase 3/3] Running parameter sweep ({job.total_runs:,} combinations)...")
 
         # ===== PHASE 3: Fast parameter sweep =====
         try:
