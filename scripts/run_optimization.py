@@ -3,30 +3,32 @@
 Run parameter optimization for backtesting.
 
 Usage:
-    python scripts/run_optimization.py --symbol BTC/USDT       # Incremental (default)
-    python scripts/run_optimization.py --symbol BTC/USDT --full # Full re-optimization
-    python scripts/run_optimization.py --all-symbols           # All active symbols
-    python scripts/run_optimization.py --all-symbols -p        # Parallel (3-4x faster)
-    python scripts/run_optimization.py --list                  # List all jobs
-    python scripts/run_optimization.py --results               # Show all results
-    python scripts/run_optimization.py --best                  # Show best parameters
+    python scripts/run_optimization.py -s BTC/USDT          # Incremental (default)
+    python scripts/run_optimization.py -s BTC/USDT -f       # Full re-optimization
+    python scripts/run_optimization.py -a                   # All active symbols
+    python scripts/run_optimization.py -a -p                # Parallel (3-4x faster)
+    python scripts/run_optimization.py -a -p -w 8           # Parallel with 8 workers
+    python scripts/run_optimization.py -l                   # List all jobs
+    python scripts/run_optimization.py -r                   # Show all results
+    python scripts/run_optimization.py -b                   # Show best parameters
 
 Options:
-    --symbol        Run optimization for a specific symbol
-    --all-symbols   Run optimization for all active symbols
-    --timeframes    Comma-separated timeframes
-    --patterns      Comma-separated patterns
-    --full          Full mode: re-run ALL combinations (creates new job, ignores existing)
-    --parallel, -p  Use parallel processing (3-4x faster for multiple symbols)
-    --workers       Number of parallel workers (default: 4, max: 8)
-    --list          List all optimization jobs
-    --results       Show all optimization results
-    --best          Show best parameters by symbol
-    --verbose       Show detailed progress
+    -s, --symbol        Run optimization for a specific symbol
+    -a, --all-symbols   Run optimization for all active symbols
+    -t, --timeframes    Comma-separated timeframes
+    --patterns          Comma-separated patterns
+    -f, --full          Full mode: re-run ALL combinations (creates new job)
+    -p, --parallel      Use parallel processing (3-4x faster for multiple symbols)
+    -w, --workers       Number of parallel workers (default: 4, max: 8)
+    -l, --list          List all optimization jobs
+    -r, --results       Show all optimization results
+    -b, --best          Show best parameters by symbol
+    -v, --verbose       Show detailed progress
+    --reset             Delete ALL optimization data (requires confirmation)
 
 By default, runs in INCREMENTAL mode which only processes new candles since
-the last run. Use --full to re-run all combinations from scratch.
-Use --parallel for faster processing when optimizing multiple symbols.
+the last run. Use -f/--full to re-run all combinations from scratch.
+Use -p/--parallel for faster processing when optimizing multiple symbols.
 """
 import sys
 import os
@@ -381,20 +383,20 @@ def reset_optimization_data(confirm_code=None):
 
 def main():
     parser = argparse.ArgumentParser(description='Run parameter optimization')
-    parser.add_argument('--symbol', type=str, help='Single symbol to optimize')
-    parser.add_argument('--all-symbols', action='store_true', help='Optimize all active symbols')
-    parser.add_argument('--timeframes', type=str, default='1m,5m,15m,30m,1h,2h,4h,1d', help='Comma-separated timeframes')
+    parser.add_argument('-s', '--symbol', type=str, help='Single symbol to optimize')
+    parser.add_argument('-a', '--all-symbols', action='store_true', help='Optimize all active symbols')
+    parser.add_argument('-t', '--timeframes', type=str, default='1m,5m,15m,30m,1h,2h,4h,1d', help='Comma-separated timeframes')
     parser.add_argument('--patterns', type=str, default='imbalance,order_block,liquidity_sweep',
                         help='Comma-separated pattern types')
-    parser.add_argument('--full', '-f', action='store_true',
+    parser.add_argument('-f', '--full', action='store_true',
                         help='Full mode: re-run ALL combinations (creates new job, ignores existing)')
-    parser.add_argument('--list', action='store_true', help='List all jobs')
-    parser.add_argument('--results', action='store_true', help='Show all results')
-    parser.add_argument('--best', action='store_true', help='Show best parameters')
+    parser.add_argument('-l', '--list', action='store_true', help='List all jobs')
+    parser.add_argument('-r', '--results', action='store_true', help='Show all results')
+    parser.add_argument('-b', '--best', action='store_true', help='Show best parameters')
     parser.add_argument('--reset', action='store_true', help='Delete ALL optimization data (requires confirmation)')
-    parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed progress')
-    parser.add_argument('--parallel', '-p', action='store_true', help='Use parallel processing (3-4x faster)')
-    parser.add_argument('--workers', type=int, default=4, help='Number of parallel workers (default: 4, max: 8)')
+    parser.add_argument('-v', '--verbose', action='store_true', help='Show detailed progress')
+    parser.add_argument('-p', '--parallel', action='store_true', help='Use parallel processing (3-4x faster)')
+    parser.add_argument('-w', '--workers', type=int, default=4, help='Number of parallel workers (default: 4, max: 8)')
 
     args = parser.parse_args()
 
