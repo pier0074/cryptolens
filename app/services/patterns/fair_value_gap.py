@@ -139,11 +139,15 @@ class FVGDetector(PatternDetector):
         n = len(df)
         patterns = []
 
-        # For overlap tracking - use numpy arrays for fast vectorized checking
-        seen_bullish_lows = []
-        seen_bullish_highs = []
-        seen_bearish_lows = []
-        seen_bearish_highs = []
+        # Pre-allocate numpy arrays for overlap tracking (avoids O(n²) list-to-array conversions)
+        # Initial capacity of 64, doubles when full (amortized O(1) append)
+        initial_capacity = 64
+        seen_bullish_lows = np.empty(initial_capacity, dtype=np.float64)
+        seen_bullish_highs = np.empty(initial_capacity, dtype=np.float64)
+        seen_bearish_lows = np.empty(initial_capacity, dtype=np.float64)
+        seen_bearish_highs = np.empty(initial_capacity, dtype=np.float64)
+        n_bullish = 0
+        n_bearish = 0
         overlap_threshold = Config.DEFAULT_OVERLAP_THRESHOLD
 
         for i in range(2, n):
@@ -161,15 +165,16 @@ class FVGDetector(PatternDetector):
                 if zone_low > 0:
                     zone_size_pct = ((zone_high - zone_low) / zone_low) * 100
                     if zone_size_pct >= min_zone:
-                        # Fast vectorized overlap check
+                        # Fast vectorized overlap check using pre-allocated arrays
                         is_valid = True
-                        if not skip_overlap and seen_bullish_lows:
-                            seen_lows = np.array(seen_bullish_lows)
-                            seen_highs = np.array(seen_bullish_highs)
-                            overlap_lows = np.maximum(seen_lows, zone_low)
-                            overlap_highs = np.minimum(seen_highs, zone_high)
+                        if not skip_overlap and n_bullish > 0:
+                            # Use sliced view instead of creating new array
+                            s_lows = seen_bullish_lows[:n_bullish]
+                            s_highs = seen_bullish_highs[:n_bullish]
+                            overlap_lows = np.maximum(s_lows, zone_low)
+                            overlap_highs = np.minimum(s_highs, zone_high)
                             overlap_sizes = np.maximum(0, overlap_highs - overlap_lows)
-                            seen_sizes = seen_highs - seen_lows
+                            seen_sizes = s_highs - s_lows
                             zone_size = zone_high - zone_low
                             smaller_sizes = np.minimum(seen_sizes, zone_size)
                             with np.errstate(divide='ignore', invalid='ignore'):
@@ -177,11 +182,21 @@ class FVGDetector(PatternDetector):
                             if np.any(overlap_pcts >= overlap_threshold):
                                 is_valid = False
                             else:
-                                seen_bullish_lows.append(zone_low)
-                                seen_bullish_highs.append(zone_high)
+                                # Grow array if needed (double capacity)
+                                if n_bullish >= len(seen_bullish_lows):
+                                    seen_bullish_lows = np.concatenate([seen_bullish_lows, np.empty(len(seen_bullish_lows), dtype=np.float64)])
+                                    seen_bullish_highs = np.concatenate([seen_bullish_highs, np.empty(len(seen_bullish_highs), dtype=np.float64)])
+                                seen_bullish_lows[n_bullish] = zone_low
+                                seen_bullish_highs[n_bullish] = zone_high
+                                n_bullish += 1
                         elif not skip_overlap:
-                            seen_bullish_lows.append(zone_low)
-                            seen_bullish_highs.append(zone_high)
+                            # Grow array if needed
+                            if n_bullish >= len(seen_bullish_lows):
+                                seen_bullish_lows = np.concatenate([seen_bullish_lows, np.empty(len(seen_bullish_lows), dtype=np.float64)])
+                                seen_bullish_highs = np.concatenate([seen_bullish_highs, np.empty(len(seen_bullish_highs), dtype=np.float64)])
+                            seen_bullish_lows[n_bullish] = zone_low
+                            seen_bullish_highs[n_bullish] = zone_high
+                            n_bullish += 1
 
                         if is_valid:
                             patterns.append({
@@ -202,15 +217,16 @@ class FVGDetector(PatternDetector):
                 if zone_low > 0:
                     zone_size_pct = ((zone_high - zone_low) / zone_low) * 100
                     if zone_size_pct >= min_zone:
-                        # Fast vectorized overlap check
+                        # Fast vectorized overlap check using pre-allocated arrays
                         is_valid = True
-                        if not skip_overlap and seen_bearish_lows:
-                            seen_lows = np.array(seen_bearish_lows)
-                            seen_highs = np.array(seen_bearish_highs)
-                            overlap_lows = np.maximum(seen_lows, zone_low)
-                            overlap_highs = np.minimum(seen_highs, zone_high)
+                        if not skip_overlap and n_bearish > 0:
+                            # Use sliced view instead of creating new array
+                            s_lows = seen_bearish_lows[:n_bearish]
+                            s_highs = seen_bearish_highs[:n_bearish]
+                            overlap_lows = np.maximum(s_lows, zone_low)
+                            overlap_highs = np.minimum(s_highs, zone_high)
                             overlap_sizes = np.maximum(0, overlap_highs - overlap_lows)
-                            seen_sizes = seen_highs - seen_lows
+                            seen_sizes = s_highs - s_lows
                             zone_size = zone_high - zone_low
                             smaller_sizes = np.minimum(seen_sizes, zone_size)
                             with np.errstate(divide='ignore', invalid='ignore'):
@@ -218,11 +234,21 @@ class FVGDetector(PatternDetector):
                             if np.any(overlap_pcts >= overlap_threshold):
                                 is_valid = False
                             else:
-                                seen_bearish_lows.append(zone_low)
-                                seen_bearish_highs.append(zone_high)
+                                # Grow array if needed
+                                if n_bearish >= len(seen_bearish_lows):
+                                    seen_bearish_lows = np.concatenate([seen_bearish_lows, np.empty(len(seen_bearish_lows), dtype=np.float64)])
+                                    seen_bearish_highs = np.concatenate([seen_bearish_highs, np.empty(len(seen_bearish_highs), dtype=np.float64)])
+                                seen_bearish_lows[n_bearish] = zone_low
+                                seen_bearish_highs[n_bearish] = zone_high
+                                n_bearish += 1
                         elif not skip_overlap:
-                            seen_bearish_lows.append(zone_low)
-                            seen_bearish_highs.append(zone_high)
+                            # Grow array if needed
+                            if n_bearish >= len(seen_bearish_lows):
+                                seen_bearish_lows = np.concatenate([seen_bearish_lows, np.empty(len(seen_bearish_lows), dtype=np.float64)])
+                                seen_bearish_highs = np.concatenate([seen_bearish_highs, np.empty(len(seen_bearish_highs), dtype=np.float64)])
+                            seen_bearish_lows[n_bearish] = zone_low
+                            seen_bearish_highs[n_bearish] = zone_high
+                            n_bearish += 1
 
                         if is_valid:
                             patterns.append({

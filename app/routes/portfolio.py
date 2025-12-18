@@ -659,6 +659,8 @@ def edit_trade(portfolio_id, trade_id):
 
 
 @portfolio_bp.route('/<int:portfolio_id>/trades/<int:trade_id>/delete', methods=['POST'])
+@login_required
+@feature_required('portfolio')
 def delete_trade(portfolio_id, trade_id):
     """Delete a trade"""
     portfolio = db.session.get(Portfolio, portfolio_id)
@@ -680,6 +682,8 @@ def delete_trade(portfolio_id, trade_id):
 # ==================== JOURNAL ENTRIES ====================
 
 @portfolio_bp.route('/<int:portfolio_id>/trades/<int:trade_id>/journal', methods=['POST'])
+@login_required
+@feature_required('portfolio')
 def add_journal_entry(portfolio_id, trade_id):
     """Add a journal entry to a trade"""
     trade = db.session.get(Trade, trade_id)
@@ -702,6 +706,8 @@ def add_journal_entry(portfolio_id, trade_id):
 
 
 @portfolio_bp.route('/<int:portfolio_id>/trades/<int:trade_id>/journal/<int:entry_id>/delete', methods=['POST'])
+@login_required
+@feature_required('portfolio')
 def delete_journal_entry(portfolio_id, trade_id, entry_id):
     """Delete a journal entry"""
     entry = db.session.get(JournalEntry, entry_id)
@@ -718,6 +724,8 @@ def delete_journal_entry(portfolio_id, trade_id, entry_id):
 # ==================== TAGS ====================
 
 @portfolio_bp.route('/tags')
+@login_required
+@feature_required('portfolio')
 def tags():
     """List and manage tags"""
     tags = TradeTag.query.all()
@@ -725,6 +733,8 @@ def tags():
 
 
 @portfolio_bp.route('/tags/create', methods=['POST'])
+@login_required
+@feature_required('portfolio')
 def create_tag():
     """Create a new tag"""
     data = request.form
@@ -739,6 +749,8 @@ def create_tag():
 
 
 @portfolio_bp.route('/tags/<int:tag_id>/delete', methods=['POST'])
+@login_required
+@feature_required('portfolio')
 def delete_tag(tag_id):
     """Delete a tag"""
     tag = db.session.get(TradeTag, tag_id)
@@ -949,6 +961,8 @@ def api_trade_from_signal():
 
 
 @portfolio_bp.route('/api/portfolios/<int:portfolio_id>/stats')
+@login_required
+@feature_required('portfolio')
 def api_portfolio_stats(portfolio_id):
     """API: Get portfolio statistics (optimized with SQL aggregation)"""
     from sqlalchemy import func, case

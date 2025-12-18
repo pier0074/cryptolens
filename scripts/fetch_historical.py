@@ -37,13 +37,14 @@ import os
 import time
 import asyncio
 import fcntl
+import tempfile
 from datetime import datetime, timezone, timedelta
 from typing import List, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Lock file path for preventing concurrent execution
-LOCK_FILE = '/tmp/cryptolens_historical.lock'
+# Lock file path for preventing concurrent execution (use system temp directory)
+LOCK_FILE = os.path.join(tempfile.gettempdir(), 'cryptolens_historical.lock')
 
 
 def acquire_lock():

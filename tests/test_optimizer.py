@@ -454,6 +454,21 @@ class TestSweepPhaseFactorization:
             assert run.is_incremental is True
 
 
+class TestIncrementalSkipLogic:
+    """Tests for skip logic when no new candles are available"""
+
+    def test_incremental_processes_symbol_by_symbol(self):
+        """Test that run_incremental processes one symbol at a time using shared method"""
+        opt = ParameterOptimizer()
+        # This is a structural test - the method processes symbols in a loop
+        # using the shared _process_symbol method
+        import inspect
+        source = inspect.getsource(opt.run_incremental)
+        assert 'for symbol in symbols:' in source
+        # Uses shared _process_symbol method (refactored for DRY code)
+        assert '_process_symbol' in source
+
+
 # ========================================
 # Fixtures
 # ========================================

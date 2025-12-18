@@ -6,6 +6,7 @@ Usage:
     python scripts/run_optimization.py --symbol BTC/USDT       # Incremental (default)
     python scripts/run_optimization.py --symbol BTC/USDT --full # Full re-optimization
     python scripts/run_optimization.py --all-symbols           # All active symbols
+    python scripts/run_optimization.py --all-symbols -p        # Parallel (3-4x faster)
     python scripts/run_optimization.py --list                  # List all jobs
     python scripts/run_optimization.py --results               # Show all results
     python scripts/run_optimization.py --best                  # Show best parameters
@@ -16,6 +17,8 @@ Options:
     --timeframes    Comma-separated timeframes
     --patterns      Comma-separated patterns
     --full          Full mode: re-run ALL combinations (creates new job, ignores existing)
+    --parallel, -p  Use parallel processing (3-4x faster for multiple symbols)
+    --workers       Number of parallel workers (default: 4, max: 8)
     --list          List all optimization jobs
     --results       Show all optimization results
     --best          Show best parameters by symbol
@@ -23,6 +26,7 @@ Options:
 
 By default, runs in INCREMENTAL mode which only processes new candles since
 the last run. Use --full to re-run all combinations from scratch.
+Use --parallel for faster processing when optimizing multiple symbols.
 """
 import sys
 import os
@@ -110,10 +114,10 @@ def format_duration(seconds):
         return f"{hours}h {mins}m"
 
 
-def run_optimization(symbols, timeframes, pattern_types, verbose=False, incremental=False):
+def run_optimization(symbols, timeframes, pattern_types, verbose=False, incremental=False, parallel=False, max_workers=4):
     """Run optimization for given symbols."""
     if incremental:
-        run_incremental_optimization(symbols, timeframes, pattern_types, verbose)
+        run_incremental_optimization(symbols, timeframes, pattern_types, verbose, parallel, max_workers)
         return
 
     # Get date range from first symbol's candles
@@ -180,7 +184,7 @@ def run_optimization(symbols, timeframes, pattern_types, verbose=False, incremen
     print(f"Or visit: /admin/optimization/results")
 
 
-def run_incremental_optimization(symbols, timeframes, pattern_types, verbose=False):
+def run_incremental_optimization(symbols, timeframes, pattern_types, verbose=False, parallel=False, max_workers=4):
     """Run incremental optimization - only process new candles."""
     import itertools
 
@@ -191,14 +195,17 @@ def run_incremental_optimization(symbols, timeframes, pattern_types, verbose=Fal
     param_combinations = list(itertools.product(*QUICK_PARAMETER_GRID.values()))
     total_runs = len(symbols) * len(timeframes) * len(pattern_types) * len(param_combinations)
 
+    mode = "Parallel" if parallel else "Sequential"
     print(f"\n{'='*60}")
-    print(f"PARAMETER OPTIMIZATION (Incremental Mode)")
+    print(f"PARAMETER OPTIMIZATION (Incremental Mode - {mode})")
     print(f"{'='*60}")
     print(f"  Symbols: {', '.join(symbols)}")
     print(f"  Timeframes: {', '.join(timeframes)}")
     print(f"  Patterns: {', '.join(pattern_types)}")
     print(f"  Date range: {start_date or 'N/A'} to {end_date or 'N/A'}")
     print(f"  Total combinations: {total_runs}")
+    if parallel:
+        print(f"  Workers: {max_workers}")
     print(f"{'='*60}\n")
 
     # Run with timing
@@ -209,7 +216,9 @@ def run_incremental_optimization(symbols, timeframes, pattern_types, verbose=Fal
         timeframes=timeframes,
         pattern_types=pattern_types,
         parameter_grid=QUICK_PARAMETER_GRID,
-        progress_callback=callback
+        progress_callback=callback,
+        parallel=parallel,
+        max_workers=max_workers
     )
     end_time = datetime.now()
     duration = (end_time - start_time).total_seconds()
@@ -384,6 +393,8 @@ def main():
     parser.add_argument('--best', action='store_true', help='Show best parameters')
     parser.add_argument('--reset', action='store_true', help='Delete ALL optimization data (requires confirmation)')
     parser.add_argument('--verbose', '-v', action='store_true', help='Show detailed progress')
+    parser.add_argument('--parallel', '-p', action='store_true', help='Use parallel processing (3-4x faster)')
+    parser.add_argument('--workers', type=int, default=4, help='Number of parallel workers (default: 4, max: 8)')
 
     args = parser.parse_args()
 
@@ -405,7 +416,7 @@ def main():
             patterns = [p.strip() for p in args.patterns.split(',')]
             # Default is incremental, --full overrides to full mode
             incremental = not args.full
-            run_optimization(symbols, timeframes, patterns, args.verbose, incremental)
+            run_optimization(symbols, timeframes, patterns, args.verbose, incremental, args.parallel, args.workers)
         elif args.all_symbols:
             active_symbols = Symbol.query.filter_by(is_active=True).all()
             if not active_symbols:
@@ -416,13 +427,14 @@ def main():
             patterns = [p.strip() for p in args.patterns.split(',')]
             # Default is incremental, --full overrides to full mode
             incremental = not args.full
-            run_optimization(symbols, timeframes, patterns, args.verbose, incremental)
+            run_optimization(symbols, timeframes, patterns, args.verbose, incremental, args.parallel, args.workers)
         else:
             parser.print_help()
             print("\nExamples:")
             print("  python scripts/run_optimization.py --symbol BTC/USDT -v       # Incremental (default)")
             print("  python scripts/run_optimization.py --symbol BTC/USDT --full   # Full re-optimization")
             print("  python scripts/run_optimization.py --all-symbols -v")
+            print("  python scripts/run_optimization.py --all-symbols -p           # Parallel processing")
             print("  python scripts/run_optimization.py --results")
             print("  python scripts/run_optimization.py --best")
             print("  python scripts/run_optimization.py --reset                    # Delete all data")

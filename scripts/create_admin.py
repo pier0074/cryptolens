@@ -13,6 +13,7 @@ Usage:
 """
 import sys
 import os
+import secrets
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from datetime import datetime, timezone
@@ -21,33 +22,34 @@ from app.models import User, Subscription
 from app.services.auth import generate_unique_topic
 
 
-# Test account credentials
+def generate_secure_password() -> str:
+    """Generate a cryptographically secure random password."""
+    return secrets.token_urlsafe(16)
+
+
+# Test account definitions (passwords generated at runtime)
 TEST_ACCOUNTS = [
     {
         'email': 'admin@cryptolens.local',
         'username': 'admin',
-        'password': 'Admin123',
         'plan': 'premium',  # Plan name for Subscription
         'is_admin': True,
     },
     {
         'email': 'free@cryptolens.local',
         'username': 'freeuser',
-        'password': 'Free123',
         'plan': 'free',
         'is_admin': False,
     },
     {
         'email': 'pro@cryptolens.local',
         'username': 'prouser',
-        'password': 'Pro123',
         'plan': 'pro',
         'is_admin': False,
     },
     {
         'email': 'premium@cryptolens.local',
         'username': 'premiumuser',
-        'password': 'Premium123',
         'plan': 'premium',
         'is_admin': False,
     },
@@ -55,7 +57,7 @@ TEST_ACCOUNTS = [
 
 
 def create_test_accounts():
-    """Create all test accounts."""
+    """Create all test accounts with secure random passwords."""
     app = create_app()
     with app.app_context():
         created = []
@@ -67,6 +69,9 @@ def create_test_accounts():
                 skipped.append(account)
                 continue
 
+            # Generate secure random password at runtime
+            password = generate_secure_password()
+
             # Create user with ntfy_topic (subscription_tier is a computed property)
             user = User(
                 email=account['email'],
@@ -75,7 +80,8 @@ def create_test_accounts():
                 is_verified=True,
                 ntfy_topic=generate_unique_topic()
             )
-            user.set_password(account['password'])
+            user.set_password(password)
+            account['password'] = password  # Store for display
             db.session.add(user)
             db.session.flush()  # Get the user.id
 

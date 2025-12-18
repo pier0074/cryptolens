@@ -7,9 +7,13 @@ Performance optimizations:
 - Vectorized trade simulation using numpy
 - Batch DB commits every 50 runs
 - Progress saved frequently for resumability
+- Parallel symbol processing (CRITICAL-8 fix)
 """
 import json
 import itertools
+import os
+import time
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from datetime import datetime, timezone
 from typing import Dict, List, Optional, Tuple
 import pandas as pd
@@ -29,6 +33,11 @@ from app.services.logger import log_system
 # Batch commit size for DB operations
 BATCH_COMMIT_SIZE = 50
 
+# Default number of parallel workers (bounded to prevent memory issues)
+# Each worker can use ~50MB per symbol, so 4 workers = ~200MB peak
+DEFAULT_PARALLEL_WORKERS = 4
+MAX_PARALLEL_WORKERS = 8
+
 # Detector instances (reuse to avoid re-initialization)
 _detectors = {
     'imbalance': FVGDetector(),
@@ -36,8 +45,297 @@ _detectors = {
     'liquidity_sweep': LiquiditySweepDetector(),
 }
 
-# Batch commit size - balance between performance and data safety
-BATCH_COMMIT_SIZE = 50
+
+def _process_symbol_worker(
+    symbol: str,
+    timeframes: List[str],
+    pattern_types: List[str],
+    parameter_grid: Dict,
+    existing_run_keys: set,
+) -> Dict:
+    """
+    Worker function for parallel symbol processing.
+
+    This function runs in a separate process and uses the shared
+    _process_symbol() method via a new optimizer instance.
+
+    Args:
+        symbol: Trading symbol to process
+        timeframes: List of timeframes
+        pattern_types: List of pattern types
+        parameter_grid: Parameter combinations to test
+        existing_run_keys: Set of (symbol, timeframe, pattern_type, rr, sl) tuples
+                          that already have completed runs (currently unused)
+
+    Returns:
+        Dict with keys from _process_symbol() plus:
+            - has_new_data: whether data was loaded
+            - skip_count: number of skipped combinations (no data)
+    """
+    try:
+        # Create Flask app context for database queries (read-only)
+        from app import create_app
+        app = create_app()
+
+        with app.app_context():
+            # Create optimizer instance and use shared _process_symbol method
+            optimizer = ParameterOptimizer()
+            result = optimizer._process_symbol(
+                symbol=symbol,
+                timeframes=timeframes,
+                pattern_types=pattern_types,
+                parameter_grid=parameter_grid,
+            )
+
+            # Add parallel-specific fields
+            result['has_new_data'] = bool(result.get('data_cache'))
+            result['skip_count'] = 0
+
+            # Check if we actually have data
+            has_data = False
+            for key, cached in result.get('data_cache', {}).items():
+                if cached and cached[0] is not None:
+                    has_data = True
+                    break
+
+            if not has_data:
+                param_combinations = list(itertools.product(*parameter_grid.values()))
+                result['skip_count'] = len(timeframes) * len(pattern_types) * len(param_combinations)
+                result['has_new_data'] = False
+
+            return result
+
+    except Exception as e:
+        return {
+            'symbol': symbol,
+            'data_cache': {},
+            'pattern_cache': {},
+            'results': [],
+            'best_result': None,
+            'skip_count': 0,
+            'has_new_data': False,
+            'error': str(e),
+        }
+
+
+def _simulate_trades_worker(
+    ohlcv: Dict[str, np.ndarray],
+    patterns: List[Dict],
+    params: Dict
+) -> List[Dict]:
+    """
+    Trade simulation for worker process.
+    MUST produce identical results to ParameterOptimizer._simulate_trades_fast().
+
+    Uses same algorithm: vectorized numpy operations with identical entry/exit logic.
+    """
+    if not patterns:
+        return []
+
+    rr_target = params.get('rr_target', 2.0)
+    sl_buffer_pct = params.get('sl_buffer_pct', 10.0) / 100.0
+    entry_method = params.get('entry_method', 'zone_edge')
+
+    highs = ohlcv['high']
+    lows = ohlcv['low']
+    timestamps = ohlcv['timestamp']
+    n_candles = len(highs)
+
+    # Max candles to look ahead for trade resolution (matches optimizer)
+    MAX_TRADE_DURATION = 1000
+
+    trades = []
+
+    for pattern in patterns:
+        entry_idx = pattern['detected_at']
+        if entry_idx + 10 >= n_candles:
+            continue
+
+        zone_high = pattern['zone_high']
+        zone_low = pattern['zone_low']
+        zone_size = zone_high - zone_low
+        buffer = zone_size * sl_buffer_pct
+
+        # Calculate entry, SL, TP based on direction (matches optimizer exactly)
+        if pattern['direction'] == 'bullish':
+            entry = zone_high if entry_method == 'zone_edge' else (zone_high + zone_low) / 2
+            stop_loss = zone_low - buffer
+            risk = entry - stop_loss
+            take_profit = entry + (risk * rr_target)
+            direction = 'long'
+        else:
+            entry = zone_low if entry_method == 'zone_edge' else (zone_high + zone_low) / 2
+            stop_loss = zone_high + buffer
+            risk = stop_loss - entry
+            take_profit = entry - (risk * rr_target)
+            direction = 'short'
+
+        # Limit search window
+        start_idx = entry_idx + 1
+        end_idx = min(entry_idx + MAX_TRADE_DURATION, n_candles)
+
+        if start_idx >= end_idx:
+            continue
+
+        # Get slices for vectorized operations
+        h_slice = highs[start_idx:end_idx]
+        l_slice = lows[start_idx:end_idx]
+
+        # Vectorized search for entry trigger (matches optimizer)
+        if direction == 'long':
+            entry_mask = l_slice <= entry
+        else:
+            entry_mask = h_slice >= entry
+
+        if not np.any(entry_mask):
+            continue  # No entry triggered
+
+        entry_candle_offset = np.argmax(entry_mask)
+        entry_candle = start_idx + entry_candle_offset
+
+        # Now search for SL/TP after entry
+        trade_start = entry_candle + 1
+        trade_end = end_idx
+
+        if trade_start >= trade_end:
+            continue
+
+        h_trade = highs[trade_start:trade_end]
+        l_trade = lows[trade_start:trade_end]
+
+        if direction == 'long':
+            sl_mask = l_trade <= stop_loss
+            tp_mask = h_trade >= take_profit
+        else:
+            sl_mask = h_trade >= stop_loss
+            tp_mask = l_trade <= take_profit
+
+        # Find first SL or TP hit
+        sl_idx = np.argmax(sl_mask) if np.any(sl_mask) else len(sl_mask)
+        tp_idx = np.argmax(tp_mask) if np.any(tp_mask) else len(tp_mask)
+
+        # Check which was actually hit (argmax returns 0 if all False)
+        sl_hit = sl_mask[sl_idx] if sl_idx < len(sl_mask) else False
+        tp_hit = tp_mask[tp_idx] if tp_idx < len(tp_mask) else False
+
+        if not sl_hit and not tp_hit:
+            continue  # Trade not resolved
+
+        # Determine outcome (matches optimizer exactly)
+        if sl_hit and tp_hit:
+            # Both triggered - take whichever came first
+            if sl_idx <= tp_idx:
+                result = 'loss'
+                exit_idx = trade_start + sl_idx
+                exit_price = stop_loss
+            else:
+                result = 'win'
+                exit_idx = trade_start + tp_idx
+                exit_price = take_profit
+        elif sl_hit:
+            result = 'loss'
+            exit_idx = trade_start + sl_idx
+            exit_price = stop_loss
+        else:
+            result = 'win'
+            exit_idx = trade_start + tp_idx
+            exit_price = take_profit
+
+        duration = exit_idx - entry_candle
+        entry_time = int(timestamps[entry_candle])
+        exit_time = int(timestamps[exit_idx])
+
+        # Calculate profit (matches optimizer)
+        if direction == 'long':
+            profit_pct = ((exit_price - entry) / entry) * 100
+        else:
+            profit_pct = ((entry - exit_price) / entry) * 100
+
+        actual_rr = rr_target if result == 'win' else -1.0
+
+        trades.append({
+            'entry_price': entry,
+            'exit_price': exit_price,
+            'entry_time': entry_time,
+            'exit_time': exit_time,
+            'direction': direction,
+            'result': result,
+            'profit_pct': round(profit_pct, 4),
+            'actual_rr': round(actual_rr, 2),
+            'duration_candles': duration,
+        })
+
+    return trades
+
+
+def _calculate_statistics_worker(trades: List[Dict]) -> Dict:
+    """Calculate trade statistics for worker process."""
+    if not trades:
+        return {
+            'total_trades': 0,
+            'winning_trades': 0,
+            'losing_trades': 0,
+            'win_rate': 0,
+            'avg_rr': 0,
+            'total_profit_pct': 0,
+            'max_drawdown': 0,
+            'sharpe_ratio': 0,
+            'profit_factor': 0,
+            'avg_duration': 0,
+        }
+
+    total_trades = len(trades)
+    winning = [t for t in trades if t['result'] == 'win']
+    losing = [t for t in trades if t['result'] == 'loss']
+
+    winning_trades = len(winning)
+    losing_trades = len(losing)
+    win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
+
+    profits = [t['profit_pct'] for t in trades]
+    total_profit_pct = sum(profits)
+
+    rrs = [t['actual_rr'] for t in trades]
+    avg_rr = np.mean(rrs) if rrs else 0
+
+    # Max drawdown
+    cumulative = 0
+    peak = 0
+    max_dd = 0
+    for t in trades:
+        cumulative += t['profit_pct']
+        peak = max(peak, cumulative)
+        dd = peak - cumulative
+        max_dd = max(max_dd, dd)
+
+    # Sharpe ratio
+    if len(profits) > 1:
+        returns_std = np.std(profits)
+        avg_return = np.mean(profits)
+        sharpe_ratio = (avg_return / returns_std) if returns_std > 0 else 0
+    else:
+        sharpe_ratio = 0
+
+    # Profit factor
+    gross_wins = sum(t['profit_pct'] for t in winning) if winning else 0
+    gross_losses = abs(sum(t['profit_pct'] for t in losing)) if losing else 1
+    profit_factor = gross_wins / gross_losses if gross_losses > 0 else gross_wins
+
+    # Average duration
+    avg_duration = sum(t['duration_candles'] for t in trades) / total_trades if total_trades > 0 else 0
+
+    return {
+        'total_trades': total_trades,
+        'winning_trades': winning_trades,
+        'losing_trades': losing_trades,
+        'win_rate': round(win_rate, 2),
+        'avg_rr': round(avg_rr, 2),
+        'total_profit_pct': round(total_profit_pct, 2),
+        'max_drawdown': round(max_dd, 2),
+        'sharpe_ratio': round(sharpe_ratio, 2),
+        'profit_factor': round(profit_factor, 2),
+        'avg_duration': round(avg_duration, 1),
+    }
 
 
 class ParameterOptimizer:
@@ -45,6 +343,214 @@ class ParameterOptimizer:
 
     def __init__(self):
         self.current_job = None
+
+    def _process_symbol(
+        self,
+        symbol: str,
+        timeframes: List[str],
+        pattern_types: List[str],
+        parameter_grid: Dict,
+        data_override: Dict[str, pd.DataFrame] = None,
+    ) -> Dict:
+        """
+        Core symbol processing logic - SINGLE SOURCE OF TRUTH.
+
+        This method is used by both run_job() and run_incremental().
+        It handles: data loading → pattern detection → parameter sweep.
+
+        Args:
+            symbol: Trading symbol to process
+            timeframes: List of timeframes to process
+            pattern_types: List of pattern types to detect
+            parameter_grid: Parameter combinations to test
+            data_override: Optional dict of {timeframe: DataFrame} for testing
+                          (bypasses database queries)
+
+        Returns:
+            Dict with keys:
+                - symbol: the processed symbol
+                - results: list of sweep results (each with trades, stats)
+                - best_result: best result from sweep
+                - data_cache: loaded candle data (for caller if needed)
+                - pattern_cache: detected patterns (for caller if needed)
+                - error: error message if failed, None otherwise
+        """
+        result = {
+            'symbol': symbol,
+            'results': [],
+            'best_result': None,
+            'data_cache': {},
+            'pattern_cache': {},
+            'error': None,
+        }
+
+        try:
+            # Phase 1: Load candle data
+            phase1_start = time.time()
+            print(f"  [{symbol}] Phase 1: Loading candle data...", flush=True)
+            total_candles = 0
+            for timeframe in timeframes:
+                if data_override and timeframe in data_override:
+                    # Use provided data (for testing)
+                    df = data_override[timeframe]
+                else:
+                    # Load from database
+                    df = get_candles_as_dataframe(symbol, timeframe, verified_only=True)
+                    if df is None or df.empty:
+                        df = get_candles_as_dataframe(symbol, timeframe, verified_only=False)
+
+                if df is not None and len(df) >= 20:
+                    ohlcv = self._df_to_arrays(df)
+                    last_ts = int(df['timestamp'].max())
+                    result['data_cache'][(symbol, timeframe)] = (df, ohlcv, last_ts)
+                    total_candles += len(df)
+                else:
+                    result['data_cache'][(symbol, timeframe)] = (None, None, None)
+
+            phase1_time = time.time() - phase1_start
+            print(f"  [{symbol}] Phase 1: Loaded {total_candles:,} candles across {len(timeframes)} timeframes ({phase1_time:.2f}s)", flush=True)
+
+            if total_candles == 0:
+                # No data for any timeframe - mark all as failed
+                print(f"  [{symbol}] ✗ No data available - skipping", flush=True)
+                param_keys = list(parameter_grid.keys())
+                param_combinations = list(itertools.product(*parameter_grid.values()))
+                for timeframe in timeframes:
+                    for pattern_type in pattern_types:
+                        for params in param_combinations:
+                            result['results'].append({
+                                'symbol': symbol,
+                                'timeframe': timeframe,
+                                'pattern_type': pattern_type,
+                                'params': dict(zip(param_keys, params)),
+                                'status': 'failed',
+                                'error': 'Insufficient data',
+                                'last_candle_ts': None,
+                            })
+                return result
+
+            # Phase 2: Detect patterns
+            phase2_start = time.time()
+            print(f"  [{symbol}] Phase 2: Detecting patterns...", flush=True)
+            min_zone_pcts = parameter_grid.get('min_zone_pct', [0.15])
+            use_overlaps = parameter_grid.get('use_overlap', [True])
+
+            for timeframe in timeframes:
+                cached = result['data_cache'].get((symbol, timeframe), (None, None, None))
+                df = cached[0]
+                if df is None:
+                    continue
+
+                for pattern_type in pattern_types:
+                    detector = _detectors.get(pattern_type)
+                    if not detector:
+                        continue
+
+                    for min_zone_pct in min_zone_pcts:
+                        for use_overlap in use_overlaps:
+                            cache_key = (symbol, timeframe, pattern_type, min_zone_pct, use_overlap)
+                            patterns = detector.detect_historical(
+                                df,
+                                min_zone_pct=min_zone_pct,
+                                skip_overlap=not use_overlap
+                            )
+                            result['pattern_cache'][cache_key] = patterns
+
+            phase2_time = time.time() - phase2_start
+            total_patterns = sum(len(p) for p in result['pattern_cache'].values())
+            print(f"  [{symbol}] Phase 2: Detected {total_patterns:,} patterns ({phase2_time:.2f}s)", flush=True)
+
+            # Phase 3: Parameter sweep
+            phase3_start = time.time()
+            param_keys = list(parameter_grid.keys())
+            param_combinations = list(itertools.product(*parameter_grid.values()))
+            total_combos = len(param_combinations) * len(timeframes) * len(pattern_types)
+            print(f"  [{symbol}] Phase 3: Running {total_combos:,} parameter combinations...", flush=True)
+            best_profit = float('-inf')
+
+            for timeframe in timeframes:
+                cached = result['data_cache'].get((symbol, timeframe), (None, None, None))
+                df, ohlcv, last_candle_ts = cached[0], cached[1], cached[2] if len(cached) > 2 else None
+
+                if df is None:
+                    for pattern_type in pattern_types:
+                        for params in param_combinations:
+                            result['results'].append({
+                                'symbol': symbol,
+                                'timeframe': timeframe,
+                                'pattern_type': pattern_type,
+                                'params': dict(zip(param_keys, params)),
+                                'status': 'failed',
+                                'error': 'Insufficient data',
+                                'last_candle_ts': None,
+                            })
+                    continue
+
+                for pattern_type in pattern_types:
+                    detector = _detectors.get(pattern_type)
+                    if not detector:
+                        for params in param_combinations:
+                            result['results'].append({
+                                'symbol': symbol,
+                                'timeframe': timeframe,
+                                'pattern_type': pattern_type,
+                                'params': dict(zip(param_keys, params)),
+                                'status': 'failed',
+                                'error': f'Unknown pattern type: {pattern_type}',
+                                'last_candle_ts': last_candle_ts,
+                            })
+                        continue
+
+                    for params in param_combinations:
+                        param_dict = dict(zip(param_keys, params))
+
+                        try:
+                            min_zone_pct = param_dict.get('min_zone_pct', 0.15)
+                            use_overlap = param_dict.get('use_overlap', True)
+                            cache_key = (symbol, timeframe, pattern_type, min_zone_pct, use_overlap)
+                            patterns = result['pattern_cache'].get(cache_key, [])
+
+                            trades = self._simulate_trades_fast(ohlcv, patterns, param_dict)
+                            stats = self._calculate_statistics(trades)
+
+                            sweep_result = {
+                                'symbol': symbol,
+                                'timeframe': timeframe,
+                                'pattern_type': pattern_type,
+                                'params': param_dict,
+                                'status': 'completed',
+                                'trades': trades,
+                                'stats': stats,
+                                'last_candle_ts': last_candle_ts,
+                            }
+                            result['results'].append(sweep_result)
+
+                            if stats['total_profit_pct'] > best_profit:
+                                best_profit = stats['total_profit_pct']
+                                result['best_result'] = sweep_result
+
+                        except Exception as e:
+                            result['results'].append({
+                                'symbol': symbol,
+                                'timeframe': timeframe,
+                                'pattern_type': pattern_type,
+                                'params': param_dict,
+                                'status': 'failed',
+                                'error': str(e),
+                                'last_candle_ts': last_candle_ts,
+                            })
+
+            phase3_time = time.time() - phase3_start
+            completed = sum(1 for r in result['results'] if r['status'] == 'completed')
+            total_trades = sum(len(r.get('trades', [])) for r in result['results'] if r['status'] == 'completed')
+            best_pct = result['best_result']['stats']['total_profit_pct'] if result['best_result'] else 0
+            print(f"  [{symbol}] Phase 3: Completed {completed} sweeps, {total_trades:,} trades, best: {best_pct:.2f}% ({phase3_time:.2f}s)", flush=True)
+
+        except Exception as e:
+            result['error'] = str(e)
+            print(f"  [{symbol}] ✗ Error: {str(e)}", flush=True)
+
+        return result
 
     def create_job(
         self,
@@ -102,20 +608,24 @@ class ParameterOptimizer:
 
         return job
 
-    def run_job(self, job_id: int, progress_callback=None) -> Dict:
+    def run_job(
+        self,
+        job_id: int,
+        progress_callback=None,
+        parallel: bool = False,
+        max_workers: int = None
+    ) -> Dict:
         """
         Execute all runs for a job.
 
-        Optimized approach:
-        1. Load candle data once per symbol/timeframe
-        2. Cache pattern detection per symbol/timeframe/pattern_type
-        3. Only vary parameters for trade simulation
-        4. Batch DB commits for performance
-        5. Save progress frequently for resumability
+        Uses the shared _process_symbol() method for each symbol, ensuring
+        consistent behavior with run_incremental().
 
         Args:
             job_id: Job ID to execute
             progress_callback: Optional callback(completed, total) for progress updates
+            parallel: If True, process symbols in parallel (default: False)
+            max_workers: Number of parallel workers (default: 4, max: 8)
 
         Returns:
             Summary dict with results
@@ -138,52 +648,82 @@ class ParameterOptimizer:
         pattern_types = job.pattern_types_list
         param_grid = job.parameter_grid_dict
 
-        # Generate all parameter combinations
-        param_keys = list(param_grid.keys())
-        param_combinations = list(itertools.product(*param_grid.values()))
-
         completed = 0
         failed = 0
         best_result = None
         best_profit = float('-inf')
         pending_commits = 0
+        processed_count = 0
 
-        # Phase 1 & 2: Load data and detect patterns (shared methods)
-        data_cache = self._load_candle_data_phase(symbols, timeframes)
-        pattern_cache = self._detect_patterns_phase(symbols, timeframes, pattern_types, param_grid, data_cache)
+        # Calculate total for progress
+        param_combinations = list(itertools.product(*param_grid.values()))
+        total_runs = len(symbols) * len(timeframes) * len(pattern_types) * len(param_combinations)
 
-        # Phase 3: Parameter sweep (shared implementation)
         try:
-            results, best_sweep_result = self._run_sweep_phase(
-                symbols, timeframes, pattern_types, param_grid,
-                data_cache, pattern_cache, progress_callback
-            )
+            # Process each symbol using shared _process_symbol() method
+            for symbol in symbols:
+                print(f"\n{'='*60}", flush=True)
+                print(f"[{symbol}] Starting optimization...", flush=True)
 
-            # Create OptimizationRun records from sweep results
-            for r in results:
-                if r['status'] == 'completed':
-                    run = self._create_run_from_result(job, r)
-                    completed += 1
-                    if run.total_profit_pct > best_profit:
-                        best_profit = run.total_profit_pct
-                        best_result = run
-                else:
-                    self._create_failed_run(
-                        job, r['symbol'], r['timeframe'], r['pattern_type'],
-                        r['params'], r.get('error', 'Unknown error')
-                    )
-                    failed += 1
+                symbol_result = self._process_symbol(
+                    symbol=symbol,
+                    timeframes=timeframes,
+                    pattern_types=pattern_types,
+                    parameter_grid=param_grid,
+                )
 
-                pending_commits += 1
-                job.completed_runs = completed
-                job.failed_runs = failed
+                if symbol_result.get('error'):
+                    print(f"  [{symbol}] ✗ Error - {symbol_result['error']}", flush=True)
+                    # Mark all as failed for this symbol
+                    for tf in timeframes:
+                        for pt in pattern_types:
+                            for params in param_combinations:
+                                self._create_failed_run(
+                                    job, symbol, tf, pt,
+                                    dict(zip(param_grid.keys(), params)),
+                                    symbol_result['error']
+                                )
+                                failed += 1
+                    continue
 
-                if pending_commits >= BATCH_COMMIT_SIZE:
-                    db.session.commit()
-                    pending_commits = 0
+                # Create OptimizationRun records from results
+                symbol_completed = 0
+                symbol_failed = 0
+
+                for r in symbol_result['results']:
+                    if r['status'] == 'completed':
+                        run = self._create_run_from_result(job, r)
+                        completed += 1
+                        symbol_completed += 1
+                        if run.total_profit_pct is not None and run.total_profit_pct > best_profit:
+                            best_profit = run.total_profit_pct
+                            best_result = run
+                    else:
+                        self._create_failed_run(
+                            job, r['symbol'], r['timeframe'], r['pattern_type'],
+                            r['params'], r.get('error', 'Unknown error')
+                        )
+                        failed += 1
+                        symbol_failed += 1
+
+                    pending_commits += 1
+                    processed_count += 1
+
+                    if progress_callback:
+                        progress_callback(processed_count, total_runs)
+
+                    if pending_commits >= BATCH_COMMIT_SIZE:
+                        job.completed_runs = completed
+                        job.failed_runs = failed
+                        db.session.commit()
+                        pending_commits = 0
+
+                print(f"  [{symbol}] ✓ {symbol_completed} completed, {symbol_failed} failed", flush=True)
 
             # Final commit
             if pending_commits > 0:
+                job.completed_runs = completed
+                job.failed_runs = failed
                 db.session.commit()
 
             # Update best params
@@ -407,8 +947,10 @@ class ParameterOptimizer:
             for timeframe in timeframes:
                 query_start = datetime.now(timezone.utc)
                 df = get_candles_as_dataframe(symbol, timeframe, verified_only=True)
+                verified_source = "verified"
                 if df is None or df.empty:
                     df = get_candles_as_dataframe(symbol, timeframe, verified_only=False)
+                    verified_source = "unverified"
                 query_duration = (datetime.now(timezone.utc) - query_start).total_seconds()
 
                 if df is not None and len(df) >= 20:
@@ -416,7 +958,8 @@ class ParameterOptimizer:
                     last_candle_ts = int(df['timestamp'].max())
                     data_cache[(symbol, timeframe)] = (df, ohlcv_arrays, last_candle_ts)
                     total_candles += len(df)
-                    print(f"  {symbol} {timeframe}: {len(df):,} candles ({query_duration:.2f}s)", flush=True)
+                    status = "" if verified_source == "verified" else " [unverified!]"
+                    print(f"  {symbol} {timeframe}: {len(df):,} candles ({query_duration:.2f}s){status}", flush=True)
                 else:
                     data_cache[(symbol, timeframe)] = (None, None, None)
                     print(f"  {symbol} {timeframe}: No data ({query_duration:.2f}s)")
@@ -1253,13 +1796,24 @@ class ParameterOptimizer:
         timeframes: List[str],
         pattern_types: List[str],
         parameter_grid: Dict = None,
-        progress_callback=None
+        progress_callback=None,
+        parallel: bool = False,
+        max_workers: int = None
     ) -> Dict:
         """
-        Run incremental optimization - uses the same simulation as full mode.
+        Run incremental optimization.
 
-        Uses the SAME _run_sweep_phase as run_job for consistent results.
-        The only difference is how records are created/updated.
+        By default processes ONE SYMBOL AT A TIME to save memory.
+        Set parallel=True to process multiple symbols concurrently for 3-4x speedup.
+
+        Args:
+            symbols: List of trading pairs to optimize
+            timeframes: List of timeframes
+            pattern_types: List of pattern types
+            parameter_grid: Parameter combinations to test
+            progress_callback: Optional callback for progress updates
+            parallel: If True, use parallel processing (default: False)
+            max_workers: Number of parallel workers (default: 4, max: 8)
 
         Returns:
             Summary dict with results
@@ -1267,64 +1821,115 @@ class ParameterOptimizer:
         if parameter_grid is None:
             parameter_grid = QUICK_PARAMETER_GRID
 
-        updated = 0
-        new_runs = 0
-        errors = 0
-        pending_commits = 0
+        # Use parallel processing if requested and multiple symbols
+        if parallel and len(symbols) > 1:
+            return self._run_incremental_parallel(
+                symbols, timeframes, pattern_types, parameter_grid,
+                progress_callback, max_workers
+            )
+
+        total_updated = 0
+        total_new_runs = 0
+        total_skipped = 0
+        total_errors = 0
         best_result = None
         best_profit = float('-inf')
 
-        # Pre-load all existing runs into a dict for O(1) lookups
-        existing_runs = {}
-        all_existing = OptimizationRun.query.filter(
-            OptimizationRun.symbol.in_(symbols),
-            OptimizationRun.timeframe.in_(timeframes),
-            OptimizationRun.pattern_type.in_(pattern_types),
-            OptimizationRun.status == 'completed'
-        ).all()
-        for run in all_existing:
-            key = (run.symbol, run.timeframe, run.pattern_type, run.rr_target, run.sl_buffer_pct)
-            existing_runs[key] = run
+        # Process ONE SYMBOL AT A TIME using shared _process_symbol() method
+        for symbol in symbols:
+            # Pre-load existing runs for this symbol only
+            existing_runs = {}
+            all_existing = OptimizationRun.query.filter(
+                OptimizationRun.symbol == symbol,
+                OptimizationRun.timeframe.in_(timeframes),
+                OptimizationRun.pattern_type.in_(pattern_types),
+                OptimizationRun.status == 'completed'
+            ).all()
+            for run in all_existing:
+                key = (run.symbol, run.timeframe, run.pattern_type, run.rr_target, run.sl_buffer_pct)
+                existing_runs[key] = run
 
-        # Phase 1 & 2: Load data and detect patterns (shared methods)
-        data_cache = self._load_candle_data_phase(symbols, timeframes)
-        pattern_cache = self._detect_patterns_phase(symbols, timeframes, pattern_types, parameter_grid, data_cache)
+            print(f"\n{'='*60}", flush=True)
+            print(f"[{symbol}] Starting incremental optimization...", flush=True)
 
-        # Phase 3: Parameter sweep (SAME implementation as run_job)
-        results, best_sweep_result = self._run_sweep_phase(
-            symbols, timeframes, pattern_types, parameter_grid,
-            data_cache, pattern_cache, progress_callback
-        )
+            # Use shared _process_symbol() method
+            symbol_result = self._process_symbol(
+                symbol=symbol,
+                timeframes=timeframes,
+                pattern_types=pattern_types,
+                parameter_grid=parameter_grid,
+            )
 
-        # Create/update records from sweep results
-        for r in results:
-            params = r['params']
-            rr_target = params.get('rr_target', 2.0)
-            sl_buffer_pct = params.get('sl_buffer_pct', 10.0)
-            existing_key = (r['symbol'], r['timeframe'], r['pattern_type'], rr_target, sl_buffer_pct)
-            existing = existing_runs.get(existing_key)
+            if symbol_result.get('error'):
+                print(f"  [{symbol}] ✗ Error - {symbol_result['error']}", flush=True)
+                param_combinations = list(itertools.product(*parameter_grid.values()))
+                total_errors += len(timeframes) * len(pattern_types) * len(param_combinations)
+                continue
 
-            if r['status'] == 'completed':
-                run = self._create_run_from_result(None, r, existing_run=existing)
-                if existing:
-                    updated += 1
+            # Check if we have new data compared to existing runs
+            has_new_data = False
+            for timeframe in timeframes:
+                cached = symbol_result['data_cache'].get((symbol, timeframe))
+                if cached and cached[2]:  # last_candle_ts
+                    last_candle_ts = cached[2]
+                    # Check if any existing run for this timeframe has older data
+                    for (sym, tf, pt, rr, sl), run in existing_runs.items():
+                        if tf == timeframe and run.last_candle_timestamp:
+                            if last_candle_ts > run.last_candle_timestamp:
+                                has_new_data = True
+                                break
+                    # If no existing runs for this timeframe, we have "new" data
+                    if not any(tf == timeframe for (sym, tf, pt, rr, sl) in existing_runs.keys()):
+                        has_new_data = True
+                        break
+                    if has_new_data:
+                        break
+
+            if not has_new_data and existing_runs:
+                # Skip this symbol entirely - no new candles
+                param_combinations = list(itertools.product(*parameter_grid.values()))
+                skip_count = len(timeframes) * len(pattern_types) * len(param_combinations)
+                total_skipped += skip_count
+                print(f"  [{symbol}] ⏭ Skipped - No new candles since last run", flush=True)
+                continue
+
+            # Create/update records from results
+            pending_commits = 0
+            symbol_updated = 0
+            symbol_new = 0
+
+            for r in symbol_result['results']:
+                params = r['params']
+                rr_target = params.get('rr_target', 2.0)
+                sl_buffer_pct = params.get('sl_buffer_pct', 10.0)
+                existing_key = (r['symbol'], r['timeframe'], r['pattern_type'], rr_target, sl_buffer_pct)
+                existing = existing_runs.get(existing_key)
+
+                if r['status'] == 'completed':
+                    run = self._create_run_from_result(None, r, existing_run=existing)
+                    if existing:
+                        total_updated += 1
+                        symbol_updated += 1
+                    else:
+                        total_new_runs += 1
+                        symbol_new += 1
+                        existing_runs[existing_key] = run
+
+                    if run.total_profit_pct is not None and run.total_profit_pct > best_profit:
+                        best_profit = run.total_profit_pct
+                        best_result = run
                 else:
-                    new_runs += 1
-                    existing_runs[existing_key] = run
+                    total_errors += 1
 
-                if run.total_profit_pct is not None and run.total_profit_pct > best_profit:
-                    best_profit = run.total_profit_pct
-                    best_result = run
-            else:
-                errors += 1
+                pending_commits += 1
+                if pending_commits >= BATCH_COMMIT_SIZE:
+                    db.session.commit()
+                    pending_commits = 0
 
-            pending_commits += 1
-            if pending_commits >= BATCH_COMMIT_SIZE:
+            if pending_commits > 0:
                 db.session.commit()
-                pending_commits = 0
 
-        if pending_commits > 0:
-            db.session.commit()
+            print(f"  [{symbol}] ✓ {symbol_new} new, {symbol_updated} updated", flush=True)
 
         # Build best result dict
         best_result_dict = None
@@ -1342,12 +1947,196 @@ class ParameterOptimizer:
 
         return {
             'success': True,
-            'updated': updated,
-            'new_runs': new_runs,
-            'skipped': 0,  # No longer skipping - always recompute
-            'errors': errors,
-            'total': len(results),
+            'updated': total_updated,
+            'new_runs': total_new_runs,
+            'skipped': total_skipped,
+            'errors': total_errors,
+            'total': total_updated + total_new_runs + total_skipped,
             'best_result': best_result_dict,
+        }
+
+    def _run_incremental_parallel(
+        self,
+        symbols: List[str],
+        timeframes: List[str],
+        pattern_types: List[str],
+        parameter_grid: Dict,
+        progress_callback=None,
+        max_workers: int = None
+    ) -> Dict:
+        """
+        Run incremental optimization with parallel symbol processing.
+
+        Uses ProcessPoolExecutor to process multiple symbols concurrently.
+        Each worker process loads data, detects patterns, and simulates trades.
+        Database writes are done in the main process to avoid race conditions.
+
+        Args:
+            symbols: List of trading pairs
+            timeframes: List of timeframes
+            pattern_types: List of pattern types
+            parameter_grid: Parameter combinations
+            progress_callback: Optional progress callback
+            max_workers: Number of workers (default: 4, max: 8)
+
+        Returns:
+            Summary dict with results
+        """
+        # Bound workers to prevent memory issues
+        if max_workers is None:
+            max_workers = DEFAULT_PARALLEL_WORKERS
+        max_workers = min(max_workers, MAX_PARALLEL_WORKERS, len(symbols))
+
+        print(f"\n{'='*60}", flush=True)
+        print(f"PARALLEL PROCESSING: {len(symbols)} symbols with {max_workers} workers", flush=True)
+        print(f"{'='*60}", flush=True)
+
+        total_updated = 0
+        total_new_runs = 0
+        total_skipped = 0
+        total_errors = 0
+        best_result = None
+        best_profit = float('-inf')
+
+        # Pre-load existing runs for ALL symbols (needed for skip detection)
+        existing_runs_map = {}  # symbol -> {key: run}
+        for symbol in symbols:
+            existing_runs = {}
+            all_existing = OptimizationRun.query.filter(
+                OptimizationRun.symbol == symbol,
+                OptimizationRun.timeframe.in_(timeframes),
+                OptimizationRun.pattern_type.in_(pattern_types),
+                OptimizationRun.status == 'completed'
+            ).all()
+            for run in all_existing:
+                key = (run.symbol, run.timeframe, run.pattern_type, run.rr_target, run.sl_buffer_pct)
+                existing_runs[key] = run
+            existing_runs_map[symbol] = existing_runs
+
+        # Prepare existing run keys for workers
+        existing_run_keys = set()
+        for symbol_runs in existing_runs_map.values():
+            existing_run_keys.update(symbol_runs.keys())
+
+        parallel_start = datetime.now(timezone.utc)
+        completed_symbols = 0
+
+        # Process symbols in parallel using ProcessPoolExecutor
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all symbol processing tasks
+            future_to_symbol = {
+                executor.submit(
+                    _process_symbol_worker,
+                    symbol,
+                    timeframes,
+                    pattern_types,
+                    parameter_grid,
+                    existing_run_keys
+                ): symbol
+                for symbol in symbols
+            }
+
+            # Process results as they complete
+            for future in as_completed(future_to_symbol):
+                symbol = future_to_symbol[future]
+                completed_symbols += 1
+
+                try:
+                    worker_result = future.result()
+
+                    if worker_result.get('error'):
+                        print(f"  [{symbol}] ✗ Error - {worker_result['error']}", flush=True)
+                        param_combinations = list(itertools.product(*parameter_grid.values()))
+                        total_errors += len(timeframes) * len(pattern_types) * len(param_combinations)
+                        continue
+
+                    if worker_result.get('skip_count', 0) > 0 and not worker_result.get('has_new_data'):
+                        total_skipped += worker_result['skip_count']
+                        print(f"  [{symbol}] ⏭ Skipped (no data)", flush=True)
+                        continue
+
+                    # Get existing runs for this symbol
+                    existing_runs = existing_runs_map.get(symbol, {})
+
+                    # Process results and create/update DB records
+                    pending_commits = 0
+                    symbol_updated = 0
+                    symbol_new = 0
+                    symbol_errors = 0
+
+                    for r in worker_result.get('results', []):
+                        params = r['params']
+                        rr_target = params.get('rr_target', 2.0)
+                        sl_buffer_pct = params.get('sl_buffer_pct', 10.0)
+                        existing_key = (r['symbol'], r['timeframe'], r['pattern_type'], rr_target, sl_buffer_pct)
+                        existing = existing_runs.get(existing_key)
+
+                        if r['status'] == 'completed':
+                            run = self._create_run_from_result(None, r, existing_run=existing)
+                            if existing:
+                                symbol_updated += 1
+                            else:
+                                symbol_new += 1
+                                existing_runs[existing_key] = run
+
+                            if run.total_profit_pct is not None and run.total_profit_pct > best_profit:
+                                best_profit = run.total_profit_pct
+                                best_result = run
+                        else:
+                            symbol_errors += 1
+
+                        pending_commits += 1
+                        if pending_commits >= BATCH_COMMIT_SIZE:
+                            db.session.commit()
+                            pending_commits = 0
+
+                    if pending_commits > 0:
+                        db.session.commit()
+
+                    total_updated += symbol_updated
+                    total_new_runs += symbol_new
+                    total_errors += symbol_errors
+
+                    print(f"  [{symbol}] ✓ {symbol_new} new, {symbol_updated} updated "
+                          f"[{completed_symbols}/{len(symbols)}]", flush=True)
+
+                except Exception as e:
+                    print(f"  [{symbol}] ✗ Exception - {str(e)}", flush=True)
+                    param_combinations = list(itertools.product(*parameter_grid.values()))
+                    total_errors += len(timeframes) * len(pattern_types) * len(param_combinations)
+
+        parallel_duration = (datetime.now(timezone.utc) - parallel_start).total_seconds()
+        print(f"\n{'='*60}", flush=True)
+        print(f"PARALLEL COMPLETE: {parallel_duration:.1f}s", flush=True)
+        print(f"  Updated: {total_updated}, New: {total_new_runs}, "
+              f"Skipped: {total_skipped}, Errors: {total_errors}", flush=True)
+        print(f"{'='*60}\n", flush=True)
+
+        # Build best result dict
+        best_result_dict = None
+        if best_result:
+            best_result_dict = {
+                'symbol': best_result.symbol,
+                'timeframe': best_result.timeframe,
+                'pattern_type': best_result.pattern_type,
+                'rr_target': best_result.rr_target,
+                'sl_buffer_pct': best_result.sl_buffer_pct,
+                'win_rate': best_result.win_rate,
+                'total_profit_pct': best_result.total_profit_pct,
+                'total_trades': best_result.total_trades,
+            }
+
+        return {
+            'success': True,
+            'updated': total_updated,
+            'new_runs': total_new_runs,
+            'skipped': total_skipped,
+            'errors': total_errors,
+            'total': total_updated + total_new_runs + total_skipped,
+            'best_result': best_result_dict,
+            'parallel': True,
+            'workers': max_workers,
+            'duration_seconds': parallel_duration,
         }
 
     def _run_incremental_single(
@@ -1903,10 +2692,10 @@ class ParameterOptimizer:
 
             was_resolved = False
 
-            for idx in range(n_candles):
-                # Skip candles before entry
-                if timestamps[idx] <= entry_time:
-                    continue
+            # Use binary search to find first candle after entry_time (O(log n) vs O(n))
+            start_idx = np.searchsorted(timestamps, entry_time, side='right')
+
+            for idx in range(start_idx, n_candles):
 
                 if direction == 'long':
                     if lows[idx] <= stop_loss:

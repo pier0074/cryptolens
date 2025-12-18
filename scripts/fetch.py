@@ -32,10 +32,11 @@ import asyncio
 import time
 import traceback
 import fcntl
+import tempfile
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# Lock file path for preventing concurrent execution
-LOCK_FILE = '/tmp/cryptolens_fetch.lock'
+# Lock file path for preventing concurrent execution (use system temp directory)
+LOCK_FILE = os.path.join(tempfile.gettempdir(), 'cryptolens_fetch.lock')
 
 from datetime import datetime, timezone
 

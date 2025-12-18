@@ -62,6 +62,13 @@ def get_database_url() -> str:
     db_name = os.getenv(f'{prefix}_NAME', os.getenv('DB_NAME', 'cryptolens'))
     db_port = os.getenv(f'{prefix}_PORT', os.getenv('DB_PORT', '3306'))
 
+    # Security: Require password in production
+    if is_production() and not db_pass:
+        raise ValueError(
+            "DB_PASS (or PROD_DB_PASS) is required in production. "
+            "Set the environment variable or use DATABASE_URL."
+        )
+
     # Build MySQL connection URL
     # Format: mysql+pymysql://user:pass@host:port/database
     if db_pass:
