@@ -38,6 +38,31 @@ BATCH_COMMIT_SIZE = 50
 DEFAULT_PARALLEL_WORKERS = 4
 MAX_PARALLEL_WORKERS = 8
 
+# Timeframe drill-down mapping for resolving same-candle SL/TP conflicts
+# When both SL and TP are hit on the same candle, we look at smaller TF to determine which hit first
+SMALLER_TIMEFRAME = {
+    '1d': '4h',
+    '4h': '1h',
+    '2h': '30m',
+    '1h': '15m',
+    '30m': '5m',
+    '15m': '5m',
+    '5m': '1m',
+    '1m': None,  # Can't go smaller, assume loss (conservative)
+}
+
+# Timeframe to milliseconds for timestamp calculations
+TIMEFRAME_MS = {
+    '1m': 60 * 1000,
+    '5m': 5 * 60 * 1000,
+    '15m': 15 * 60 * 1000,
+    '30m': 30 * 60 * 1000,
+    '1h': 60 * 60 * 1000,
+    '2h': 2 * 60 * 60 * 1000,
+    '4h': 4 * 60 * 60 * 1000,
+    '1d': 24 * 60 * 60 * 1000,
+}
+
 # Detector instances (reuse to avoid re-initialization)
 _detectors = {
     'imbalance': FVGDetector(),
@@ -208,8 +233,14 @@ def _simulate_trades_worker(
 
         # Determine outcome (matches optimizer exactly)
         if sl_hit and tp_hit:
-            # Both triggered - take whichever came first
-            if sl_idx <= tp_idx:
+            # Both triggered - check if same candle
+            if sl_idx == tp_idx:
+                # Same candle conflict - assume loss (conservative)
+                # Worker doesn't have access to smaller TF data for drill-down
+                result = 'loss'
+                exit_idx = trade_start + sl_idx
+                exit_price = stop_loss
+            elif sl_idx < tp_idx:
                 result = 'loss'
                 exit_idx = trade_start + sl_idx
                 exit_price = stop_loss
@@ -565,7 +596,12 @@ class ParameterOptimizer:
                             cache_key = (symbol, timeframe, pattern_type, min_zone_pct, use_overlap)
                             patterns = result['pattern_cache'].get(cache_key, [])
 
-                            trades = self._simulate_trades_fast(ohlcv, patterns, param_dict)
+                            trades = self._simulate_trades_fast(
+                                ohlcv, patterns, param_dict,
+                                timeframe=timeframe,
+                                data_cache=result.get('data_cache'),
+                                symbol=symbol
+                            )
                             stats = self._calculate_statistics(trades)
 
                             sweep_result = {
@@ -944,7 +980,12 @@ class ParameterOptimizer:
                             patterns = pattern_cache.get(cache_key, [])
 
                             # Simulate trades (single shared implementation)
-                            trades = self._simulate_trades_fast(ohlcv_arrays, patterns, param_dict)
+                            trades = self._simulate_trades_fast(
+                                ohlcv_arrays, patterns, param_dict,
+                                timeframe=timeframe,
+                                data_cache=data_cache,
+                                symbol=symbol
+                            )
                             stats = self._calculate_statistics(trades)
 
                             result = {
@@ -1116,14 +1157,20 @@ class ParameterOptimizer:
         timeframe: str,
         pattern_type: str,
         patterns: List[Dict],
-        params: Dict
+        params: Dict,
+        data_cache: Dict = None
     ) -> OptimizationRun:
         """
         Run a single optimization with specific parameters using pre-computed patterns.
         Uses numpy arrays for faster trade simulation.
         """
         # Simulate trades using vectorized numpy operations
-        trades = self._simulate_trades_fast(ohlcv, patterns, params)
+        trades = self._simulate_trades_fast(
+            ohlcv, patterns, params,
+            timeframe=timeframe,
+            data_cache=data_cache,
+            symbol=symbol
+        )
 
         # Calculate statistics
         stats = self._calculate_statistics(trades)
@@ -1163,11 +1210,22 @@ class ParameterOptimizer:
         self,
         ohlcv: Dict[str, np.ndarray],
         patterns: List[Dict],
-        params: Dict
+        params: Dict,
+        timeframe: str = None,
+        data_cache: Dict = None,
+        symbol: str = None
     ) -> List[Dict]:
         """
         Simulate trades using fully vectorized numpy operations.
         This is heavily optimized for speed - processes all patterns in batch.
+
+        Args:
+            ohlcv: Dict with 'high', 'low', 'timestamp' numpy arrays
+            patterns: List of pattern dicts with 'detected_at', 'zone_high', 'zone_low', 'direction'
+            params: Dict with 'rr_target', 'sl_buffer_pct', 'entry_method'
+            timeframe: Current timeframe (for same-candle drill-down)
+            data_cache: Dict[(symbol, tf)] -> (df, ohlcv, first_ts, last_ts) for drill-down
+            symbol: Symbol being processed (for drill-down lookup)
         """
         if not patterns:
             return []
@@ -1264,8 +1322,25 @@ class ParameterOptimizer:
 
             # Determine outcome
             if sl_hit and tp_hit:
-                # Both triggered - take whichever came first
-                if sl_idx <= tp_idx:
+                # Both triggered - check if same candle
+                if sl_idx == tp_idx:
+                    # Same candle conflict - drill down to smaller TF or assume loss
+                    conflict_candle_idx = trade_start + sl_idx
+                    conflict_ts = int(timestamps[conflict_candle_idx])
+
+                    result = self._resolve_same_candle_conflict(
+                        direction=direction,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        conflict_ts=conflict_ts,
+                        timeframe=timeframe,
+                        data_cache=data_cache,
+                        symbol=symbol
+                    )
+
+                    exit_idx = conflict_candle_idx
+                    exit_price = take_profit if result == 'win' else stop_loss
+                elif sl_idx < tp_idx:
                     result = 'loss'
                     exit_idx = trade_start + sl_idx
                     exit_price = stop_loss
@@ -1308,6 +1383,128 @@ class ParameterOptimizer:
                 })
 
         return trades
+
+    def _resolve_same_candle_conflict(
+        self,
+        direction: str,
+        stop_loss: float,
+        take_profit: float,
+        conflict_ts: int,
+        timeframe: str,
+        data_cache: Dict,
+        symbol: str
+    ) -> str:
+        """
+        Resolve same-candle SL/TP conflict by drilling down to smaller timeframe.
+
+        When both SL and TP are hit on the same candle, we can't know which hit first
+        from the current timeframe data alone. This method looks at smaller TF candles
+        within that period to determine the actual order.
+
+        Args:
+            direction: 'long' or 'short'
+            stop_loss: Stop loss price level
+            take_profit: Take profit price level
+            conflict_ts: Timestamp of the conflict candle (start of candle)
+            timeframe: Current timeframe (e.g., '4h')
+            data_cache: Dict[(symbol, tf)] -> (df, ohlcv, first_ts, last_ts)
+            symbol: Trading symbol
+
+        Returns:
+            'win' or 'loss'
+        """
+        # If no drill-down possible, assume loss (conservative)
+        if not timeframe or not data_cache or not symbol:
+            return 'loss'
+
+        smaller_tf = SMALLER_TIMEFRAME.get(timeframe)
+        if smaller_tf is None:
+            # 1m is smallest - can't drill down further, assume loss
+            return 'loss'
+
+        # Get smaller TF data
+        cache_key = (symbol, smaller_tf)
+        if cache_key not in data_cache:
+            # No smaller TF data available, assume loss
+            return 'loss'
+
+        _, smaller_ohlcv, _, _ = data_cache[cache_key]
+        if smaller_ohlcv is None:
+            return 'loss'
+
+        smaller_highs = smaller_ohlcv['high']
+        smaller_lows = smaller_ohlcv['low']
+        smaller_timestamps = smaller_ohlcv['timestamp']
+
+        # Find the candles within the conflict period
+        # The conflict candle spans from conflict_ts to conflict_ts + timeframe_ms
+        tf_ms = TIMEFRAME_MS.get(timeframe, 60 * 60 * 1000)
+        conflict_end_ts = conflict_ts + tf_ms
+
+        # Find indices of smaller TF candles within the conflict period
+        mask = (smaller_timestamps >= conflict_ts) & (smaller_timestamps < conflict_end_ts)
+
+        if not np.any(mask):
+            # No smaller TF candles found in this period
+            return 'loss'
+
+        # Get the indices
+        indices = np.where(mask)[0]
+
+        # Scan through smaller TF candles to find which hit first
+        for idx in indices:
+            high = smaller_highs[idx]
+            low = smaller_lows[idx]
+
+            if direction == 'long':
+                sl_hit = low <= stop_loss
+                tp_hit = high >= take_profit
+
+                if sl_hit and tp_hit:
+                    # Still a conflict on this smaller candle - try to drill down further
+                    smaller_smaller_tf = SMALLER_TIMEFRAME.get(smaller_tf)
+                    if smaller_smaller_tf is None:
+                        return 'loss'  # Can't go smaller, conservative
+
+                    # Recursive drill-down
+                    return self._resolve_same_candle_conflict(
+                        direction=direction,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        conflict_ts=int(smaller_timestamps[idx]),
+                        timeframe=smaller_tf,
+                        data_cache=data_cache,
+                        symbol=symbol
+                    )
+                elif sl_hit:
+                    return 'loss'
+                elif tp_hit:
+                    return 'win'
+            else:  # short
+                sl_hit = high >= stop_loss
+                tp_hit = low <= take_profit
+
+                if sl_hit and tp_hit:
+                    smaller_smaller_tf = SMALLER_TIMEFRAME.get(smaller_tf)
+                    if smaller_smaller_tf is None:
+                        return 'loss'
+
+                    return self._resolve_same_candle_conflict(
+                        direction=direction,
+                        stop_loss=stop_loss,
+                        take_profit=take_profit,
+                        conflict_ts=int(smaller_timestamps[idx]),
+                        timeframe=smaller_tf,
+                        data_cache=data_cache,
+                        symbol=symbol
+                    )
+                elif sl_hit:
+                    return 'loss'
+                elif tp_hit:
+                    return 'win'
+
+        # Neither hit in smaller TF data (shouldn't happen, but be conservative)
+        return 'loss'
 
     def _simulate_single_trade_fast(
         self,

@@ -471,6 +471,224 @@ class TestIncrementalSkipLogic:
         assert 'existing_timestamps' in source
 
 
+class TestSameCandleConflictResolution:
+    """Tests for same-candle SL/TP conflict resolution using smaller TF drill-down"""
+
+    def test_resolve_same_candle_no_data_returns_loss(self, app):
+        """Test that same-candle conflict returns loss when no drill-down data available"""
+        with app.app_context():
+            opt = ParameterOptimizer()
+
+            result = opt._resolve_same_candle_conflict(
+                direction='long',
+                stop_loss=100.0,
+                take_profit=110.0,
+                conflict_ts=1700000000000,
+                timeframe=None,  # No timeframe
+                data_cache=None,  # No data cache
+                symbol='BTC/USDT'
+            )
+
+            assert result == 'loss'  # Conservative default
+
+    def test_resolve_same_candle_1m_returns_loss(self, app):
+        """Test that 1m timeframe (smallest) always returns loss"""
+        with app.app_context():
+            opt = ParameterOptimizer()
+
+            # Even with data_cache, 1m can't drill down further
+            data_cache = {('BTC/USDT', '1m'): (None, None, None, None)}
+
+            result = opt._resolve_same_candle_conflict(
+                direction='long',
+                stop_loss=100.0,
+                take_profit=110.0,
+                conflict_ts=1700000000000,
+                timeframe='1m',
+                data_cache=data_cache,
+                symbol='BTC/USDT'
+            )
+
+            assert result == 'loss'
+
+    def test_resolve_same_candle_drills_down_finds_sl_first(self, app):
+        """Test drill-down correctly identifies SL hit first"""
+        with app.app_context():
+            opt = ParameterOptimizer()
+
+            # Create 1h candle with conflict, and 15m data showing SL hit first
+            # 1h candle at timestamp 1700000000000 (conflict)
+            # 15m candles within that hour:
+            # Candle 1: low hits SL first
+            # Candle 2: high would hit TP
+
+            smaller_ohlcv = {
+                'high': np.array([105.0, 115.0, 108.0, 107.0]),  # TP (110) hit on candle 2
+                'low': np.array([99.0, 103.0, 104.0, 105.0]),    # SL (100) hit on candle 1
+                'timestamp': np.array([
+                    1700000000000,      # 15m candle 1 - starts at 1h candle start
+                    1700000000000 + 15*60*1000,  # 15m candle 2
+                    1700000000000 + 30*60*1000,  # 15m candle 3
+                    1700000000000 + 45*60*1000,  # 15m candle 4
+                ])
+            }
+
+            data_cache = {
+                ('BTC/USDT', '15m'): (None, smaller_ohlcv, None, None)
+            }
+
+            result = opt._resolve_same_candle_conflict(
+                direction='long',
+                stop_loss=100.0,
+                take_profit=110.0,
+                conflict_ts=1700000000000,
+                timeframe='1h',  # Will drill down to 15m
+                data_cache=data_cache,
+                symbol='BTC/USDT'
+            )
+
+            assert result == 'loss'  # SL hit first (candle 1: low=99 < SL=100)
+
+    def test_resolve_same_candle_drills_down_finds_tp_first(self, app):
+        """Test drill-down correctly identifies TP hit first"""
+        with app.app_context():
+            opt = ParameterOptimizer()
+
+            # 15m candles where TP hits before SL
+            smaller_ohlcv = {
+                'high': np.array([115.0, 105.0, 108.0, 107.0]),  # TP (110) hit on candle 1
+                'low': np.array([103.0, 99.0, 104.0, 105.0]),    # SL (100) hit on candle 2
+                'timestamp': np.array([
+                    1700000000000,
+                    1700000000000 + 15*60*1000,
+                    1700000000000 + 30*60*1000,
+                    1700000000000 + 45*60*1000,
+                ])
+            }
+
+            data_cache = {
+                ('BTC/USDT', '15m'): (None, smaller_ohlcv, None, None)
+            }
+
+            result = opt._resolve_same_candle_conflict(
+                direction='long',
+                stop_loss=100.0,
+                take_profit=110.0,
+                conflict_ts=1700000000000,
+                timeframe='1h',
+                data_cache=data_cache,
+                symbol='BTC/USDT'
+            )
+
+            assert result == 'win'  # TP hit first (candle 1: high=115 > TP=110)
+
+    def test_resolve_same_candle_short_direction(self, app):
+        """Test drill-down works correctly for short trades"""
+        with app.app_context():
+            opt = ParameterOptimizer()
+
+            # For short: SL is above entry, TP is below entry
+            # Short at 100, SL at 110, TP at 90
+            smaller_ohlcv = {
+                'high': np.array([105.0, 115.0, 108.0]),  # SL (110) hit on candle 2
+                'low': np.array([95.0, 92.0, 85.0]),      # TP (90) hit on candle 3
+                'timestamp': np.array([
+                    1700000000000,
+                    1700000000000 + 15*60*1000,
+                    1700000000000 + 30*60*1000,
+                ])
+            }
+
+            data_cache = {
+                ('BTC/USDT', '15m'): (None, smaller_ohlcv, None, None)
+            }
+
+            result = opt._resolve_same_candle_conflict(
+                direction='short',
+                stop_loss=110.0,  # Above entry for short
+                take_profit=90.0,  # Below entry for short
+                conflict_ts=1700000000000,
+                timeframe='1h',
+                data_cache=data_cache,
+                symbol='BTC/USDT'
+            )
+
+            assert result == 'loss'  # SL hit first (candle 2: high=115 > SL=110)
+
+    def test_timeframe_mapping_exists(self):
+        """Test that SMALLER_TIMEFRAME mapping is complete"""
+        from app.services.optimizer import SMALLER_TIMEFRAME
+
+        # All expected timeframes should be in mapping
+        expected_tfs = ['1d', '4h', '2h', '1h', '30m', '15m', '5m', '1m']
+        for tf in expected_tfs:
+            assert tf in SMALLER_TIMEFRAME
+
+        # 1m should map to None (can't go smaller)
+        assert SMALLER_TIMEFRAME['1m'] is None
+
+        # Others should map to smaller TFs
+        assert SMALLER_TIMEFRAME['1d'] == '4h'
+        assert SMALLER_TIMEFRAME['4h'] == '1h'
+        assert SMALLER_TIMEFRAME['1h'] == '15m'
+
+
+class TestFeeCalculation:
+    """Tests for fee calculation formula (used in WebUI)"""
+
+    def test_fee_formula_zero_fees(self):
+        """Test net profit equals gross when fee is 0%"""
+        gross_profit = 50.0
+        trades = 100
+        fee_pct = 0.0
+
+        total_fees = trades * 2 * fee_pct
+        net = gross_profit - total_fees
+
+        assert net == 50.0
+
+    def test_fee_formula_standard_binance_fee(self):
+        """Test net profit calculation with standard 0.1% Binance fee"""
+        gross_profit = 50.0
+        trades = 100
+        fee_pct = 0.1  # 0.1%
+
+        # Each trade pays fee on entry and exit = 2 * fee per trade
+        total_fees = trades * 2 * fee_pct
+        net = gross_profit - total_fees
+
+        # 100 trades * 2 * 0.1% = 20% total fees
+        assert total_fees == 20.0
+        assert net == 30.0
+
+    def test_fee_formula_many_trades_can_turn_profitable_negative(self):
+        """Test that fees can turn a profitable strategy negative"""
+        gross_profit = 15.0
+        trades = 200
+        fee_pct = 0.1
+
+        total_fees = trades * 2 * fee_pct
+        net = gross_profit - total_fees
+
+        # 200 trades * 2 * 0.1% = 40% total fees
+        # Gross 15% - 40% fees = -25% net
+        assert total_fees == 40.0
+        assert net == -25.0
+
+    def test_fee_formula_higher_fee_rate(self):
+        """Test with higher fee rate (0.2% like some exchanges)"""
+        gross_profit = 100.0
+        trades = 50
+        fee_pct = 0.2
+
+        total_fees = trades * 2 * fee_pct
+        net = gross_profit - total_fees
+
+        # 50 trades * 2 * 0.2% = 20% total fees
+        assert total_fees == 20.0
+        assert net == 80.0
+
+
 # ========================================
 # Fixtures
 # ========================================

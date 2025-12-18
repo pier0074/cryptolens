@@ -54,10 +54,19 @@
                 <option value="trades" {% if sort_by == 'trades' %}selected{% endif %}>Total Trades</option>
             </select>
         </div>
+        <div>
+            <label class="block text-gray-400 text-sm mb-1">Fee %</label>
+            <input type="number" id="feeInput" step="0.01" min="0" max="1" value="0.10"
+                   class="bg-gray-800 border border-gray-700 rounded px-3 py-2 text-white w-20"
+                   title="Trading fee per trade (entry + exit). Default 0.1% for Binance.">
+        </div>
         <a href="{{ url_for('admin.optimization_results') }}" class="px-4 py-2 bg-gray-600 hover:bg-gray-500 rounded text-sm">
             Reset
         </a>
     </form>
+    <p class="text-gray-500 text-xs mt-2">
+        Fee formula: Net = Gross - (Trades × 2 × Fee%). Assumes limit orders with fee on entry and exit.
+    </p>
 </div>
 
 <script>
@@ -264,7 +273,9 @@ document.querySelectorAll('.filter-auto').forEach(el => {
                     <th class="text-right py-3 px-3">SL%</th>
                     <th class="text-right py-3 px-3">Trades</th>
                     <th class="text-right py-3 px-3">Win Rate</th>
-                    <th class="text-right py-3 px-3">Profit</th>
+                    <th class="text-right py-3 px-3">Gross P/L</th>
+                    <th class="text-right py-3 px-3">Net P/L</th>
+                    <th class="text-right py-3 px-3">Fees</th>
                     <th class="text-right py-3 px-3">Sharpe</th>
                     <th class="text-right py-3 px-3">Max DD</th>
                     <th class="text-center py-3 px-3">Action</th>
@@ -274,7 +285,9 @@ document.querySelectorAll('.filter-auto').forEach(el => {
                 {% for run in results %}
                 {% set is_best = best_result and run.id == best_result.id %}
                 {% set is_profitable = run.total_profit_pct and run.total_profit_pct > 0 %}
-                <tr class="border-b border-gray-800 hover:bg-gray-800/50 {% if is_best %}bg-green-900/20{% endif %}">
+                <tr class="border-b border-gray-800 hover:bg-gray-800/50 {% if is_best %}bg-green-900/20{% endif %} profit-row"
+                    data-gross="{{ run.total_profit_pct or 0 }}"
+                    data-trades="{{ run.total_trades or 0 }}">
                     <td class="py-3 px-3 font-medium {% if is_best %}text-green-400{% endif %}">
                         {% if is_best %}<span title="Best result">&#9733;</span>{% endif %}
                         {{ run.symbol }}
@@ -305,8 +318,14 @@ document.querySelectorAll('.filter-auto').forEach(el => {
                     <td class="py-3 px-3 text-right {% if run.win_rate and run.win_rate >= 50 %}text-green-400{% elif run.win_rate %}text-red-400{% endif %}">
                         {{ run.win_rate|round(1) if run.win_rate else '-' }}%
                     </td>
-                    <td class="py-3 px-3 text-right font-medium {% if is_profitable %}text-green-400{% elif run.total_profit_pct %}text-red-400{% endif %}">
+                    <td class="py-3 px-3 text-right font-medium gross-cell {% if is_profitable %}text-green-400{% elif run.total_profit_pct %}text-red-400{% endif %}">
                         {{ run.total_profit_pct|round(2) if run.total_profit_pct else '-' }}%
+                    </td>
+                    <td class="py-3 px-3 text-right font-medium net-cell">
+                        -
+                    </td>
+                    <td class="py-3 px-3 text-right text-yellow-500 fees-cell">
+                        -
                     </td>
                     <td class="py-3 px-3 text-right text-gray-400">
                         {{ run.sharpe_ratio|round(2) if run.sharpe_ratio else '-' }}
@@ -397,6 +416,45 @@ python scripts/run_optimization.py --all-symbols -v</pre>
 
 <script>
 let pendingCopy = null;
+
+// Fee calculation: Net = Gross - (Trades × 2 × Fee%)
+// 2× because we pay fee on entry AND exit
+function calculateNetProfits() {
+    const feeInput = document.getElementById('feeInput');
+    const feePct = parseFloat(feeInput.value) || 0.10;
+
+    document.querySelectorAll('.profit-row').forEach(row => {
+        const gross = parseFloat(row.dataset.gross) || 0;
+        const trades = parseInt(row.dataset.trades) || 0;
+
+        // Total fees = trades × 2 × fee% (entry + exit per trade)
+        const totalFees = trades * 2 * feePct;
+        const net = gross - totalFees;
+
+        // Update cells
+        const netCell = row.querySelector('.net-cell');
+        const feesCell = row.querySelector('.fees-cell');
+
+        if (netCell) {
+            netCell.textContent = net.toFixed(2) + '%';
+            // Color based on profitability
+            netCell.classList.remove('text-green-400', 'text-red-400');
+            if (net > 0) {
+                netCell.classList.add('text-green-400');
+            } else if (net < 0) {
+                netCell.classList.add('text-red-400');
+            }
+        }
+
+        if (feesCell) {
+            feesCell.textContent = '-' + totalFees.toFixed(2) + '%';
+        }
+    });
+}
+
+// Calculate on page load and when fee changes
+document.addEventListener('DOMContentLoaded', calculateNetProfits);
+document.getElementById('feeInput')?.addEventListener('input', calculateNetProfits);
 
 function copyParams(symbol, patternType, rr, sl) {
     pendingCopy = { symbol, patternType, rr, sl };
