@@ -404,7 +404,7 @@ class ParameterOptimizer:
                     print(f"  {symbol} {timeframe}: No data ({tf_time:.2f}s)", flush=True)
 
             phase1_time = time.time() - phase1_start
-            print(f"  ✓ Phase 1 complete: {total_candles:,} candles in {phase1_time:.1f}s", flush=True)
+            print(f"  ✓ [{symbol}] Phase 1 complete: {total_candles:,} candles in {phase1_time:.1f}s", flush=True)
 
             if total_candles == 0:
                 print(f"  ✗ {symbol}: No data available - skipping", flush=True)
@@ -507,7 +507,7 @@ class ParameterOptimizer:
                 print(f"    ✓ Done: {tf_patterns:,} patterns in {tf_duration:.2f}s [{', '.join(pattern_details)}]", flush=True)
 
             phase2_time = time.time() - phase2_start
-            print(f"  ✓ Phase 2 complete: {total_patterns:,} patterns in {phase2_time:.1f}s", flush=True)
+            print(f"  ✓ [{symbol}] Phase 2 complete: {total_patterns:,} patterns in {phase2_time:.1f}s", flush=True)
 
             # Phase 3: Parameter sweep with logging
             phase3_start = time.time()
@@ -592,7 +592,7 @@ class ParameterOptimizer:
 
             phase3_time = time.time() - phase3_start
             completed = sum(1 for r in result['results'] if r['status'] == 'completed')
-            print(f"  ✓ Phase 3 complete: {completed:,} runs in {phase3_time:.1f}s", flush=True)
+            print(f"  ✓ [{symbol}] Phase 3 complete: {completed:,} runs in {phase3_time:.1f}s", flush=True)
 
         except Exception as e:
             result['error'] = str(e)
