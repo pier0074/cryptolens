@@ -458,17 +458,16 @@ class TestIncrementalSkipLogic:
     """Tests for skip logic when no new candles are available"""
 
     def test_incremental_processes_symbol_by_symbol(self):
-        """Test that run_incremental processes one symbol at a time with phase methods"""
+        """Test that run_incremental processes one symbol at a time with shared method"""
         opt = ParameterOptimizer()
         # This is a structural test - the method processes symbols in a loop
-        # using the detailed phase methods for logging
+        # using the shared _process_symbol method for consistency
         import inspect
         source = inspect.getsource(opt.run_incremental)
         assert 'for symbol in symbols:' in source
-        # Uses detailed phase methods for comprehensive logging
-        assert '_load_candle_data_phase' in source
-        assert '_detect_patterns_phase' in source
-        assert '_run_sweep_phase' in source
+        # Uses shared _process_symbol method with existing_timestamps for skip detection
+        assert '_process_symbol' in source
+        assert 'existing_timestamps' in source
 
 
 # ========================================

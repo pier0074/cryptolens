@@ -51,7 +51,7 @@ def _process_symbol_worker(
     timeframes: List[str],
     pattern_types: List[str],
     parameter_grid: Dict,
-    existing_run_keys: set,
+    existing_timestamps: Dict[str, int],
 ) -> Dict:
     """
     Worker function for parallel symbol processing.
@@ -64,13 +64,13 @@ def _process_symbol_worker(
         timeframes: List of timeframes
         pattern_types: List of pattern types
         parameter_grid: Parameter combinations to test
-        existing_run_keys: Set of (symbol, timeframe, pattern_type, rr, sl) tuples
-                          that already have completed runs (currently unused)
+        existing_timestamps: Dict of {timeframe: last_candle_ts} from existing runs
+                            for skip detection
 
     Returns:
-        Dict with keys from _process_symbol() plus:
-            - has_new_data: whether data was loaded
-            - skip_count: number of skipped combinations (no data)
+        Dict with keys from _process_symbol() including:
+            - skipped: True if skipped due to no new data
+            - skip_count: number of skipped combinations
     """
     try:
         # Create Flask app context for database queries (read-only)
@@ -85,23 +85,8 @@ def _process_symbol_worker(
                 timeframes=timeframes,
                 pattern_types=pattern_types,
                 parameter_grid=parameter_grid,
+                existing_timestamps=existing_timestamps,
             )
-
-            # Add parallel-specific fields
-            result['has_new_data'] = bool(result.get('data_cache'))
-            result['skip_count'] = 0
-
-            # Check if we actually have data
-            has_data = False
-            for key, cached in result.get('data_cache', {}).items():
-                if cached and cached[0] is not None:
-                    has_data = True
-                    break
-
-            if not has_data:
-                param_combinations = list(itertools.product(*parameter_grid.values()))
-                result['skip_count'] = len(timeframes) * len(pattern_types) * len(param_combinations)
-                result['has_new_data'] = False
 
             return result
 
@@ -112,8 +97,8 @@ def _process_symbol_worker(
             'pattern_cache': {},
             'results': [],
             'best_result': None,
+            'skipped': False,
             'skip_count': 0,
-            'has_new_data': False,
             'error': str(e),
         }
 
@@ -351,12 +336,13 @@ class ParameterOptimizer:
         pattern_types: List[str],
         parameter_grid: Dict,
         data_override: Dict[str, pd.DataFrame] = None,
+        existing_timestamps: Dict[str, int] = None,
     ) -> Dict:
         """
         Core symbol processing logic - SINGLE SOURCE OF TRUTH.
 
-        This method is used by both run_job() and run_incremental().
-        It handles: data loading → pattern detection → parameter sweep.
+        This method is used by run_job(), run_incremental(), and parallel workers.
+        It handles: data loading → skip check → pattern detection → parameter sweep.
 
         Args:
             symbol: Trading symbol to process
@@ -364,7 +350,9 @@ class ParameterOptimizer:
             pattern_types: List of pattern types to detect
             parameter_grid: Parameter combinations to test
             data_override: Optional dict of {timeframe: DataFrame} for testing
-                          (bypasses database queries)
+            existing_timestamps: Optional dict of {timeframe: last_candle_ts} from
+                                existing runs. If provided and no new data, skips
+                                expensive Phase 2/3.
 
         Returns:
             Dict with keys:
@@ -374,6 +362,7 @@ class ParameterOptimizer:
                 - data_cache: loaded candle data (for caller if needed)
                 - pattern_cache: detected patterns (for caller if needed)
                 - error: error message if failed, None otherwise
+                - skipped: True if skipped due to no new data
         """
         result = {
             'symbol': symbol,
@@ -382,37 +371,43 @@ class ParameterOptimizer:
             'data_cache': {},
             'pattern_cache': {},
             'error': None,
+            'skipped': False,
         }
 
         try:
-            # Phase 1: Load candle data
+            # Phase 1: Load candle data with detailed per-timeframe logging
             phase1_start = time.time()
-            print(f"  [{symbol}] Phase 1: Loading candle data...", flush=True)
+            print(f"\n[Phase 1/3] Loading candle data ({symbol})...", flush=True)
             total_candles = 0
+
             for timeframe in timeframes:
+                tf_start = time.time()
                 if data_override and timeframe in data_override:
-                    # Use provided data (for testing)
                     df = data_override[timeframe]
+                    verified_status = ""
                 else:
-                    # Load from database
                     df = get_candles_as_dataframe(symbol, timeframe, verified_only=True)
+                    verified_status = ""
                     if df is None or df.empty:
                         df = get_candles_as_dataframe(symbol, timeframe, verified_only=False)
+                        verified_status = " [unverified!]"
+                tf_time = time.time() - tf_start
 
                 if df is not None and len(df) >= 20:
                     ohlcv = self._df_to_arrays(df)
                     last_ts = int(df['timestamp'].max())
                     result['data_cache'][(symbol, timeframe)] = (df, ohlcv, last_ts)
                     total_candles += len(df)
+                    print(f"  {symbol} {timeframe}: {len(df):,} candles ({tf_time:.2f}s){verified_status}", flush=True)
                 else:
                     result['data_cache'][(symbol, timeframe)] = (None, None, None)
+                    print(f"  {symbol} {timeframe}: No data ({tf_time:.2f}s)", flush=True)
 
             phase1_time = time.time() - phase1_start
-            print(f"  [{symbol}] Phase 1: Loaded {total_candles:,} candles across {len(timeframes)} timeframes ({phase1_time:.2f}s)", flush=True)
+            print(f"  ✓ Phase 1 complete: {total_candles:,} candles in {phase1_time:.1f}s", flush=True)
 
             if total_candles == 0:
-                # No data for any timeframe - mark all as failed
-                print(f"  [{symbol}] ✗ No data available - skipping", flush=True)
+                print(f"  ✗ {symbol}: No data available - skipping", flush=True)
                 param_keys = list(parameter_grid.keys())
                 param_combinations = list(itertools.product(*parameter_grid.values()))
                 for timeframe in timeframes:
@@ -429,44 +424,99 @@ class ParameterOptimizer:
                             })
                 return result
 
-            # Phase 2: Detect patterns
+            # Check for new data if existing timestamps provided
+            if existing_timestamps:
+                has_new_data = False
+                for timeframe in timeframes:
+                    cached = result['data_cache'].get((symbol, timeframe))
+                    if cached and cached[2]:  # last_candle_ts
+                        last_candle_ts = cached[2]
+                        existing_ts = existing_timestamps.get(timeframe)
+                        if existing_ts is None:
+                            # No existing run for this timeframe = new data
+                            has_new_data = True
+                            break
+                        elif last_candle_ts > existing_ts:
+                            # Newer candles than existing run
+                            has_new_data = True
+                            break
+
+                if not has_new_data:
+                    param_combinations = list(itertools.product(*parameter_grid.values()))
+                    skip_count = len(timeframes) * len(pattern_types) * len(param_combinations)
+                    print(f"  ⏭ Skipped {symbol}: No new candles since last run", flush=True)
+                    result['skipped'] = True
+                    result['skip_count'] = skip_count
+                    return result
+
+            # Phase 2: Detect patterns with detailed per-timeframe logging
             phase2_start = time.time()
-            print(f"  [{symbol}] Phase 2: Detecting patterns...", flush=True)
             min_zone_pcts = parameter_grid.get('min_zone_pct', [0.15])
             use_overlaps = parameter_grid.get('use_overlap', [True])
+            total_patterns = 0
+
+            print(f"\n[Phase 2/3] Detecting patterns ({len(pattern_types)} types × {len(timeframes)} timeframes)...", flush=True)
 
             for timeframe in timeframes:
                 cached = result['data_cache'].get((symbol, timeframe), (None, None, None))
                 df = cached[0]
                 if df is None:
+                    print(f"  {symbol} {timeframe}: SKIPPED (no data)", flush=True)
                     continue
+
+                n_candles = len(df)
+                tf_start = time.time()
+                tf_patterns = 0
+                pattern_details = []
+
+                print(f"  {symbol} {timeframe}: Processing {n_candles:,} candles...", flush=True)
 
                 for pattern_type in pattern_types:
                     detector = _detectors.get(pattern_type)
                     if not detector:
+                        print(f"    ⚠ Unknown pattern type: {pattern_type}", flush=True)
                         continue
+
+                    pt_start = time.time()
+                    pt_count = 0
 
                     for min_zone_pct in min_zone_pcts:
                         for use_overlap in use_overlaps:
+                            detect_start = time.time()
                             cache_key = (symbol, timeframe, pattern_type, min_zone_pct, use_overlap)
                             patterns = detector.detect_historical(
                                 df,
                                 min_zone_pct=min_zone_pct,
                                 skip_overlap=not use_overlap
                             )
+                            detect_duration = time.time() - detect_start
                             result['pattern_cache'][cache_key] = patterns
+                            pt_count += len(patterns)
+                            tf_patterns += len(patterns)
+                            total_patterns += len(patterns)
+
+                            # Log if detection takes more than 1 second
+                            if detect_duration > 1.0:
+                                print(f"    → {pattern_type} (zone={min_zone_pct}, overlap={use_overlap}): "
+                                      f"{len(patterns)} patterns in {detect_duration:.2f}s", flush=True)
+
+                    pt_duration = time.time() - pt_start
+                    pattern_details.append(f"{pattern_type}:{pt_count}({pt_duration:.1f}s)")
+
+                tf_duration = time.time() - tf_start
+                print(f"    ✓ Done: {tf_patterns:,} patterns in {tf_duration:.2f}s [{', '.join(pattern_details)}]", flush=True)
 
             phase2_time = time.time() - phase2_start
-            total_patterns = sum(len(p) for p in result['pattern_cache'].values())
-            print(f"  [{symbol}] Phase 2: Detected {total_patterns:,} patterns ({phase2_time:.2f}s)", flush=True)
+            print(f"  ✓ Phase 2 complete: {total_patterns:,} patterns in {phase2_time:.1f}s", flush=True)
 
-            # Phase 3: Parameter sweep
+            # Phase 3: Parameter sweep with logging
             phase3_start = time.time()
             param_keys = list(parameter_grid.keys())
             param_combinations = list(itertools.product(*parameter_grid.values()))
             total_combos = len(param_combinations) * len(timeframes) * len(pattern_types)
-            print(f"  [{symbol}] Phase 3: Running {total_combos:,} parameter combinations...", flush=True)
             best_profit = float('-inf')
+
+            print(f"\n[Phase 3/3] Running parameter sweep ({total_combos:,} combinations)...", flush=True)
 
             for timeframe in timeframes:
                 cached = result['data_cache'].get((symbol, timeframe), (None, None, None))
@@ -542,13 +592,11 @@ class ParameterOptimizer:
 
             phase3_time = time.time() - phase3_start
             completed = sum(1 for r in result['results'] if r['status'] == 'completed')
-            total_trades = sum(len(r.get('trades', [])) for r in result['results'] if r['status'] == 'completed')
-            best_pct = result['best_result']['stats']['total_profit_pct'] if result['best_result'] else 0
-            print(f"  [{symbol}] Phase 3: Completed {completed} sweeps, {total_trades:,} trades, best: {best_pct:.2f}% ({phase3_time:.2f}s)", flush=True)
+            print(f"  ✓ Phase 3 complete: {completed:,} runs in {phase3_time:.1f}s", flush=True)
 
         except Exception as e:
             result['error'] = str(e)
-            print(f"  [{symbol}] ✗ Error: {str(e)}", flush=True)
+            print(f"  ✗ {symbol}: Error - {str(e)}", flush=True)
 
         return result
 
@@ -660,53 +708,36 @@ class ParameterOptimizer:
         total_runs = len(symbols) * len(timeframes) * len(pattern_types) * len(param_combinations)
 
         try:
-            # Process each symbol with detailed phase logging
+            # Process each symbol using shared _process_symbol() method
             for symbol in symbols:
                 print(f"\n{'='*60}", flush=True)
                 print(f"Processing {symbol}...", flush=True)
 
-                # Phase 1: Load candle data (with detailed logging)
-                data_cache = self._load_candle_data_phase([symbol], timeframes)
-
-                # Check if we have data
-                has_data = any(
-                    data_cache.get((symbol, tf), (None, None, None))[0] is not None
-                    for tf in timeframes
+                # Use shared _process_symbol() - handles all phases with detailed logging
+                symbol_result = self._process_symbol(
+                    symbol=symbol,
+                    timeframes=timeframes,
+                    pattern_types=pattern_types,
+                    parameter_grid=param_grid,
                 )
-                if not has_data:
-                    print(f"  ✗ {symbol}: No data available", flush=True)
+
+                if symbol_result.get('error'):
                     for tf in timeframes:
                         for pt in pattern_types:
                             for params in param_combinations:
                                 self._create_failed_run(
                                     job, symbol, tf, pt,
                                     dict(zip(param_grid.keys(), params)),
-                                    'No data available'
+                                    symbol_result['error']
                                 )
                                 failed += 1
-                    del data_cache
                     continue
-
-                # Phase 2: Detect patterns (with detailed logging)
-                pattern_cache = self._detect_patterns_phase(
-                    [symbol], timeframes, pattern_types, param_grid, data_cache
-                )
-
-                # Phase 3: Parameter sweep (with detailed logging)
-                results, sweep_best = self._run_sweep_phase(
-                    [symbol], timeframes, pattern_types, param_grid,
-                    data_cache, pattern_cache
-                )
-
-                # Free memory
-                del data_cache
-                del pattern_cache
 
                 # Create OptimizationRun records from results
                 symbol_completed = 0
                 symbol_failed = 0
 
-                for r in results:
+                for r in symbol_result['results']:
                     if r['status'] == 'completed':
                         run = self._create_run_from_result(job, r)
                         completed += 1
@@ -1851,10 +1882,11 @@ class ParameterOptimizer:
         best_result = None
         best_profit = float('-inf')
 
-        # Process ONE SYMBOL AT A TIME with detailed phase logging
+        # Process ONE SYMBOL AT A TIME using shared _process_symbol() method
         for symbol in symbols:
-            # Pre-load existing runs for this symbol only
+            # Pre-load existing runs for this symbol
             existing_runs = {}
+            existing_timestamps = {}  # {timeframe: max_timestamp}
             all_existing = OptimizationRun.query.filter(
                 OptimizationRun.symbol == symbol,
                 OptimizationRun.timeframe.in_(timeframes),
@@ -1864,62 +1896,43 @@ class ParameterOptimizer:
             for run in all_existing:
                 key = (run.symbol, run.timeframe, run.pattern_type, run.rr_target, run.sl_buffer_pct)
                 existing_runs[key] = run
+                # Track max timestamp per timeframe for skip detection
+                if run.last_candle_timestamp:
+                    if run.timeframe not in existing_timestamps:
+                        existing_timestamps[run.timeframe] = run.last_candle_timestamp
+                    else:
+                        existing_timestamps[run.timeframe] = max(
+                            existing_timestamps[run.timeframe],
+                            run.last_candle_timestamp
+                        )
 
             print(f"\n{'='*60}", flush=True)
             print(f"Processing {symbol}...", flush=True)
 
-            # Phase 1: Load candle data (with detailed logging)
-            data_cache = self._load_candle_data_phase([symbol], timeframes)
+            # Use shared _process_symbol() - handles all phases and skip logic
+            symbol_result = self._process_symbol(
+                symbol=symbol,
+                timeframes=timeframes,
+                pattern_types=pattern_types,
+                parameter_grid=parameter_grid,
+                existing_timestamps=existing_timestamps if existing_runs else None,
+            )
 
-            # Check if we have new data compared to existing runs
-            has_new_data = False
-            for timeframe in timeframes:
-                cached = data_cache.get((symbol, timeframe))
-                if cached and cached[2]:  # last_candle_ts
-                    last_candle_ts = cached[2]
-                    # Check if any existing run for this timeframe has older data
-                    for (sym, tf, pt, rr, sl), run in existing_runs.items():
-                        if tf == timeframe and run.last_candle_timestamp:
-                            if last_candle_ts > run.last_candle_timestamp:
-                                has_new_data = True
-                                break
-                    # If no existing runs for this timeframe, we have "new" data
-                    if not any(tf == timeframe for (sym, tf, pt, rr, sl) in existing_runs.keys()):
-                        has_new_data = True
-                        break
-                    if has_new_data:
-                        break
-
-            if not has_new_data and existing_runs:
-                # Skip this symbol entirely - no new candles
+            if symbol_result.get('error'):
                 param_combinations = list(itertools.product(*parameter_grid.values()))
-                skip_count = len(timeframes) * len(pattern_types) * len(param_combinations)
-                total_skipped += skip_count
-                print(f"  ⏭ Skipped {symbol}: No new candles since last run", flush=True)
-                del data_cache  # Free memory
+                total_errors += len(timeframes) * len(pattern_types) * len(param_combinations)
                 continue
 
-            # Phase 2: Detect patterns (with detailed logging)
-            pattern_cache = self._detect_patterns_phase(
-                [symbol], timeframes, pattern_types, parameter_grid, data_cache
-            )
-
-            # Phase 3: Parameter sweep (with detailed logging)
-            results, sweep_best = self._run_sweep_phase(
-                [symbol], timeframes, pattern_types, parameter_grid,
-                data_cache, pattern_cache
-            )
-
-            # Free memory after processing
-            del data_cache
-            del pattern_cache
+            if symbol_result.get('skipped'):
+                total_skipped += symbol_result.get('skip_count', 0)
+                continue
 
             # Create/update records from results
             pending_commits = 0
             symbol_updated = 0
             symbol_new = 0
 
-            for r in results:
+            for r in symbol_result['results']:
                 params = r['params']
                 rr_target = params.get('rr_target', 2.0)
                 sl_buffer_pct = params.get('sl_buffer_pct', 10.0)
@@ -2019,10 +2032,12 @@ class ParameterOptimizer:
         best_result = None
         best_profit = float('-inf')
 
-        # Pre-load existing runs for ALL symbols (needed for skip detection)
+        # Pre-load existing runs for ALL symbols (needed for skip detection and DB updates)
         existing_runs_map = {}  # symbol -> {key: run}
+        existing_timestamps_map = {}  # symbol -> {timeframe: max_timestamp}
         for symbol in symbols:
             existing_runs = {}
+            existing_timestamps = {}
             all_existing = OptimizationRun.query.filter(
                 OptimizationRun.symbol == symbol,
                 OptimizationRun.timeframe.in_(timeframes),
@@ -2032,19 +2047,24 @@ class ParameterOptimizer:
             for run in all_existing:
                 key = (run.symbol, run.timeframe, run.pattern_type, run.rr_target, run.sl_buffer_pct)
                 existing_runs[key] = run
+                # Track max timestamp per timeframe for skip detection
+                if run.last_candle_timestamp:
+                    if run.timeframe not in existing_timestamps:
+                        existing_timestamps[run.timeframe] = run.last_candle_timestamp
+                    else:
+                        existing_timestamps[run.timeframe] = max(
+                            existing_timestamps[run.timeframe],
+                            run.last_candle_timestamp
+                        )
             existing_runs_map[symbol] = existing_runs
-
-        # Prepare existing run keys for workers
-        existing_run_keys = set()
-        for symbol_runs in existing_runs_map.values():
-            existing_run_keys.update(symbol_runs.keys())
+            existing_timestamps_map[symbol] = existing_timestamps
 
         parallel_start = datetime.now(timezone.utc)
         completed_symbols = 0
 
         # Process symbols in parallel using ProcessPoolExecutor
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            # Submit all symbol processing tasks
+            # Submit all symbol processing tasks with existing timestamps for skip detection
             future_to_symbol = {
                 executor.submit(
                     _process_symbol_worker,
@@ -2052,7 +2072,7 @@ class ParameterOptimizer:
                     timeframes,
                     pattern_types,
                     parameter_grid,
-                    existing_run_keys
+                    existing_timestamps_map.get(symbol, {}) if existing_runs_map.get(symbol) else {}
                 ): symbol
                 for symbol in symbols
             }
@@ -2066,14 +2086,13 @@ class ParameterOptimizer:
                     worker_result = future.result()
 
                     if worker_result.get('error'):
-                        print(f"  [{symbol}] ✗ Error - {worker_result['error']}", flush=True)
+                        print(f"  ✗ {symbol}: Error - {worker_result['error']}", flush=True)
                         param_combinations = list(itertools.product(*parameter_grid.values()))
                         total_errors += len(timeframes) * len(pattern_types) * len(param_combinations)
                         continue
 
-                    if worker_result.get('skip_count', 0) > 0 and not worker_result.get('has_new_data'):
-                        total_skipped += worker_result['skip_count']
-                        print(f"  [{symbol}] ⏭ Skipped (no data)", flush=True)
+                    if worker_result.get('skipped'):
+                        total_skipped += worker_result.get('skip_count', 0)
                         continue
 
                     # Get existing runs for this symbol

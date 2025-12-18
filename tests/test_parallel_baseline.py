@@ -1033,7 +1033,7 @@ class TestParallelVsSequentialConsistency:
                     'rr_target': [2.0],
                     'sl_buffer_pct': [10.0],
                 },
-                existing_run_keys=set()
+                existing_timestamps={}  # Empty = no existing runs, don't skip
             )
 
             # Verify structure
