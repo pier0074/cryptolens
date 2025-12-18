@@ -402,19 +402,40 @@ class ParameterOptimizer:
                         continue
 
                     pt_combo_count = 0
-                    n_patterns = len(result['pattern_cache'].get((symbol, timeframe, pattern_type, 0.15, True), []))
-                    print(f"    → {timeframe} {pattern_type} ({n_patterns} patterns, {len(param_combinations)} combos)...", flush=True)
+                    cache_key = (symbol, timeframe, pattern_type, 0.15, True)
+                    patterns = result['pattern_cache'].get(cache_key, [])
+                    n_patterns = len(patterns)
+                    pt_start = time.time()
+
+                    # Group params by expiry_multiplier for efficient pre-computation
+                    expiry_values = list(set(p[param_keys.index('expiry_multiplier')] for p in param_combinations))
+                    entry_method = 'zone_edge'  # Fixed for now
+
+                    # Pre-compute entries for each expiry value (3x instead of 192x)
+                    entry_cache = {}
+                    for expiry_mult in expiry_values:
+                        expiry_candles = get_pattern_expiry_candles(timeframe, expiry_mult)
+                        entry_cache[expiry_mult] = self._precompute_entries(
+                            ohlcv, patterns, expiry_candles, entry_method
+                        )
+
+                    n_entries = sum(len(v) for v in entry_cache.values()) // len(expiry_values) if expiry_values else 0
+                    print(f"    → {timeframe} {pattern_type}: {n_patterns} patterns, {n_entries} entries, {len(param_combinations)} combos", flush=True)
+
+                    # Now iterate through all param combos using cached entries
                     for params in param_combinations:
                         param_dict = dict(zip(param_keys, params))
 
                         try:
-                            min_zone_pct = param_dict.get('min_zone_pct', 0.15)
-                            use_overlap = param_dict.get('use_overlap', True)
-                            cache_key = (symbol, timeframe, pattern_type, min_zone_pct, use_overlap)
-                            patterns = result['pattern_cache'].get(cache_key, [])
+                            expiry_mult = param_dict.get('expiry_multiplier', 1.0)
+                            rr_target = param_dict.get('rr_target', 2.0)
+                            sl_buffer_pct = param_dict.get('sl_buffer_pct', 10.0) / 100.0
 
-                            trades = self._simulate_trades_fast(
-                                ohlcv, patterns, param_dict,
+                            # Use pre-computed entries for this expiry
+                            precomputed = entry_cache.get(expiry_mult, {})
+
+                            trades = self._simulate_with_precomputed_entries(
+                                ohlcv, precomputed, rr_target, sl_buffer_pct,
                                 timeframe=timeframe,
                                 data_cache=result.get('data_cache'),
                                 symbol=symbol
@@ -439,9 +460,7 @@ class ParameterOptimizer:
                                 result['best_result'] = sweep_result
 
                             processed_combos += 1
-                            if processed_combos % progress_interval == 0:
-                                pct = int(processed_combos / total_combos * 100)
-                                print(f"    [{symbol}] {processed_combos:,}/{total_combos:,} ({pct}%)", flush=True)
+                            pt_combo_count += 1
 
                         except Exception as e:
                             result['results'].append({
@@ -454,11 +473,11 @@ class ParameterOptimizer:
                                 'first_candle_ts': first_candle_ts,
                                 'last_candle_ts': last_candle_ts,
                             })
-                        pt_combo_count += 1
+                            pt_combo_count += 1
 
                     # Print progress after each timeframe/pattern combo
                     pt_time = time.time() - pt_start
-                    print(f"    {timeframe} {pattern_type}: {pt_combo_count} combos in {pt_time:.1f}s", flush=True)
+                    print(f"      ✓ {pt_combo_count} combos in {pt_time:.1f}s ({pt_combo_count/pt_time:.0f}/s)", flush=True)
 
             phase3_time = time.time() - phase3_start
             completed = sum(1 for r in result['results'] if r['status'] == 'completed')
@@ -1026,6 +1045,170 @@ class ParameterOptimizer:
         db.session.add(run)
 
         return run
+
+    def _precompute_entries(
+        self,
+        ohlcv: Dict[str, np.ndarray],
+        patterns: List[Dict],
+        expiry_candles: int,
+        entry_method: str = 'zone_edge'
+    ) -> Dict[int, Dict]:
+        """
+        Pre-compute entry candles for all patterns with a given expiry.
+        Returns dict mapping pattern index to entry info.
+        """
+        if not patterns:
+            return {}
+
+        highs = ohlcv['high']
+        lows = ohlcv['low']
+        n_candles = len(highs)
+        entries = {}
+
+        for i, pattern in enumerate(patterns):
+            entry_idx = pattern['detected_at']
+            if entry_idx + MIN_CANDLES_AFTER_PATTERN >= n_candles:
+                continue
+
+            zone_high = pattern['zone_high']
+            zone_low = pattern['zone_low']
+            direction = 'long' if pattern['direction'] == 'bullish' else 'short'
+
+            # Entry price based on method
+            if direction == 'long':
+                entry_price = zone_high if entry_method == 'zone_edge' else (zone_high + zone_low) / 2
+            else:
+                entry_price = zone_low if entry_method == 'zone_edge' else (zone_high + zone_low) / 2
+
+            # Entry search window
+            entry_start = entry_idx + 1
+            entry_end = min(entry_idx + expiry_candles, n_candles)
+
+            if entry_start >= entry_end:
+                continue
+
+            # Vectorized entry search
+            if direction == 'long':
+                entry_mask = lows[entry_start:entry_end] <= entry_price
+            else:
+                entry_mask = highs[entry_start:entry_end] >= entry_price
+
+            if not np.any(entry_mask):
+                continue
+
+            entry_candle = entry_start + np.argmax(entry_mask)
+
+            entries[i] = {
+                'entry_candle': entry_candle,
+                'entry_price': entry_price,
+                'direction': direction,
+                'zone_high': zone_high,
+                'zone_low': zone_low,
+                'zone_size': zone_high - zone_low,
+            }
+
+        return entries
+
+    def _simulate_with_precomputed_entries(
+        self,
+        ohlcv: Dict[str, np.ndarray],
+        precomputed_entries: Dict[int, Dict],
+        rr_target: float,
+        sl_buffer_pct: float,
+        timeframe: str = None,
+        data_cache: Dict = None,
+        symbol: str = None
+    ) -> List[Dict]:
+        """
+        Fast simulation using pre-computed entry candles.
+        Only calculates SL/TP outcomes - entry search already done.
+        """
+        if not precomputed_entries:
+            return []
+
+        highs = ohlcv['high']
+        lows = ohlcv['low']
+        timestamps = ohlcv['timestamp']
+        n_candles = len(highs)
+        trades = []
+
+        for entry_info in precomputed_entries.values():
+            entry_candle = entry_info['entry_candle']
+            entry_price = entry_info['entry_price']
+            direction = entry_info['direction']
+            zone_size = entry_info['zone_size']
+            buffer = zone_size * sl_buffer_pct
+
+            # Calculate SL/TP based on direction and params
+            if direction == 'long':
+                stop_loss = entry_info['zone_low'] - buffer
+                risk = entry_price - stop_loss
+                take_profit = entry_price + (risk * rr_target)
+            else:
+                stop_loss = entry_info['zone_high'] + buffer
+                risk = stop_loss - entry_price
+                take_profit = entry_price - (risk * rr_target)
+
+            # Search for SL/TP from entry to end
+            trade_start = entry_candle + 1
+            if trade_start >= n_candles:
+                continue
+
+            h_trade = highs[trade_start:]
+            l_trade = lows[trade_start:]
+
+            if direction == 'long':
+                sl_mask = l_trade <= stop_loss
+                tp_mask = h_trade >= take_profit
+            else:
+                sl_mask = h_trade >= stop_loss
+                tp_mask = l_trade <= take_profit
+
+            sl_idx = np.argmax(sl_mask) if np.any(sl_mask) else len(sl_mask)
+            tp_idx = np.argmax(tp_mask) if np.any(tp_mask) else len(tp_mask)
+
+            sl_hit = sl_idx < len(sl_mask) and sl_mask[sl_idx]
+            tp_hit = tp_idx < len(tp_mask) and tp_mask[tp_idx]
+
+            if not sl_hit and not tp_hit:
+                continue
+
+            # Determine outcome
+            if sl_hit and tp_hit:
+                if sl_idx == tp_idx:
+                    # Same candle - use drill-down or assume loss
+                    if timeframe and data_cache and symbol:
+                        conflict_ts = int(timestamps[trade_start + sl_idx])
+                        result = self._resolve_same_candle_conflict(
+                            direction, stop_loss, take_profit, conflict_ts,
+                            timeframe, data_cache, symbol
+                        )
+                    else:
+                        result = 'loss'
+                    exit_idx = trade_start + sl_idx
+                    exit_price = take_profit if result == 'win' else stop_loss
+                elif sl_idx < tp_idx:
+                    result, exit_idx, exit_price = 'loss', trade_start + sl_idx, stop_loss
+                else:
+                    result, exit_idx, exit_price = 'win', trade_start + tp_idx, take_profit
+            elif sl_hit:
+                result, exit_idx, exit_price = 'loss', trade_start + sl_idx, stop_loss
+            else:
+                result, exit_idx, exit_price = 'win', trade_start + tp_idx, take_profit
+
+            trades.append({
+                'entry_price': float(entry_price),
+                'exit_price': float(exit_price),
+                'direction': direction,
+                'result': result,
+                'rr_achieved': float(rr_target) if result == 'win' else -1.0,
+                'profit_pct': float(abs((exit_price - entry_price) / entry_price * 100)) * (1 if result == 'win' else -1),
+                'entry_time': int(timestamps[entry_candle]),
+                'exit_time': int(timestamps[exit_idx]),
+                'duration_candles': int(exit_idx - entry_candle)
+            })
+
+        return trades
 
     def _simulate_trades_fast(
         self,
