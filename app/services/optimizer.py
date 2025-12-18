@@ -385,6 +385,7 @@ class ParameterOptimizer:
                     continue
 
                 for pattern_type in pattern_types:
+                    pt_start = time.time()
                     detector = _detectors.get(pattern_type)
                     if not detector:
                         for params in param_combinations:
@@ -400,6 +401,7 @@ class ParameterOptimizer:
                             })
                         continue
 
+                    pt_combo_count = 0
                     for params in param_combinations:
                         param_dict = dict(zip(param_keys, params))
 
@@ -450,6 +452,11 @@ class ParameterOptimizer:
                                 'first_candle_ts': first_candle_ts,
                                 'last_candle_ts': last_candle_ts,
                             })
+                        pt_combo_count += 1
+
+                    # Print progress after each timeframe/pattern combo
+                    pt_time = time.time() - pt_start
+                    print(f"    {timeframe} {pattern_type}: {pt_combo_count} combos in {pt_time:.1f}s", flush=True)
 
             phase3_time = time.time() - phase3_start
             completed = sum(1 for r in result['results'] if r['status'] == 'completed')
@@ -1045,14 +1052,15 @@ class ParameterOptimizer:
         rr_target = params.get('rr_target', 2.0)
         sl_buffer_pct = params.get('sl_buffer_pct', 10.0) / 100.0
         entry_method = params.get('entry_method', 'zone_edge')
+        expiry_multiplier = params.get('expiry_multiplier', 1.0)
 
         highs = ohlcv['high']
         lows = ohlcv['low']
         timestamps = ohlcv['timestamp']
         n_candles = len(highs)
 
-        # Pattern expiry: how long zone is valid for entry (uses production PATTERN_EXPIRY_HOURS)
-        pattern_expiry_candles = get_max_trade_duration_candles(timeframe)
+        # Pattern expiry: how long zone is valid for entry (uses Config.PATTERN_EXPIRY_HOURS)
+        pattern_expiry_candles = get_pattern_expiry_candles(timeframe, expiry_multiplier)
 
         trades = []
 
