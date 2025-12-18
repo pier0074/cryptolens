@@ -67,11 +67,14 @@ TIMEFRAME_MS = {
 MIN_CANDLES_AFTER_PATTERN = 5
 
 
-def get_max_trade_duration_candles(timeframe: str) -> int:
+def get_pattern_expiry_candles(timeframe: str) -> int:
     """
-    Get max trade duration in candles from Config.PATTERN_EXPIRY_HOURS.
+    Get pattern expiry duration in candles from Config.PATTERN_EXPIRY_HOURS.
 
-    This uses the SAME expiry logic as production patterns (Pattern.expires_at),
+    This is how long a pattern zone stays VALID for entry.
+    Once a trade is entered, it stays open until SL/TP is hit (no timeout).
+
+    Uses the SAME expiry logic as production patterns (Pattern.expires_at),
     ensuring backtesting matches live trading behavior.
 
     Production expiry hours by timeframe:
@@ -89,6 +92,10 @@ def get_max_trade_duration_candles(timeframe: str) -> int:
     expiry_hours = Config.PATTERN_EXPIRY_HOURS.get(timeframe, Config.DEFAULT_PATTERN_EXPIRY_HOURS)
     minutes_per_candle = TIMEFRAME_MS.get(timeframe, 60 * 60 * 1000) // (60 * 1000)
     return int((expiry_hours * 60) / minutes_per_candle)
+
+
+# Backward compatibility alias
+get_max_trade_duration_candles = get_pattern_expiry_candles
 
 # Detector instances (reuse to avoid re-initialization)
 _detectors = {
@@ -1040,8 +1047,8 @@ class ParameterOptimizer:
         timestamps = ohlcv['timestamp']
         n_candles = len(highs)
 
-        # Max candles to look ahead for trade resolution (uses production PATTERN_EXPIRY_HOURS)
-        max_trade_duration = get_max_trade_duration_candles(timeframe)
+        # Pattern expiry: how long zone is valid for entry (uses production PATTERN_EXPIRY_HOURS)
+        pattern_expiry_candles = get_max_trade_duration_candles(timeframe)
 
         trades = []
 
@@ -1070,16 +1077,16 @@ class ParameterOptimizer:
                 take_profit = entry - (risk * rr_target)
                 direction = 'short'
 
-            # Limit search window
-            start_idx = entry_idx + 1
-            end_idx = min(entry_idx + max_trade_duration, n_candles)
+            # Entry search window: pattern must be entered within expiry period
+            entry_start_idx = entry_idx + 1
+            entry_end_idx = min(entry_idx + pattern_expiry_candles, n_candles)
 
-            if start_idx >= end_idx:
+            if entry_start_idx >= entry_end_idx:
                 continue
 
-            # Get slices for vectorized operations
-            h_slice = highs[start_idx:end_idx]
-            l_slice = lows[start_idx:end_idx]
+            # Get slices for entry search (limited by pattern expiry)
+            h_slice = highs[entry_start_idx:entry_end_idx]
+            l_slice = lows[entry_start_idx:entry_end_idx]
 
             # Vectorized search for entry trigger
             if direction == 'long':
@@ -1088,20 +1095,20 @@ class ParameterOptimizer:
                 entry_mask = h_slice >= entry
 
             if not np.any(entry_mask):
-                continue  # No entry triggered
+                continue  # Pattern expired without entry
 
             entry_candle_offset = np.argmax(entry_mask)
-            entry_candle = start_idx + entry_candle_offset
+            entry_candle = entry_start_idx + entry_candle_offset
 
-            # Now search for SL/TP after entry
+            # SL/TP search: NO TIMEOUT - trade stays open until resolved
+            # Search from entry candle to END of all available data
             trade_start = entry_candle + 1
-            trade_end = end_idx
 
-            if trade_start >= trade_end:
+            if trade_start >= n_candles:
                 continue
 
-            h_trade = highs[trade_start:trade_end]
-            l_trade = lows[trade_start:trade_end]
+            h_trade = highs[trade_start:n_candles]
+            l_trade = lows[trade_start:n_candles]
 
             if direction == 'long':
                 sl_mask = l_trade <= stop_loss
@@ -1566,8 +1573,8 @@ class ParameterOptimizer:
         sl_buffer_pct = params.get('sl_buffer_pct', 10.0) / 100.0
         entry_method = params.get('entry_method', 'zone_edge')
 
-        # Max trade duration from production PATTERN_EXPIRY_HOURS
-        max_trade_duration = get_max_trade_duration_candles(timeframe)
+        # Pattern expiry: how long zone is valid for entry (trade stays open until SL/TP)
+        pattern_expiry_candles = get_pattern_expiry_candles(timeframe)
 
         for pattern in patterns:
             entry_idx = pattern['detected_at']
@@ -1603,7 +1610,7 @@ class ParameterOptimizer:
 
             # Simulate trade outcome
             trade = self._simulate_single_trade(
-                df, entry_idx, entry, stop_loss, take_profit, direction, rr_target, max_trade_duration
+                df, entry_idx, entry, stop_loss, take_profit, direction, rr_target, pattern_expiry_candles
             )
             if trade:
                 trades.append(trade)
@@ -1619,81 +1626,88 @@ class ParameterOptimizer:
         take_profit: float,
         direction: str,
         rr_target: float,
-        max_trade_duration: int
+        pattern_expiry_candles: int
     ) -> Optional[Dict]:
-        """Simulate a single trade with expiry limit from production PATTERN_EXPIRY_HOURS"""
-        entry_triggered = False
+        """
+        Simulate a single trade with proper entry expiry and unlimited trade duration.
+
+        Entry search: Limited to pattern_expiry_candles (zone must be entered while valid)
+        Trade resolution: NO TIMEOUT - trade stays open until SL/TP is hit
+        """
+        n = len(df)
         entry_candle = None
 
-        # Limit search to max_trade_duration candles (matches production pattern expiry)
-        end_idx = min(entry_idx + 1 + max_trade_duration, len(df))
+        # Phase 1: Search for entry within pattern expiry window
+        entry_end_idx = min(entry_idx + 1 + pattern_expiry_candles, n)
 
-        for j in range(entry_idx + 1, end_idx):
+        for j in range(entry_idx + 1, entry_end_idx):
+            candle = df.iloc[j]
+            if direction == 'long' and candle['low'] <= entry:
+                entry_candle = j
+                break
+            elif direction == 'short' and candle['high'] >= entry:
+                entry_candle = j
+                break
+
+        if entry_candle is None:
+            return None  # Pattern expired without entry
+
+        # Phase 2: Search for SL/TP from entry to END of data (no timeout)
+        for j in range(entry_candle + 1, n):
             candle = df.iloc[j]
 
-            if not entry_triggered:
-                if direction == 'long':
-                    if candle['low'] <= entry:
-                        entry_triggered = True
-                        entry_candle = j
-                else:
-                    if candle['high'] >= entry:
-                        entry_triggered = True
-                        entry_candle = j
+            if direction == 'long':
+                if candle['low'] <= stop_loss:
+                    return {
+                        'entry_price': float(entry),
+                        'exit_price': float(stop_loss),
+                        'direction': direction,
+                        'result': 'loss',
+                        'rr_achieved': -1.0,
+                        'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
+                        'entry_time': int(df.iloc[entry_candle]['timestamp']),
+                        'exit_time': int(candle['timestamp']),
+                        'duration_candles': int(j - entry_candle)
+                    }
+                elif candle['high'] >= take_profit:
+                    return {
+                        'entry_price': float(entry),
+                        'exit_price': float(take_profit),
+                        'direction': direction,
+                        'result': 'win',
+                        'rr_achieved': float(rr_target),
+                        'profit_pct': float(abs((take_profit - entry) / entry * 100)),
+                        'entry_time': int(df.iloc[entry_candle]['timestamp']),
+                        'exit_time': int(candle['timestamp']),
+                        'duration_candles': int(j - entry_candle)
+                    }
             else:
-                # Check for SL or TP
-                if direction == 'long':
-                    if candle['low'] <= stop_loss:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(stop_loss),
-                            'direction': direction,
-                            'result': 'loss',
-                            'rr_achieved': -1.0,
-                            'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
-                            'entry_time': int(df.iloc[entry_candle]['timestamp']),
-                            'exit_time': int(candle['timestamp']),
-                            'duration_candles': int(j - entry_candle)
-                        }
-                    elif candle['high'] >= take_profit:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(take_profit),
-                            'direction': direction,
-                            'result': 'win',
-                            'rr_achieved': float(rr_target),
-                            'profit_pct': float(abs((take_profit - entry) / entry * 100)),
-                            'entry_time': int(df.iloc[entry_candle]['timestamp']),
-                            'exit_time': int(candle['timestamp']),
-                            'duration_candles': int(j - entry_candle)
-                        }
-                else:
-                    if candle['high'] >= stop_loss:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(stop_loss),
-                            'direction': direction,
-                            'result': 'loss',
-                            'rr_achieved': -1.0,
-                            'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
-                            'entry_time': int(df.iloc[entry_candle]['timestamp']),
-                            'exit_time': int(candle['timestamp']),
-                            'duration_candles': int(j - entry_candle)
-                        }
-                    elif candle['low'] <= take_profit:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(take_profit),
-                            'direction': direction,
-                            'result': 'win',
-                            'rr_achieved': float(rr_target),
-                            'profit_pct': float(abs((take_profit - entry) / entry * 100)),
-                            'entry_time': int(df.iloc[entry_candle]['timestamp']),
-                            'exit_time': int(candle['timestamp']),
-                            'duration_candles': int(j - entry_candle)
-                        }
+                if candle['high'] >= stop_loss:
+                    return {
+                        'entry_price': float(entry),
+                        'exit_price': float(stop_loss),
+                        'direction': direction,
+                        'result': 'loss',
+                        'rr_achieved': -1.0,
+                        'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
+                        'entry_time': int(df.iloc[entry_candle]['timestamp']),
+                        'exit_time': int(candle['timestamp']),
+                        'duration_candles': int(j - entry_candle)
+                    }
+                elif candle['low'] <= take_profit:
+                    return {
+                        'entry_price': float(entry),
+                        'exit_price': float(take_profit),
+                        'direction': direction,
+                        'result': 'win',
+                        'rr_achieved': float(rr_target),
+                        'profit_pct': float(abs((take_profit - entry) / entry * 100)),
+                        'entry_time': int(df.iloc[entry_candle]['timestamp']),
+                        'exit_time': int(candle['timestamp']),
+                        'duration_candles': int(j - entry_candle)
+                    }
 
-        return None
+        return None  # Trade still open (not resolved in available data)
 
     def _calculate_statistics(self, trades: List[Dict]) -> Dict:
         """Calculate performance statistics from trades"""
@@ -2515,8 +2529,8 @@ class ParameterOptimizer:
         sl_buffer_pct = params.get('sl_buffer_pct', 10.0) / 100.0
         entry_method = params.get('entry_method', 'zone_edge')
 
-        # Max trade duration from production PATTERN_EXPIRY_HOURS
-        max_trade_duration = get_max_trade_duration_candles(timeframe)
+        # Pattern expiry: how long zone is valid for entry (trade stays open until SL/TP)
+        pattern_expiry_candles = get_pattern_expiry_candles(timeframe)
 
         highs = ohlcv['high']
         lows = ohlcv['low']
@@ -2551,32 +2565,32 @@ class ParameterOptimizer:
                 take_profit = entry - (risk * rr_target)
                 direction = 'short'
 
-            # Vectorized trade simulation (uses production expiry)
-            start_idx = entry_idx + 1
-            end_idx = min(entry_idx + max_trade_duration, n_candles)
+            # Entry search: limited by pattern expiry
+            entry_start_idx = entry_idx + 1
+            entry_end_idx = min(entry_idx + pattern_expiry_candles, n_candles)
 
-            if start_idx >= end_idx:
+            if entry_start_idx >= entry_end_idx:
                 continue
 
-            h_slice = highs[start_idx:end_idx]
-            l_slice = lows[start_idx:end_idx]
+            h_slice = highs[entry_start_idx:entry_end_idx]
+            l_slice = lows[entry_start_idx:entry_end_idx]
 
-            # Find entry trigger
+            # Find entry trigger (within expiry window)
             if direction == 'long':
                 entry_mask = l_slice <= entry
             else:
                 entry_mask = h_slice >= entry
 
             if not np.any(entry_mask):
-                continue  # No entry triggered
+                continue  # Pattern expired without entry
 
             entry_offset = np.argmax(entry_mask)
-            entry_candle = start_idx + entry_offset
+            entry_candle = entry_start_idx + entry_offset
             entry_time = int(timestamps[entry_candle])
 
-            # Search for SL/TP after entry
+            # SL/TP search: NO TIMEOUT - search to end of data
             trade_start = entry_candle + 1
-            if trade_start >= end_idx:
+            if trade_start >= n_candles:
                 # Entry at edge - trade is open
                 open_trades.append({
                     'status': 'open',
@@ -2589,8 +2603,8 @@ class ParameterOptimizer:
                 })
                 continue
 
-            h_trade = highs[trade_start:end_idx]
-            l_trade = lows[trade_start:end_idx]
+            h_trade = highs[trade_start:n_candles]
+            l_trade = lows[trade_start:n_candles]
 
             if direction == 'long':
                 sl_mask = l_trade <= stop_loss
@@ -2861,8 +2875,8 @@ class ParameterOptimizer:
         sl_buffer_pct = params.get('sl_buffer_pct', 10.0) / 100.0
         entry_method = params.get('entry_method', 'zone_edge')
 
-        # Max trade duration from production PATTERN_EXPIRY_HOURS
-        max_trade_duration = get_max_trade_duration_candles(timeframe)
+        # Pattern expiry: how long zone is valid for entry (trade stays open until SL/TP)
+        pattern_expiry_candles = get_pattern_expiry_candles(timeframe)
 
         for pattern in patterns:
             entry_idx = pattern['detected_at']
@@ -2893,7 +2907,7 @@ class ParameterOptimizer:
                 direction = 'short'
 
             trade = self._simulate_single_trade_with_open(
-                df, entry_idx, entry, stop_loss, take_profit, direction, rr_target, max_trade_duration
+                df, entry_idx, entry, stop_loss, take_profit, direction, rr_target, pattern_expiry_candles
             )
 
             if trade:
@@ -2913,94 +2927,101 @@ class ParameterOptimizer:
         take_profit: float,
         direction: str,
         rr_target: float,
-        max_trade_duration: int
+        pattern_expiry_candles: int
     ) -> Optional[Dict]:
-        """Simulate a single trade with expiry, returning open if not resolved"""
-        entry_triggered = False
+        """
+        Simulate a single trade with proper entry expiry and unlimited trade duration.
+
+        Entry search: Limited to pattern_expiry_candles (zone must be entered while valid)
+        Trade resolution: NO TIMEOUT - trade stays open until SL/TP is hit
+        Returns 'open' status if trade is entered but not resolved in available data.
+        """
+        n = len(df)
         entry_candle = None
         entry_time = None
 
-        # Limit search to max_trade_duration candles (matches production pattern expiry)
-        end_idx = min(entry_idx + 1 + max_trade_duration, len(df))
+        # Phase 1: Search for entry within pattern expiry window
+        entry_end_idx = min(entry_idx + 1 + pattern_expiry_candles, n)
 
-        for j in range(entry_idx + 1, end_idx):
+        for j in range(entry_idx + 1, entry_end_idx):
+            candle = df.iloc[j]
+            if direction == 'long' and candle['low'] <= entry:
+                entry_candle = j
+                entry_time = int(candle['timestamp'])
+                break
+            elif direction == 'short' and candle['high'] >= entry:
+                entry_candle = j
+                entry_time = int(candle['timestamp'])
+                break
+
+        if entry_candle is None:
+            return None  # Pattern expired without entry
+
+        # Phase 2: Search for SL/TP from entry to END of data (no timeout)
+        for j in range(entry_candle + 1, n):
             candle = df.iloc[j]
 
-            if not entry_triggered:
-                if direction == 'long' and candle['low'] <= entry:
-                    entry_triggered = True
-                    entry_candle = j
-                    entry_time = int(candle['timestamp'])
-                elif direction == 'short' and candle['high'] >= entry:
-                    entry_triggered = True
-                    entry_candle = j
-                    entry_time = int(candle['timestamp'])
+            if direction == 'long':
+                if candle['low'] <= stop_loss:
+                    return {
+                        'entry_price': float(entry),
+                        'exit_price': float(stop_loss),
+                        'direction': direction,
+                        'result': 'loss',
+                        'rr_achieved': -1.0,
+                        'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
+                        'entry_time': entry_time,
+                        'exit_time': int(candle['timestamp']),
+                        'duration_candles': int(j - entry_candle)
+                    }
+                elif candle['high'] >= take_profit:
+                    return {
+                        'entry_price': float(entry),
+                        'exit_price': float(take_profit),
+                        'direction': direction,
+                        'result': 'win',
+                        'rr_achieved': float(rr_target),
+                        'profit_pct': float(abs((take_profit - entry) / entry * 100)),
+                        'entry_time': entry_time,
+                        'exit_time': int(candle['timestamp']),
+                        'duration_candles': int(j - entry_candle)
+                    }
             else:
-                # Check for SL or TP
-                if direction == 'long':
-                    if candle['low'] <= stop_loss:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(stop_loss),
-                            'direction': direction,
-                            'result': 'loss',
-                            'rr_achieved': -1.0,
-                            'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
-                            'entry_time': entry_time,
-                            'exit_time': int(candle['timestamp']),
-                            'duration_candles': int(j - entry_candle)
-                        }
-                    elif candle['high'] >= take_profit:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(take_profit),
-                            'direction': direction,
-                            'result': 'win',
-                            'rr_achieved': float(rr_target),
-                            'profit_pct': float(abs((take_profit - entry) / entry * 100)),
-                            'entry_time': entry_time,
-                            'exit_time': int(candle['timestamp']),
-                            'duration_candles': int(j - entry_candle)
-                        }
-                else:
-                    if candle['high'] >= stop_loss:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(stop_loss),
-                            'direction': direction,
-                            'result': 'loss',
-                            'rr_achieved': -1.0,
-                            'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
-                            'entry_time': entry_time,
-                            'exit_time': int(candle['timestamp']),
-                            'duration_candles': int(j - entry_candle)
-                        }
-                    elif candle['low'] <= take_profit:
-                        return {
-                            'entry_price': float(entry),
-                            'exit_price': float(take_profit),
-                            'direction': direction,
-                            'result': 'win',
-                            'rr_achieved': float(rr_target),
-                            'profit_pct': float(abs((take_profit - entry) / entry * 100)),
-                            'entry_time': entry_time,
-                            'exit_time': int(candle['timestamp']),
-                            'duration_candles': int(j - entry_candle)
-                        }
+                if candle['high'] >= stop_loss:
+                    return {
+                        'entry_price': float(entry),
+                        'exit_price': float(stop_loss),
+                        'direction': direction,
+                        'result': 'loss',
+                        'rr_achieved': -1.0,
+                        'profit_pct': float(-abs((stop_loss - entry) / entry * 100)),
+                        'entry_time': entry_time,
+                        'exit_time': int(candle['timestamp']),
+                        'duration_candles': int(j - entry_candle)
+                    }
+                elif candle['low'] <= take_profit:
+                    return {
+                        'entry_price': float(entry),
+                        'exit_price': float(take_profit),
+                        'direction': direction,
+                        'result': 'win',
+                        'rr_achieved': float(rr_target),
+                        'profit_pct': float(abs((take_profit - entry) / entry * 100)),
+                        'entry_time': entry_time,
+                        'exit_time': int(candle['timestamp']),
+                        'duration_candles': int(j - entry_candle)
+                    }
 
-        # Trade not resolved - return as open
-        if entry_triggered:
-            return {
-                'status': 'open',
-                'entry_price': float(entry),
-                'stop_loss': float(stop_loss),
-                'take_profit': float(take_profit),
-                'direction': direction,
-                'rr_target': float(rr_target),
-                'entry_time': entry_time,
-            }
-
-        return None
+        # Trade entered but not resolved - return as open
+        return {
+            'status': 'open',
+            'entry_price': float(entry),
+            'stop_loss': float(stop_loss),
+            'take_profit': float(take_profit),
+            'direction': direction,
+            'rr_target': float(rr_target),
+            'entry_time': entry_time,
+        }
 
     def _resolve_open_trades(
         self,
