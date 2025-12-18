@@ -359,7 +359,7 @@ class ParameterOptimizer:
             total_combos = len(param_combinations) * len(timeframes) * len(pattern_types)
             best_profit = float('-inf')
             processed_combos = 0
-            progress_interval = max(500, total_combos // 10)  # Every 500 or 10%
+            progress_interval = 10  # Print every 10 combos
 
             print(f"\n[Phase 3/3] [{symbol}] Running parameter sweep ({total_combos:,} combinations)...", flush=True)
 
@@ -402,6 +402,8 @@ class ParameterOptimizer:
                         continue
 
                     pt_combo_count = 0
+                    n_patterns = len(result['pattern_cache'].get((symbol, timeframe, pattern_type, 0.15, True), []))
+                    print(f"    → {timeframe} {pattern_type} ({n_patterns} patterns, {len(param_combinations)} combos)...", flush=True)
                     for params in param_combinations:
                         param_dict = dict(zip(param_keys, params))
 
