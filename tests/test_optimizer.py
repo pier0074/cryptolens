@@ -398,7 +398,8 @@ class TestSweepPhaseFactorization:
                     'profit_factor': 0,
                     'avg_duration': 0,
                 },
-                'last_candle_ts': 1700000000000,
+                'first_candle_ts': 1672531200000,  # 2023-01-01
+                'last_candle_ts': 1700000000000,   # 2023-11-14
             }
 
             run = opt._create_run_from_result(None, result)

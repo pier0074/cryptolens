@@ -395,12 +395,13 @@ class ParameterOptimizer:
 
                 if df is not None and len(df) >= 20:
                     ohlcv = self._df_to_arrays(df)
+                    first_ts = int(df['timestamp'].min())
                     last_ts = int(df['timestamp'].max())
-                    result['data_cache'][(symbol, timeframe)] = (df, ohlcv, last_ts)
+                    result['data_cache'][(symbol, timeframe)] = (df, ohlcv, first_ts, last_ts)
                     total_candles += len(df)
                     print(f"  {symbol} {timeframe}: {len(df):,} candles ({tf_time:.2f}s){verified_status}", flush=True)
                 else:
-                    result['data_cache'][(symbol, timeframe)] = (None, None, None)
+                    result['data_cache'][(symbol, timeframe)] = (None, None, None, None)
                     print(f"  {symbol} {timeframe}: No data ({tf_time:.2f}s)", flush=True)
 
             phase1_time = time.time() - phase1_start
@@ -429,8 +430,8 @@ class ParameterOptimizer:
                 has_new_data = False
                 for timeframe in timeframes:
                     cached = result['data_cache'].get((symbol, timeframe))
-                    if cached and cached[2]:  # last_candle_ts
-                        last_candle_ts = cached[2]
+                    if cached and cached[3]:  # last_candle_ts (index 3 now)
+                        last_candle_ts = cached[3]
                         existing_ts = existing_timestamps.get(timeframe)
                         if existing_ts is None:
                             # No existing run for this timeframe = new data
@@ -519,8 +520,10 @@ class ParameterOptimizer:
             print(f"\n[Phase 3/3] Running parameter sweep ({total_combos:,} combinations)...", flush=True)
 
             for timeframe in timeframes:
-                cached = result['data_cache'].get((symbol, timeframe), (None, None, None))
-                df, ohlcv, last_candle_ts = cached[0], cached[1], cached[2] if len(cached) > 2 else None
+                cached = result['data_cache'].get((symbol, timeframe), (None, None, None, None))
+                df, ohlcv = cached[0], cached[1]
+                first_candle_ts = cached[2] if len(cached) > 2 else None
+                last_candle_ts = cached[3] if len(cached) > 3 else None
 
                 if df is None:
                     for pattern_type in pattern_types:
@@ -532,6 +535,7 @@ class ParameterOptimizer:
                                 'params': dict(zip(param_keys, params)),
                                 'status': 'failed',
                                 'error': 'Insufficient data',
+                                'first_candle_ts': None,
                                 'last_candle_ts': None,
                             })
                     continue
@@ -547,6 +551,7 @@ class ParameterOptimizer:
                                 'params': dict(zip(param_keys, params)),
                                 'status': 'failed',
                                 'error': f'Unknown pattern type: {pattern_type}',
+                                'first_candle_ts': first_candle_ts,
                                 'last_candle_ts': last_candle_ts,
                             })
                         continue
@@ -571,6 +576,7 @@ class ParameterOptimizer:
                                 'status': 'completed',
                                 'trades': trades,
                                 'stats': stats,
+                                'first_candle_ts': first_candle_ts,
                                 'last_candle_ts': last_candle_ts,
                             }
                             result['results'].append(sweep_result)
@@ -587,6 +593,7 @@ class ParameterOptimizer:
                                 'params': param_dict,
                                 'status': 'failed',
                                 'error': str(e),
+                                'first_candle_ts': first_candle_ts,
                                 'last_candle_ts': last_candle_ts,
                             })
 
@@ -882,8 +889,10 @@ class ParameterOptimizer:
 
         for symbol in symbols:
             for timeframe in timeframes:
-                cached = data_cache.get((symbol, timeframe), (None, None, None))
-                df, ohlcv_arrays, last_candle_ts = cached[0], cached[1], cached[2] if len(cached) > 2 else None
+                cached = data_cache.get((symbol, timeframe), (None, None, None, None))
+                df, ohlcv_arrays = cached[0], cached[1]
+                first_candle_ts = cached[2] if len(cached) > 2 else None
+                last_candle_ts = cached[3] if len(cached) > 3 else None
 
                 if df is None:
                     # Mark as failed
@@ -897,6 +906,7 @@ class ParameterOptimizer:
                                 'params': dict(zip(param_keys, params)),
                                 'status': 'failed',
                                 'error': 'Insufficient data',
+                                'first_candle_ts': None,
                                 'last_candle_ts': None,
                             })
                             if progress_callback:
@@ -915,6 +925,7 @@ class ParameterOptimizer:
                                 'params': dict(zip(param_keys, params)),
                                 'status': 'failed',
                                 'error': f'Unknown pattern type: {pattern_type}',
+                                'first_candle_ts': first_candle_ts,
                                 'last_candle_ts': last_candle_ts,
                             })
                             if progress_callback:
@@ -944,6 +955,7 @@ class ParameterOptimizer:
                                 'status': 'completed',
                                 'trades': trades,
                                 'stats': stats,
+                                'first_candle_ts': first_candle_ts,
                                 'last_candle_ts': last_candle_ts,
                             }
                             results.append(result)
@@ -961,6 +973,7 @@ class ParameterOptimizer:
                                 'params': param_dict,
                                 'status': 'failed',
                                 'error': str(e),
+                                'first_candle_ts': first_candle_ts,
                                 'last_candle_ts': last_candle_ts,
                             })
 
@@ -982,7 +995,7 @@ class ParameterOptimizer:
         Phase 1: Load all candle data for given symbols/timeframes.
 
         Returns:
-            data_cache: Dict[(symbol, timeframe)] -> (df, ohlcv_arrays, last_candle_ts)
+            data_cache: Dict[(symbol, timeframe)] -> (df, ohlcv_arrays, first_candle_ts, last_candle_ts)
         """
         data_cache = {}
         total_candles = 0
@@ -1002,13 +1015,14 @@ class ParameterOptimizer:
 
                 if df is not None and len(df) >= 20:
                     ohlcv_arrays = self._df_to_arrays(df)
+                    first_candle_ts = int(df['timestamp'].min())
                     last_candle_ts = int(df['timestamp'].max())
-                    data_cache[(symbol, timeframe)] = (df, ohlcv_arrays, last_candle_ts)
+                    data_cache[(symbol, timeframe)] = (df, ohlcv_arrays, first_candle_ts, last_candle_ts)
                     total_candles += len(df)
                     status = "" if verified_source == "verified" else " [unverified!]"
                     print(f"  {symbol} {timeframe}: {len(df):,} candles ({query_duration:.2f}s){status}", flush=True)
                 else:
-                    data_cache[(symbol, timeframe)] = (None, None, None)
+                    data_cache[(symbol, timeframe)] = (None, None, None, None)
                     print(f"  {symbol} {timeframe}: No data ({query_duration:.2f}s)")
 
         phase_duration = (datetime.now(timezone.utc) - phase_start).total_seconds()
@@ -1455,6 +1469,7 @@ class ParameterOptimizer:
         """
         stats = result['stats']
         params = result['params']
+        first_candle_ts = result.get('first_candle_ts')
         last_candle_ts = result.get('last_candle_ts')
 
         # Determine start/end dates
@@ -1462,8 +1477,9 @@ class ParameterOptimizer:
             start_date = job.start_date
             end_date = job.end_date
         else:
-            start_date = datetime.fromtimestamp(last_candle_ts / 1000).strftime('%Y-%m-%d') if last_candle_ts else None
-            end_date = start_date
+            # Use actual data range from candle timestamps
+            start_date = datetime.fromtimestamp(first_candle_ts / 1000).strftime('%Y-%m-%d') if first_candle_ts else None
+            end_date = datetime.fromtimestamp(last_candle_ts / 1000).strftime('%Y-%m-%d') if last_candle_ts else None
 
         if existing_run:
             # Update existing run

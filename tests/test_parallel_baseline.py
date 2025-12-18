@@ -173,7 +173,7 @@ class TestParallelProcessingBaseline:
                 assert isinstance(key, tuple)
                 assert len(key) == 2  # (symbol, timeframe)
                 assert isinstance(value, tuple)
-                assert len(value) == 3  # (df, ohlcv_arrays, last_candle_ts)
+                assert len(value) == 4  # (df, ohlcv_arrays, first_candle_ts, last_candle_ts)
 
     def test_phase2_detect_patterns(self, app):
         """Test Phase 2: Pattern detection with synthetic data."""
