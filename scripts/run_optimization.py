@@ -11,12 +11,14 @@ Usage:
     python scripts/run_optimization.py -l                   # List all jobs
     python scripts/run_optimization.py -r                   # Show all results
     python scripts/run_optimization.py -b                   # Show best parameters
+    python scripts/run_optimization.py -s BTC/USDT -e 1.0         # Only test 1x expiry
 
 Options:
     -s, --symbol        Run optimization for a specific symbol
     -a, --all-symbols   Run optimization for all active symbols
     -t, --timeframes    Comma-separated timeframes
     --patterns          Comma-separated patterns
+    -e, --expiry        Comma-separated expiry multipliers (default: 0.5,1.0,2.0)
     -f, --full          Full mode: re-run ALL combinations (creates new job)
     -p, --parallel      Use parallel processing (3-4x faster for multiple symbols)
     -w, --workers       Number of parallel workers (default: 4, max: 8)
@@ -116,10 +118,20 @@ def format_duration(seconds):
         return f"{hours}h {mins}m"
 
 
-def run_optimization(symbols, timeframes, pattern_types, verbose=False, incremental=False, parallel=False, max_workers=4):
+def build_parameter_grid(expiry_multipliers):
+    """Build parameter grid with custom expiry multipliers."""
+    grid = QUICK_PARAMETER_GRID.copy()
+    grid['expiry_multiplier'] = expiry_multipliers
+    return grid
+
+
+def run_optimization(symbols, timeframes, pattern_types, verbose=False, incremental=False, parallel=False, max_workers=4, expiry_multipliers=None):
     """Run optimization for given symbols."""
+    if expiry_multipliers is None:
+        expiry_multipliers = [0.5, 1.0, 2.0]
+
     if incremental:
-        run_incremental_optimization(symbols, timeframes, pattern_types, verbose, parallel, max_workers)
+        run_incremental_optimization(symbols, timeframes, pattern_types, verbose, parallel, max_workers, expiry_multipliers)
         return
 
     # Get date range from first symbol's candles
@@ -135,10 +147,12 @@ def run_optimization(symbols, timeframes, pattern_types, verbose=False, incremen
     print(f"  Symbols: {', '.join(symbols)}")
     print(f"  Timeframes: {', '.join(timeframes)}")
     print(f"  Patterns: {', '.join(pattern_types)}")
+    print(f"  Expiry multipliers: {expiry_multipliers}")
     print(f"  Date range: {start_date} to {end_date}")
     print(f"{'='*60}\n")
 
-    # Create job
+    # Create job with custom expiry multipliers
+    param_grid = build_parameter_grid(expiry_multipliers)
     job_name = f"Optimization {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')}"
     job = optimizer.create_job(
         name=job_name,
@@ -147,7 +161,7 @@ def run_optimization(symbols, timeframes, pattern_types, verbose=False, incremen
         pattern_types=pattern_types,
         start_date=start_date,
         end_date=end_date,
-        parameter_grid=QUICK_PARAMETER_GRID,
+        parameter_grid=param_grid,
     )
 
     print(f"Created job #{job.id}: {job.name}")
@@ -186,15 +200,21 @@ def run_optimization(symbols, timeframes, pattern_types, verbose=False, incremen
     print(f"Or visit: /admin/optimization/results")
 
 
-def run_incremental_optimization(symbols, timeframes, pattern_types, verbose=False, parallel=False, max_workers=4):
+def run_incremental_optimization(symbols, timeframes, pattern_types, verbose=False, parallel=False, max_workers=4, expiry_multipliers=None):
     """Run incremental optimization - only process new candles."""
     import itertools
+
+    if expiry_multipliers is None:
+        expiry_multipliers = [0.5, 1.0, 2.0]
+
+    # Build parameter grid with custom expiry multipliers
+    param_grid = build_parameter_grid(expiry_multipliers)
 
     # Get date range from first symbol's candles for display
     start_date, end_date = get_date_range_for_symbol(symbols[0], timeframes[0])
 
     # Calculate total combinations for display
-    param_combinations = list(itertools.product(*QUICK_PARAMETER_GRID.values()))
+    param_combinations = list(itertools.product(*param_grid.values()))
     total_runs = len(symbols) * len(timeframes) * len(pattern_types) * len(param_combinations)
 
     mode = "Parallel" if parallel else "Sequential"
@@ -204,6 +224,7 @@ def run_incremental_optimization(symbols, timeframes, pattern_types, verbose=Fal
     print(f"  Symbols: {', '.join(symbols)}")
     print(f"  Timeframes: {', '.join(timeframes)}")
     print(f"  Patterns: {', '.join(pattern_types)}")
+    print(f"  Expiry multipliers: {expiry_multipliers}")
     print(f"  Date range: {start_date or 'N/A'} to {end_date or 'N/A'}")
     print(f"  Total combinations: {total_runs}")
     if parallel:
@@ -217,7 +238,7 @@ def run_incremental_optimization(symbols, timeframes, pattern_types, verbose=Fal
         symbols=symbols,
         timeframes=timeframes,
         pattern_types=pattern_types,
-        parameter_grid=QUICK_PARAMETER_GRID,
+        parameter_grid=param_grid,
         progress_callback=callback,
         parallel=parallel,
         max_workers=max_workers
@@ -279,17 +300,18 @@ def show_results():
         print("No optimization results found (min 5 trades required)")
         return
 
-    print(f"\n{'Symbol':<12} {'TF':<5} {'Pattern':<15} {'RR':<5} {'SL%':<5} {'Trades':<7} {'Win%':<7} {'Profit%':<10} {'Sharpe':<8}")
-    print('-' * 90)
+    print(f"\n{'Symbol':<12} {'TF':<5} {'Pattern':<15} {'RR':<5} {'SL%':<5} {'Exp':<5} {'Trades':<7} {'Win%':<7} {'Profit%':<10} {'Sharpe':<8}")
+    print('-' * 100)
 
     best_profit = runs[0].total_profit_pct if runs else 0
 
     for i, run in enumerate(runs[:50]):  # Top 50
         is_best = run.total_profit_pct == best_profit
         marker = '*' if is_best else ' '
+        expiry = run.expiry_multiplier if run.expiry_multiplier else 1.0
 
         print(f"{marker}{run.symbol:<11} {run.timeframe:<5} {run.pattern_type:<15} "
-              f"{run.rr_target:<5} {run.sl_buffer_pct:<5} {run.total_trades:<7} "
+              f"{run.rr_target:<5} {run.sl_buffer_pct:<5} {expiry:<5} {run.total_trades:<7} "
               f"{run.win_rate or 0:<7.1f} {run.total_profit_pct or 0:<10.2f} "
               f"{run.sharpe_ratio or 0:<8.2f}")
 
@@ -388,6 +410,8 @@ def main():
     parser.add_argument('-t', '--timeframes', type=str, default='1m,5m,15m,30m,1h,2h,4h,1d', help='Comma-separated timeframes')
     parser.add_argument('--patterns', type=str, default='imbalance,order_block,liquidity_sweep',
                         help='Comma-separated pattern types')
+    parser.add_argument('-e', '--expiry', type=str, default='0.5,1.0,2.0',
+                        help='Comma-separated expiry multipliers (default: 0.5,1.0,2.0)')
     parser.add_argument('-f', '--full', action='store_true',
                         help='Full mode: re-run ALL combinations (creates new job, ignores existing)')
     parser.add_argument('-l', '--list', action='store_true', help='List all jobs')
@@ -416,9 +440,10 @@ def main():
             symbols = [args.symbol.strip()]
             timeframes = [t.strip() for t in args.timeframes.split(',')]
             patterns = [p.strip() for p in args.patterns.split(',')]
+            expiry_multipliers = [float(e.strip()) for e in args.expiry.split(',')]
             # Default is incremental, --full overrides to full mode
             incremental = not args.full
-            run_optimization(symbols, timeframes, patterns, args.verbose, incremental, args.parallel, args.workers)
+            run_optimization(symbols, timeframes, patterns, args.verbose, incremental, args.parallel, args.workers, expiry_multipliers)
         elif args.all_symbols:
             active_symbols = Symbol.query.filter_by(is_active=True).all()
             if not active_symbols:
@@ -427,9 +452,10 @@ def main():
             symbols = [s.symbol for s in active_symbols]
             timeframes = [t.strip() for t in args.timeframes.split(',')]
             patterns = [p.strip() for p in args.patterns.split(',')]
+            expiry_multipliers = [float(e.strip()) for e in args.expiry.split(',')]
             # Default is incremental, --full overrides to full mode
             incremental = not args.full
-            run_optimization(symbols, timeframes, patterns, args.verbose, incremental, args.parallel, args.workers)
+            run_optimization(symbols, timeframes, patterns, args.verbose, incremental, args.parallel, args.workers, expiry_multipliers)
         else:
             parser.print_help()
             print("\nExamples:")

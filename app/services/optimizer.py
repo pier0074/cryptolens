@@ -67,7 +67,7 @@ TIMEFRAME_MS = {
 MIN_CANDLES_AFTER_PATTERN = 5
 
 
-def get_pattern_expiry_candles(timeframe: str) -> int:
+def get_pattern_expiry_candles(timeframe: str, expiry_multiplier: float = 1.0) -> int:
     """
     Get pattern expiry duration in candles from Config.PATTERN_EXPIRY_HOURS.
 
@@ -77,7 +77,11 @@ def get_pattern_expiry_candles(timeframe: str) -> int:
     Uses the SAME expiry logic as production patterns (Pattern.expires_at),
     ensuring backtesting matches live trading behavior.
 
-    Production expiry hours by timeframe:
+    Args:
+        timeframe: Candle timeframe (e.g., '1h', '4h')
+        expiry_multiplier: Multiplier for expiry duration (1.0 = default, 0.5 = half, 2.0 = double)
+
+    Production expiry hours by timeframe (at 1.0x multiplier):
         1m: 4h = 240 candles
         5m: 12h = 144 candles
         15m: 24h = 96 candles
@@ -90,8 +94,9 @@ def get_pattern_expiry_candles(timeframe: str) -> int:
     from app.config import Config
 
     expiry_hours = Config.PATTERN_EXPIRY_HOURS.get(timeframe, Config.DEFAULT_PATTERN_EXPIRY_HOURS)
+    expiry_hours = expiry_hours * expiry_multiplier
     minutes_per_candle = TIMEFRAME_MS.get(timeframe, 60 * 60 * 1000) // (60 * 1000)
-    return int((expiry_hours * 60) / minutes_per_candle)
+    return max(1, int((expiry_hours * 60) / minutes_per_candle))
 
 
 # Backward compatibility alias
@@ -997,6 +1002,7 @@ class ParameterOptimizer:
             entry_method=params.get('entry_method', 'zone_edge'),
             min_zone_pct=params.get('min_zone_pct', 0.15),
             use_overlap=params.get('use_overlap', True),
+            expiry_multiplier=params.get('expiry_multiplier', 1.0),
             status='completed',
             total_trades=stats['total_trades'],
             winning_trades=stats['winning_trades'],
@@ -1437,6 +1443,7 @@ class ParameterOptimizer:
             entry_method=params.get('entry_method', 'zone_edge'),
             min_zone_pct=min_zone_pct,
             use_overlap=use_overlap,
+            expiry_multiplier=params.get('expiry_multiplier', 1.0),
             status='completed',
             total_trades=stats['total_trades'],
             winning_trades=stats['winning_trades'],
@@ -1518,6 +1525,7 @@ class ParameterOptimizer:
                 entry_method=params.get('entry_method', 'zone_edge'),
                 min_zone_pct=params.get('min_zone_pct', 0.15),
                 use_overlap=params.get('use_overlap', True),
+                expiry_multiplier=params.get('expiry_multiplier', 1.0),
                 status='completed',
                 total_trades=stats['total_trades'],
                 winning_trades=stats['winning_trades'],
@@ -1560,6 +1568,7 @@ class ParameterOptimizer:
             entry_method=params.get('entry_method', 'zone_edge'),
             min_zone_pct=params.get('min_zone_pct', 0.15),
             use_overlap=params.get('use_overlap', True),
+            expiry_multiplier=params.get('expiry_multiplier', 1.0),
             status='failed',
             error_message=error_message,
         )
@@ -1572,9 +1581,10 @@ class ParameterOptimizer:
         rr_target = params.get('rr_target', 2.0)
         sl_buffer_pct = params.get('sl_buffer_pct', 10.0) / 100.0
         entry_method = params.get('entry_method', 'zone_edge')
+        expiry_multiplier = params.get('expiry_multiplier', 1.0)
 
         # Pattern expiry: how long zone is valid for entry (trade stays open until SL/TP)
-        pattern_expiry_candles = get_pattern_expiry_candles(timeframe)
+        pattern_expiry_candles = get_pattern_expiry_candles(timeframe, expiry_multiplier)
 
         for pattern in patterns:
             entry_idx = pattern['detected_at']
@@ -2249,10 +2259,11 @@ class ParameterOptimizer:
         """
         rr_target = params.get('rr_target', 2.0)
         sl_buffer_pct = params.get('sl_buffer_pct', 10.0)
+        expiry_multiplier = params.get('expiry_multiplier', 1.0)
 
         # Find existing run
         existing = OptimizationRun.find_existing(
-            symbol, timeframe, pattern_type, rr_target, sl_buffer_pct
+            symbol, timeframe, pattern_type, rr_target, sl_buffer_pct, expiry_multiplier
         )
 
         # Get all available VERIFIED candles (for accurate incremental updates)
@@ -2355,6 +2366,7 @@ class ParameterOptimizer:
                 entry_method=params.get('entry_method', 'zone_edge'),
                 min_zone_pct=params.get('min_zone_pct', 0.15),
                 use_overlap=params.get('use_overlap', True),
+                expiry_multiplier=expiry_multiplier,
                 status='completed',
                 total_trades=stats['total_trades'],
                 winning_trades=stats['winning_trades'],
@@ -2486,6 +2498,7 @@ class ParameterOptimizer:
                 entry_method=params.get('entry_method', 'zone_edge'),
                 min_zone_pct=params.get('min_zone_pct', 0.15),
                 use_overlap=params.get('use_overlap', True),
+                expiry_multiplier=expiry_multiplier,
                 status='completed',
                 total_trades=stats['total_trades'],
                 winning_trades=stats['winning_trades'],
@@ -2528,9 +2541,10 @@ class ParameterOptimizer:
         rr_target = params.get('rr_target', 2.0)
         sl_buffer_pct = params.get('sl_buffer_pct', 10.0) / 100.0
         entry_method = params.get('entry_method', 'zone_edge')
+        expiry_multiplier = params.get('expiry_multiplier', 1.0)
 
         # Pattern expiry: how long zone is valid for entry (trade stays open until SL/TP)
-        pattern_expiry_candles = get_pattern_expiry_candles(timeframe)
+        pattern_expiry_candles = get_pattern_expiry_candles(timeframe, expiry_multiplier)
 
         highs = ohlcv['high']
         lows = ohlcv['low']
@@ -2874,9 +2888,10 @@ class ParameterOptimizer:
         rr_target = params.get('rr_target', 2.0)
         sl_buffer_pct = params.get('sl_buffer_pct', 10.0) / 100.0
         entry_method = params.get('entry_method', 'zone_edge')
+        expiry_multiplier = params.get('expiry_multiplier', 1.0)
 
         # Pattern expiry: how long zone is valid for entry (trade stays open until SL/TP)
-        pattern_expiry_candles = get_pattern_expiry_candles(timeframe)
+        pattern_expiry_candles = get_pattern_expiry_candles(timeframe, expiry_multiplier)
 
         for pattern in patterns:
             entry_idx = pattern['detected_at']

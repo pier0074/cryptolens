@@ -17,7 +17,10 @@ PARAMETER_GRID = {
     'min_zone_pct': [0.15],
     'tp_method': ['fixed_rr'],
     'entry_method': ['zone_edge'],
-    'use_overlap': [True]
+    'use_overlap': [True],
+    # Pattern expiry multiplier: 1.0 = use Config default, 0.5 = half expiry, 2.0 = double
+    # This controls how long a pattern zone stays valid for entry
+    'expiry_multiplier': [0.5, 1.0, 2.0],
 }
 
 # Aliases for backwards compatibility
@@ -160,6 +163,7 @@ class OptimizationRun(db.Model):
     entry_method = db.Column(db.String(20), nullable=False, default='zone_edge')
     min_zone_pct = db.Column(db.Float, nullable=False, default=0.15)
     use_overlap = db.Column(db.Boolean, default=True)
+    expiry_multiplier = db.Column(db.Float, nullable=False, default=1.0)
 
     # Results
     status = db.Column(db.String(20), default='pending')
@@ -217,7 +221,7 @@ class OptimizationRun(db.Model):
         self.open_trades_json = json.dumps(value) if value else None
 
     @classmethod
-    def find_existing(cls, symbol, timeframe, pattern_type, rr_target, sl_buffer_pct):
+    def find_existing(cls, symbol, timeframe, pattern_type, rr_target, sl_buffer_pct, expiry_multiplier=1.0):
         """Find existing completed run with same parameters for incremental update"""
         from sqlalchemy import case
         # MySQL doesn't support NULLS LAST, use CASE to sort NULLs to end
@@ -227,6 +231,7 @@ class OptimizationRun(db.Model):
             cls.pattern_type == pattern_type,
             cls.rr_target == rr_target,
             cls.sl_buffer_pct == sl_buffer_pct,
+            cls.expiry_multiplier == expiry_multiplier,
             cls.status == 'completed'
         ).order_by(
             case((cls.last_candle_timestamp.is_(None), 1), else_=0),
@@ -243,6 +248,7 @@ class OptimizationRun(db.Model):
             'entry_method': self.entry_method,
             'min_zone_pct': self.min_zone_pct,
             'use_overlap': self.use_overlap,
+            'expiry_multiplier': self.expiry_multiplier,
         }
 
     def to_dict(self):

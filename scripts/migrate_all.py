@@ -120,6 +120,7 @@ def migrate():
                 'is_incremental': 'BOOLEAN DEFAULT 0',
                 'base_run_id': 'INTEGER',
                 'updated_at': 'DATETIME',
+                'expiry_multiplier': 'FLOAT DEFAULT 1.0',
             }
             for col, col_type in opt_cols.items():
                 add_column_if_not_exists('optimization_runs', col, col_type, changes)
