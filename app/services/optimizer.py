@@ -660,37 +660,53 @@ class ParameterOptimizer:
         total_runs = len(symbols) * len(timeframes) * len(pattern_types) * len(param_combinations)
 
         try:
-            # Process each symbol using shared _process_symbol() method
+            # Process each symbol with detailed phase logging
             for symbol in symbols:
                 print(f"\n{'='*60}", flush=True)
-                print(f"[{symbol}] Starting optimization...", flush=True)
+                print(f"Processing {symbol}...", flush=True)
 
-                symbol_result = self._process_symbol(
-                    symbol=symbol,
-                    timeframes=timeframes,
-                    pattern_types=pattern_types,
-                    parameter_grid=param_grid,
+                # Phase 1: Load candle data (with detailed logging)
+                data_cache = self._load_candle_data_phase([symbol], timeframes)
+
+                # Check if we have data
+                has_data = any(
+                    data_cache.get((symbol, tf), (None, None, None))[0] is not None
+                    for tf in timeframes
                 )
-
-                if symbol_result.get('error'):
-                    print(f"  [{symbol}] ✗ Error - {symbol_result['error']}", flush=True)
-                    # Mark all as failed for this symbol
+                if not has_data:
+                    print(f"  ✗ {symbol}: No data available", flush=True)
                     for tf in timeframes:
                         for pt in pattern_types:
                             for params in param_combinations:
                                 self._create_failed_run(
                                     job, symbol, tf, pt,
                                     dict(zip(param_grid.keys(), params)),
-                                    symbol_result['error']
+                                    'No data available'
                                 )
                                 failed += 1
+                    del data_cache
                     continue
+
+                # Phase 2: Detect patterns (with detailed logging)
+                pattern_cache = self._detect_patterns_phase(
+                    [symbol], timeframes, pattern_types, param_grid, data_cache
+                )
+
+                # Phase 3: Parameter sweep (with detailed logging)
+                results, sweep_best = self._run_sweep_phase(
+                    [symbol], timeframes, pattern_types, param_grid,
+                    data_cache, pattern_cache
+                )
+
+                # Free memory
+                del data_cache
+                del pattern_cache
 
                 # Create OptimizationRun records from results
                 symbol_completed = 0
                 symbol_failed = 0
 
-                for r in symbol_result['results']:
+                for r in results:
                     if r['status'] == 'completed':
                         run = self._create_run_from_result(job, r)
                         completed += 1
@@ -718,7 +734,7 @@ class ParameterOptimizer:
                         db.session.commit()
                         pending_commits = 0
 
-                print(f"  [{symbol}] ✓ {symbol_completed} completed, {symbol_failed} failed", flush=True)
+                print(f"  ✓ {symbol}: {symbol_completed} completed, {symbol_failed} failed", flush=True)
 
             # Final commit
             if pending_commits > 0:
@@ -1835,7 +1851,7 @@ class ParameterOptimizer:
         best_result = None
         best_profit = float('-inf')
 
-        # Process ONE SYMBOL AT A TIME using shared _process_symbol() method
+        # Process ONE SYMBOL AT A TIME with detailed phase logging
         for symbol in symbols:
             # Pre-load existing runs for this symbol only
             existing_runs = {}
@@ -1850,26 +1866,15 @@ class ParameterOptimizer:
                 existing_runs[key] = run
 
             print(f"\n{'='*60}", flush=True)
-            print(f"[{symbol}] Starting incremental optimization...", flush=True)
+            print(f"Processing {symbol}...", flush=True)
 
-            # Use shared _process_symbol() method
-            symbol_result = self._process_symbol(
-                symbol=symbol,
-                timeframes=timeframes,
-                pattern_types=pattern_types,
-                parameter_grid=parameter_grid,
-            )
-
-            if symbol_result.get('error'):
-                print(f"  [{symbol}] ✗ Error - {symbol_result['error']}", flush=True)
-                param_combinations = list(itertools.product(*parameter_grid.values()))
-                total_errors += len(timeframes) * len(pattern_types) * len(param_combinations)
-                continue
+            # Phase 1: Load candle data (with detailed logging)
+            data_cache = self._load_candle_data_phase([symbol], timeframes)
 
             # Check if we have new data compared to existing runs
             has_new_data = False
             for timeframe in timeframes:
-                cached = symbol_result['data_cache'].get((symbol, timeframe))
+                cached = data_cache.get((symbol, timeframe))
                 if cached and cached[2]:  # last_candle_ts
                     last_candle_ts = cached[2]
                     # Check if any existing run for this timeframe has older data
@@ -1890,15 +1895,31 @@ class ParameterOptimizer:
                 param_combinations = list(itertools.product(*parameter_grid.values()))
                 skip_count = len(timeframes) * len(pattern_types) * len(param_combinations)
                 total_skipped += skip_count
-                print(f"  [{symbol}] ⏭ Skipped - No new candles since last run", flush=True)
+                print(f"  ⏭ Skipped {symbol}: No new candles since last run", flush=True)
+                del data_cache  # Free memory
                 continue
+
+            # Phase 2: Detect patterns (with detailed logging)
+            pattern_cache = self._detect_patterns_phase(
+                [symbol], timeframes, pattern_types, parameter_grid, data_cache
+            )
+
+            # Phase 3: Parameter sweep (with detailed logging)
+            results, sweep_best = self._run_sweep_phase(
+                [symbol], timeframes, pattern_types, parameter_grid,
+                data_cache, pattern_cache
+            )
+
+            # Free memory after processing
+            del data_cache
+            del pattern_cache
 
             # Create/update records from results
             pending_commits = 0
             symbol_updated = 0
             symbol_new = 0
 
-            for r in symbol_result['results']:
+            for r in results:
                 params = r['params']
                 rr_target = params.get('rr_target', 2.0)
                 sl_buffer_pct = params.get('sl_buffer_pct', 10.0)
@@ -1929,7 +1950,7 @@ class ParameterOptimizer:
             if pending_commits > 0:
                 db.session.commit()
 
-            print(f"  [{symbol}] ✓ {symbol_new} new, {symbol_updated} updated", flush=True)
+            print(f"  ✓ {symbol}: {symbol_new} new, {symbol_updated} updated", flush=True)
 
         # Build best result dict
         best_result_dict = None
