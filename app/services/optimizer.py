@@ -2142,15 +2142,23 @@ class ParameterOptimizer:
             }
 
             # Process results as they complete
+            total_symbols = len(symbols)
             for future in as_completed(future_to_symbol):
                 symbol = future_to_symbol[future]
                 completed_symbols += 1
+
+                # Show progress bar
+                pct = int(completed_symbols / total_symbols * 100)
+                bar_len = 30
+                filled = int(bar_len * completed_symbols / total_symbols)
+                bar = '=' * filled + '-' * (bar_len - filled)
+                print(f"\r  Progress: [{bar}] {pct}% ({completed_symbols}/{total_symbols} symbols)", end='', flush=True)
 
                 try:
                     worker_result = future.result()
 
                     if worker_result.get('error'):
-                        print(f"  ✗ {symbol}: Error - {worker_result['error']}", flush=True)
+                        print(f"\n  ✗ {symbol}: Error - {worker_result['error']}", flush=True)
                         param_combinations = list(itertools.product(*parameter_grid.values()))
                         total_errors += len(timeframes) * len(pattern_types) * len(param_combinations)
                         continue
@@ -2201,11 +2209,10 @@ class ParameterOptimizer:
                     total_new_runs += symbol_new
                     total_errors += symbol_errors
 
-                    print(f"  [{symbol}] ✓ {symbol_new} new, {symbol_updated} updated "
-                          f"[{completed_symbols}/{len(symbols)}]", flush=True)
+                    print(f"\n  ✓ {symbol}: {symbol_new} new, {symbol_updated} updated", flush=True)
 
                 except Exception as e:
-                    print(f"  [{symbol}] ✗ Exception - {str(e)}", flush=True)
+                    print(f"\n  ✗ {symbol}: Exception - {str(e)}", flush=True)
                     param_combinations = list(itertools.product(*parameter_grid.values()))
                     total_errors += len(timeframes) * len(pattern_types) * len(param_combinations)
 
