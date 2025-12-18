@@ -936,85 +936,10 @@ class TestParallelVsSequentialConsistency:
     These tests ensure CRITICAL-8 fix (parallel processing) doesn't change output.
     """
 
-    def test_worker_trade_simulation_matches_optimizer(self, app):
-        """Verify worker trade simulation produces same results as optimizer method."""
-        from app.services.optimizer import (
-            ParameterOptimizer, _simulate_trades_worker, _calculate_statistics_worker
-        )
-        from app.services.patterns.fair_value_gap import FVGDetector
-
-        with app.app_context():
-            np.random.seed(42)
-            n_candles = 500
-
-            # Create test data
-            timestamps = [1700000000000 + i * 3600000 for i in range(n_candles)]
-            prices = 100 + np.cumsum(np.random.randn(n_candles) * 0.5)
-            highs = prices + np.abs(np.random.randn(n_candles)) * 0.5
-            lows = prices - np.abs(np.random.randn(n_candles)) * 0.5
-            opens = prices + np.random.randn(n_candles) * 0.1
-            closes = prices + np.random.randn(n_candles) * 0.1
-
-            highs = np.maximum(highs, np.maximum(opens, closes))
-            lows = np.minimum(lows, np.minimum(opens, closes))
-
-            # Create FVG gaps
-            for i in range(20, n_candles - 5, 25):
-                highs[i] = lows[i+2] - 0.3
-
-            df = pd.DataFrame({
-                'timestamp': timestamps,
-                'open': opens,
-                'high': highs,
-                'low': lows,
-                'close': closes,
-                'volume': np.random.randint(1000, 10000, n_candles).astype(float)
-            })
-
-            # Detect patterns
-            detector = FVGDetector()
-            patterns = detector.detect_historical(df, min_zone_pct=0.15, skip_overlap=True)
-
-            # Create ohlcv arrays
-            optimizer = ParameterOptimizer()
-            ohlcv = optimizer._df_to_arrays(df)
-
-            params = {
-                'rr_target': 2.0,
-                'sl_buffer_pct': 10.0,
-                'entry_method': 'zone_edge',
-            }
-
-            # Run both implementations
-            trades_optimizer = optimizer._simulate_trades_fast(ohlcv, patterns, params)
-            trades_worker = _simulate_trades_worker(ohlcv, patterns, params)
-
-            stats_optimizer = optimizer._calculate_statistics(trades_optimizer)
-            stats_worker = _calculate_statistics_worker(trades_worker)
-
-            # Results MUST match exactly
-            assert len(trades_optimizer) == len(trades_worker), \
-                f"Trade count mismatch: optimizer={len(trades_optimizer)}, worker={len(trades_worker)}"
-
-            # Compare each trade
-            for i, (t_opt, t_wrk) in enumerate(zip(trades_optimizer, trades_worker)):
-                assert t_opt['result'] == t_wrk['result'], \
-                    f"Trade {i} result mismatch: {t_opt['result']} vs {t_wrk['result']}"
-                assert abs(t_opt['profit_pct'] - t_wrk['profit_pct']) < 0.0001, \
-                    f"Trade {i} profit mismatch: {t_opt['profit_pct']} vs {t_wrk['profit_pct']}"
-
-            # Compare statistics
-            assert stats_optimizer['total_trades'] == stats_worker['total_trades']
-            assert stats_optimizer['win_rate'] == stats_worker['win_rate']
-            assert abs(stats_optimizer['total_profit_pct'] - stats_worker['total_profit_pct']) < 0.01
-
-            print(f"\n=== WORKER VS OPTIMIZER COMPARISON ===")
-            print(f"Patterns: {len(patterns)}")
-            print(f"Trades: {len(trades_optimizer)}")
-            print(f"Win rate: {stats_optimizer['win_rate']}%")
-            print(f"Total profit: {stats_optimizer['total_profit_pct']}%")
-            print(f"Results: IDENTICAL ✓")
-            print(f"========================================\n")
+    # Note: test_worker_trade_simulation_matches_optimizer removed as the duplicated
+    # _simulate_trades_worker and _calculate_statistics_worker functions were dead code
+    # and have been removed. The parallel processing now uses _process_symbol_worker
+    # which creates a full optimizer instance and uses the class methods directly.
 
     def test_parallel_worker_produces_valid_results(self, app):
         """Test that parallel worker function produces valid results."""

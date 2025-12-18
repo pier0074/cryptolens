@@ -125,7 +125,10 @@ class LiquiditySweepDetector(PatternDetector):
         precomputed: dict = None
     ) -> List[Dict[str, Any]]:
         """
-        Detect Liquidity Sweeps in the given symbol/timeframe
+        Detect Liquidity Sweeps in the given symbol/timeframe.
+
+        Uses detect_historical() for pattern detection (shared algorithm),
+        then filters by DB overlap and saves to database.
 
         Args:
             symbol: Trading pair (e.g., 'BTC/USDT')
@@ -147,77 +150,30 @@ class LiquiditySweepDetector(PatternDetector):
         if not sym:
             return []
 
+        # Use shared detection algorithm (skip_overlap=True since we check DB overlap below)
+        raw_patterns = self.detect_historical(df, skip_overlap=True)
+
+        # Filter by DB overlap and save valid patterns
         patterns = []
+        for raw in raw_patterns:
+            zone_low = raw['zone_low']
+            zone_high = raw['zone_high']
+            direction = raw['direction']
+            detected_at = raw['detected_ts']
+            swept_level = raw.get('swept_level')
 
-        # Find swing points
-        swing_highs, swing_lows = self.find_swing_points(df, lookback=3)
-
-        # Look for liquidity sweeps in recent candles
-        for i in range(len(df) - 10, len(df)):
-            if i < 0:
+            # Check DB overlap (production uses persistent pattern storage)
+            if self.has_overlapping_pattern(sym.id, timeframe, direction, zone_low, zone_high):
                 continue
 
-            current = df.iloc[i]
-
-            # Check for bullish sweep (sweep of lows)
-            for swing_low in swing_lows:
-                # Skip if swing is too recent or after current candle
-                if swing_low['index'] >= i - 3 or swing_low['index'] < i - 50:
-                    continue
-
-                # Check if current candle swept the low and reversed
-                if current['low'] < swing_low['price'] and current['close'] > swing_low['price']:
-                    # This is a bullish liquidity sweep
-                    zone_low = current['low']
-                    zone_high = swing_low['price']
-
-                    # Skip zones that are too small to trade
-                    if not self.is_zone_tradeable(zone_low, zone_high):
-                        continue
-
-                    # Skip if overlapping pattern already exists (70% threshold)
-                    if self.has_overlapping_pattern(sym.id, timeframe, 'bullish', zone_low, zone_high):
-                        continue
-
-                    pattern_dict = self.save_pattern(
-                        sym.id, timeframe, 'bullish', zone_low, zone_high,
-                        int(current['timestamp']), symbol, df,
-                        precomputed=precomputed
-                    )
-                    if pattern_dict:
-                        pattern_dict['swept_level'] = swing_low['price']
-                        patterns.append(pattern_dict)
-                    break  # Only one sweep per candle
-
-            # Check for bearish sweep (sweep of highs)
-            for swing_high in swing_highs:
-                # Skip if swing is too recent or after current candle
-                if swing_high['index'] >= i - 3 or swing_high['index'] < i - 50:
-                    continue
-
-                # Check if current candle swept the high and reversed
-                if current['high'] > swing_high['price'] and current['close'] < swing_high['price']:
-                    # This is a bearish liquidity sweep
-                    zone_high = current['high']
-                    zone_low = swing_high['price']
-
-                    # Skip zones that are too small to trade
-                    if not self.is_zone_tradeable(zone_low, zone_high):
-                        continue
-
-                    # Skip if overlapping pattern already exists (70% threshold)
-                    if self.has_overlapping_pattern(sym.id, timeframe, 'bearish', zone_low, zone_high):
-                        continue
-
-                    pattern_dict = self.save_pattern(
-                        sym.id, timeframe, 'bearish', zone_low, zone_high,
-                        int(current['timestamp']), symbol, df,
-                        precomputed=precomputed
-                    )
-                    if pattern_dict:
-                        pattern_dict['swept_level'] = swing_high['price']
-                        patterns.append(pattern_dict)
-                    break  # Only one sweep per candle
+            pattern_dict = self.save_pattern(
+                sym.id, timeframe, direction, zone_low, zone_high, detected_at, symbol, df,
+                precomputed=precomputed
+            )
+            if pattern_dict:
+                if swept_level:
+                    pattern_dict['swept_level'] = swept_level
+                patterns.append(pattern_dict)
 
         # Don't commit here - let caller batch commits
         return patterns

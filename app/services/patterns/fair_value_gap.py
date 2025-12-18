@@ -33,7 +33,10 @@ class FVGDetector(PatternDetector):
         precomputed: dict = None
     ) -> List[Dict[str, Any]]:
         """
-        Detect Fair Value Gaps in the given symbol/timeframe
+        Detect Fair Value Gaps in the given symbol/timeframe.
+
+        Uses detect_historical() for pattern detection (shared algorithm),
+        then filters by DB overlap and saves to database.
 
         Args:
             symbol: Trading pair (e.g., 'BTC/USDT')
@@ -55,52 +58,32 @@ class FVGDetector(PatternDetector):
         if not sym:
             return []
 
+        # Use shared detection algorithm (skip_overlap=True since we check DB overlap below)
+        raw_patterns = self.detect_historical(df, skip_overlap=True)
+
+        # Filter by DB overlap and save valid patterns
         patterns = []
+        for raw in raw_patterns:
+            zone_low = raw['zone_low']
+            zone_high = raw['zone_high']
+            direction = raw['direction']
+            detected_at = raw['detected_ts']
 
-        for i in range(2, len(df)):
-            c1 = df.iloc[i - 2]  # First candle
-            c3 = df.iloc[i]      # Third candle
+            # Check DB overlap (production uses persistent pattern storage)
+            if self.has_overlapping_pattern(sym.id, timeframe, direction, zone_low, zone_high):
+                continue
 
-            # Bullish FVG: Gap between c1 high and c3 low
-            if c1['high'] < c3['low']:
-                zone_low = c1['high']
-                zone_high = c3['low']
-                detected_at = int(c3['timestamp'])
-
-                if self._should_save_pattern(sym.id, timeframe, 'bullish', zone_low, zone_high):
-                    pattern_dict = self.save_pattern(
-                        sym.id, timeframe, 'bullish', zone_low, zone_high, detected_at, symbol, df,
-                        precomputed=precomputed
-                    )
-                    if pattern_dict:
-                        patterns.append(pattern_dict)
-
-            # Bearish FVG: Gap between c1 low and c3 high
-            if c1['low'] > c3['high']:
-                zone_high = c1['low']
-                zone_low = c3['high']
-                detected_at = int(c3['timestamp'])
-
-                if self._should_save_pattern(sym.id, timeframe, 'bearish', zone_low, zone_high):
-                    pattern_dict = self.save_pattern(
-                        sym.id, timeframe, 'bearish', zone_low, zone_high, detected_at, symbol, df,
-                        precomputed=precomputed
-                    )
-                    if pattern_dict:
-                        patterns.append(pattern_dict)
+            pattern_dict = self.save_pattern(
+                sym.id, timeframe, direction, zone_low, zone_high, detected_at, symbol, df,
+                precomputed=precomputed
+            )
+            if pattern_dict:
+                patterns.append(pattern_dict)
 
         # Don't commit here - let caller batch commits
         return patterns
 
-    def _should_save_pattern(
-        self, symbol_id: int, timeframe: str, direction: str, zone_low: float, zone_high: float
-    ) -> bool:
-        """Check if pattern should be saved (passes all validation)"""
-        if not self.is_zone_tradeable(zone_low, zone_high):
-            return False
-        if self.has_overlapping_pattern(symbol_id, timeframe, direction, zone_low, zone_high):
-            return False
-        return True
+    # Note: _should_save_pattern() removed - detect() now uses detect_historical() + DB overlap check
 
     def detect_historical(
         self,

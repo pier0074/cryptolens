@@ -38,7 +38,10 @@ class OrderBlockDetector(PatternDetector):
         precomputed: dict = None
     ) -> List[Dict[str, Any]]:
         """
-        Detect Order Blocks in the given symbol/timeframe
+        Detect Order Blocks in the given symbol/timeframe.
+
+        Uses detect_historical() for pattern detection (shared algorithm),
+        then filters by DB overlap and saves to database.
 
         Args:
             symbol: Trading pair (e.g., 'BTC/USDT')
@@ -60,87 +63,32 @@ class OrderBlockDetector(PatternDetector):
         if not sym:
             return []
 
-        # Store precomputed for use in _find_opposing_candle
-        self._precomputed = precomputed
+        # Use shared detection algorithm (skip_overlap=True since we check DB overlap below)
+        raw_patterns = self.detect_historical(df, skip_overlap=True)
 
+        # Filter by DB overlap and save valid patterns
         patterns = []
+        for raw in raw_patterns:
+            zone_low = raw['zone_low']
+            zone_high = raw['zone_high']
+            direction = raw['direction']
+            detected_at = raw['detected_ts']
 
-        # Calculate candle body and move strength
-        df = df.copy()  # Avoid modifying original
-        df['body'] = df['close'] - df['open']
-        df['body_size'] = abs(df['body'])
-        df['is_bullish'] = df['body'] > 0
-        df['is_bearish'] = df['body'] < 0
-
-        # Calculate average body size for comparison
-        avg_body = df['body_size'].rolling(20).mean()
-
-        for i in range(3, len(df) - 1):
-            current_body = df.iloc[i]['body_size']
-
-            if pd.isna(avg_body.iloc[i]) or avg_body.iloc[i] == 0:
+            # Check DB overlap (production uses persistent pattern storage)
+            if self.has_overlapping_pattern(sym.id, timeframe, direction, zone_low, zone_high):
                 continue
 
-            # Check for strong move (body larger than threshold * average)
-            is_strong_move = current_body > (avg_body.iloc[i] * Config.ORDER_BLOCK_STRENGTH_MULTIPLIER)
-            if not is_strong_move:
-                continue
-
-            detected_at = int(df.iloc[i]['timestamp'])
-
-            # Bullish Order Block: Last bearish candle before strong bullish move
-            if df.iloc[i]['is_bullish']:
-                pattern = self._find_opposing_candle(
-                    df, i, 'bearish', sym.id, timeframe, symbol, detected_at
-                )
-                if pattern:
-                    patterns.append(pattern)
-
-            # Bearish Order Block: Last bullish candle before strong bearish move
-            elif df.iloc[i]['is_bearish']:
-                pattern = self._find_opposing_candle(
-                    df, i, 'bullish', sym.id, timeframe, symbol, detected_at
-                )
-                if pattern:
-                    patterns.append(pattern)
+            pattern_dict = self.save_pattern(
+                sym.id, timeframe, direction, zone_low, zone_high, detected_at, symbol, df,
+                precomputed=precomputed
+            )
+            if pattern_dict:
+                patterns.append(pattern_dict)
 
         # Don't commit here - let caller batch commits
-        self._precomputed = None
         return patterns
 
-    def _find_opposing_candle(
-        self,
-        df: pd.DataFrame,
-        current_idx: int,
-        candle_type: str,
-        symbol_id: int,
-        timeframe: str,
-        symbol_name: str,
-        detected_at: int
-    ) -> Dict[str, Any]:
-        """Find the last opposing candle and create order block pattern"""
-        is_opposing = 'is_bearish' if candle_type == 'bearish' else 'is_bullish'
-        direction = 'bullish' if candle_type == 'bearish' else 'bearish'
-
-        # Look for the last opposing candle in the previous 3 candles
-        for j in range(current_idx - 1, max(current_idx - 4, 0), -1):
-            if df.iloc[j][is_opposing]:
-                zone_high = max(df.iloc[j]['open'], df.iloc[j]['close'])
-                zone_low = min(df.iloc[j]['open'], df.iloc[j]['close'])
-
-                # Check if pattern should be saved
-                if not self.is_zone_tradeable(zone_low, zone_high):
-                    continue
-                if self.has_overlapping_pattern(symbol_id, timeframe, direction, zone_low, zone_high):
-                    continue
-
-                pattern_dict = self.save_pattern(
-                    symbol_id, timeframe, direction, zone_low, zone_high, detected_at, symbol_name, df,
-                    precomputed=self._precomputed
-                )
-                return pattern_dict
-
-        return None
+    # Note: _find_opposing_candle() removed - detect() now uses detect_historical() + DB overlap check
 
     def detect_historical(
         self,
