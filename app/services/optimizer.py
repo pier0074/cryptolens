@@ -361,7 +361,7 @@ class ParameterOptimizer:
             total_combos = len(param_combinations) * len(timeframes) * len(pattern_types)
             best_profit = float('-inf')
 
-            print(f"\n[Phase 3/3] Running parameter sweep ({total_combos:,} combinations)...", flush=True)
+            print(f"\n[Phase 3/3] [{symbol}] Running parameter sweep ({total_combos:,} combinations)...", flush=True)
 
             for timeframe in timeframes:
                 cached = result['data_cache'].get((symbol, timeframe), (None, None, None, None))
@@ -729,7 +729,7 @@ class ParameterOptimizer:
         total = len(symbols) * len(timeframes) * len(pattern_types) * len(param_combinations)
 
         phase3_start = datetime.now(timezone.utc)
-        print(f"\n[Phase 3/3] Running parameter sweep ({total:,} combinations)...", flush=True)
+        print(f"\n[Phase 3/3] Running parameter sweep ({total:,} combinations across {len(symbols)} symbol(s))...", flush=True)
 
         results = []
         best_result = None
@@ -737,6 +737,8 @@ class ParameterOptimizer:
         processed = 0
 
         for symbol in symbols:
+            symbol_combos = len(timeframes) * len(pattern_types) * len(param_combinations)
+            print(f"  [{symbol}] Processing {symbol_combos:,} combinations...", flush=True)
             for timeframe in timeframes:
                 cached = data_cache.get((symbol, timeframe), (None, None, None, None))
                 df, ohlcv_arrays = cached[0], cached[1]
