@@ -63,22 +63,32 @@ TIMEFRAME_MS = {
     '1d': 24 * 60 * 60 * 1000,
 }
 
-# Maximum candles to look ahead for trade resolution (shared with backtester.py)
-# Higher timeframes need shorter lookback (measured in candles)
-MAX_TRADE_DURATION_BY_TF = {
-    '1m': 2880,   # 48 hours (allows longer intraday trades)
-    '5m': 576,    # 48 hours
-    '15m': 192,   # 48 hours
-    '30m': 120,   # 60 hours
-    '1h': 100,    # ~4 days
-    '2h': 80,     # ~6 days
-    '4h': 60,     # ~10 days
-    '1d': 30,     # ~30 days
-}
-DEFAULT_MAX_TRADE_DURATION = 100  # Fallback for unknown timeframes
-
 # Minimum candles required after pattern detection to simulate a trade
 MIN_CANDLES_AFTER_PATTERN = 5
+
+
+def get_max_trade_duration_candles(timeframe: str) -> int:
+    """
+    Get max trade duration in candles from Config.PATTERN_EXPIRY_HOURS.
+
+    This uses the SAME expiry logic as production patterns (Pattern.expires_at),
+    ensuring backtesting matches live trading behavior.
+
+    Production expiry hours by timeframe:
+        1m: 4h = 240 candles
+        5m: 12h = 144 candles
+        15m: 24h = 96 candles
+        30m: 48h = 96 candles
+        1h: 72h = 72 candles
+        2h: 120h = 60 candles
+        4h: 168h = 42 candles
+        1d: 336h = 14 candles
+    """
+    from app.config import Config
+
+    expiry_hours = Config.PATTERN_EXPIRY_HOURS.get(timeframe, Config.DEFAULT_PATTERN_EXPIRY_HOURS)
+    minutes_per_candle = TIMEFRAME_MS.get(timeframe, 60 * 60 * 1000) // (60 * 1000)
+    return int((expiry_hours * 60) / minutes_per_candle)
 
 # Detector instances (reuse to avoid re-initialization)
 _detectors = {
@@ -1030,8 +1040,8 @@ class ParameterOptimizer:
         timestamps = ohlcv['timestamp']
         n_candles = len(highs)
 
-        # Max candles to look ahead for trade resolution (timeframe-aware)
-        max_trade_duration = MAX_TRADE_DURATION_BY_TF.get(timeframe, DEFAULT_MAX_TRADE_DURATION)
+        # Max candles to look ahead for trade resolution (uses production PATTERN_EXPIRY_HOURS)
+        max_trade_duration = get_max_trade_duration_candles(timeframe)
 
         trades = []
 
@@ -1308,11 +1318,12 @@ class ParameterOptimizer:
         take_profit: float,
         direction: str,
         rr_target: float,
-        n_candles: int
+        n_candles: int,
+        max_trade_duration: int = 100
     ) -> Optional[Dict]:
         """Simulate a single trade using vectorized numpy operations"""
         start_idx = entry_idx + 1
-        end_idx = min(entry_idx + DEFAULT_MAX_TRADE_DURATION, n_candles)
+        end_idx = min(entry_idx + max_trade_duration, n_candles)
 
         if start_idx >= end_idx:
             return None
@@ -1400,7 +1411,7 @@ class ParameterOptimizer:
         )
 
         # Simulate trades
-        trades = self._simulate_trades(df, patterns, params)
+        trades = self._simulate_trades(df, patterns, params, timeframe)
 
         # Calculate statistics
         stats = self._calculate_statistics(trades)
@@ -1548,12 +1559,15 @@ class ParameterOptimizer:
         db.session.add(run)
         return run
 
-    def _simulate_trades(self, df: pd.DataFrame, patterns: List[Dict], params: Dict) -> List[Dict]:
+    def _simulate_trades(self, df: pd.DataFrame, patterns: List[Dict], params: Dict, timeframe: str) -> List[Dict]:
         """Simulate trades for detected patterns"""
         trades = []
         rr_target = params.get('rr_target', 2.0)
         sl_buffer_pct = params.get('sl_buffer_pct', 10.0) / 100.0
         entry_method = params.get('entry_method', 'zone_edge')
+
+        # Max trade duration from production PATTERN_EXPIRY_HOURS
+        max_trade_duration = get_max_trade_duration_candles(timeframe)
 
         for pattern in patterns:
             entry_idx = pattern['detected_at']
@@ -1589,7 +1603,7 @@ class ParameterOptimizer:
 
             # Simulate trade outcome
             trade = self._simulate_single_trade(
-                df, entry_idx, entry, stop_loss, take_profit, direction, rr_target
+                df, entry_idx, entry, stop_loss, take_profit, direction, rr_target, max_trade_duration
             )
             if trade:
                 trades.append(trade)
@@ -1604,13 +1618,17 @@ class ParameterOptimizer:
         stop_loss: float,
         take_profit: float,
         direction: str,
-        rr_target: float
+        rr_target: float,
+        max_trade_duration: int
     ) -> Optional[Dict]:
-        """Simulate a single trade"""
+        """Simulate a single trade with expiry limit from production PATTERN_EXPIRY_HOURS"""
         entry_triggered = False
         entry_candle = None
 
-        for j in range(entry_idx + 1, len(df)):
+        # Limit search to max_trade_duration candles (matches production pattern expiry)
+        end_idx = min(entry_idx + 1 + max_trade_duration, len(df))
+
+        for j in range(entry_idx + 1, end_idx):
             candle = df.iloc[j]
 
             if not entry_triggered:
@@ -2262,7 +2280,7 @@ class ParameterOptimizer:
 
                 # Simulate new trades
                 new_trades, new_open = self._simulate_trades_with_open(
-                    df, new_patterns, params, existing.last_candle_timestamp
+                    df, new_patterns, params, timeframe, existing.last_candle_timestamp
                 )
             else:
                 new_trades = []
@@ -2307,7 +2325,7 @@ class ParameterOptimizer:
                 skip_overlap=not params.get('use_overlap', True)
             )
 
-            trades, open_trades = self._simulate_trades_with_open(df, patterns, params)
+            trades, open_trades = self._simulate_trades_with_open(df, patterns, params, timeframe)
             stats = self._calculate_statistics(trades)
 
             run = OptimizationRun(
@@ -2399,7 +2417,7 @@ class ParameterOptimizer:
 
                 # Simulate new trades using numpy (fast)
                 new_trades, new_open = self._simulate_trades_with_open_fast(
-                    ohlcv, new_patterns, params, existing.last_candle_timestamp
+                    ohlcv, new_patterns, params, timeframe, existing.last_candle_timestamp
                 )
             else:
                 new_trades = []
@@ -2438,7 +2456,7 @@ class ParameterOptimizer:
             start_date = datetime.fromtimestamp(start_ts / 1000).strftime('%Y-%m-%d')
             end_date = datetime.fromtimestamp(last_candle_ts / 1000).strftime('%Y-%m-%d')
 
-            trades, open_trades = self._simulate_trades_with_open_fast(ohlcv, patterns, params)
+            trades, open_trades = self._simulate_trades_with_open_fast(ohlcv, patterns, params, timeframe)
             stats = self._calculate_statistics(trades)
 
             run = OptimizationRun(
@@ -2479,6 +2497,7 @@ class ParameterOptimizer:
         ohlcv: Dict[str, np.ndarray],
         patterns: List[Dict],
         params: Dict,
+        timeframe: str,
         after_timestamp: int = None
     ) -> tuple:
         """
@@ -2495,6 +2514,9 @@ class ParameterOptimizer:
         rr_target = params.get('rr_target', 2.0)
         sl_buffer_pct = params.get('sl_buffer_pct', 10.0) / 100.0
         entry_method = params.get('entry_method', 'zone_edge')
+
+        # Max trade duration from production PATTERN_EXPIRY_HOURS
+        max_trade_duration = get_max_trade_duration_candles(timeframe)
 
         highs = ohlcv['high']
         lows = ohlcv['low']
@@ -2529,9 +2551,9 @@ class ParameterOptimizer:
                 take_profit = entry - (risk * rr_target)
                 direction = 'short'
 
-            # Vectorized trade simulation
+            # Vectorized trade simulation (uses production expiry)
             start_idx = entry_idx + 1
-            end_idx = min(entry_idx + DEFAULT_MAX_TRADE_DURATION, n_candles)
+            end_idx = min(entry_idx + max_trade_duration, n_candles)
 
             if start_idx >= end_idx:
                 continue
@@ -2632,11 +2654,12 @@ class ParameterOptimizer:
         take_profit: float,
         direction: str,
         rr_target: float,
-        n_candles: int
+        n_candles: int,
+        max_trade_duration: int = 100
     ) -> Optional[Dict]:
         """Fast single trade simulation using vectorized numpy, returning open if not resolved"""
         start_idx = entry_idx + 1
-        end_idx = min(entry_idx + DEFAULT_MAX_TRADE_DURATION, n_candles)
+        end_idx = min(entry_idx + max_trade_duration, n_candles)
 
         if start_idx >= end_idx:
             return None
@@ -2823,6 +2846,7 @@ class ParameterOptimizer:
         df: pd.DataFrame,
         patterns: List[Dict],
         params: Dict,
+        timeframe: str,
         after_timestamp: int = None
     ) -> tuple:
         """
@@ -2836,6 +2860,9 @@ class ParameterOptimizer:
         rr_target = params.get('rr_target', 2.0)
         sl_buffer_pct = params.get('sl_buffer_pct', 10.0) / 100.0
         entry_method = params.get('entry_method', 'zone_edge')
+
+        # Max trade duration from production PATTERN_EXPIRY_HOURS
+        max_trade_duration = get_max_trade_duration_candles(timeframe)
 
         for pattern in patterns:
             entry_idx = pattern['detected_at']
@@ -2866,7 +2893,7 @@ class ParameterOptimizer:
                 direction = 'short'
 
             trade = self._simulate_single_trade_with_open(
-                df, entry_idx, entry, stop_loss, take_profit, direction, rr_target
+                df, entry_idx, entry, stop_loss, take_profit, direction, rr_target, max_trade_duration
             )
 
             if trade:
@@ -2885,14 +2912,18 @@ class ParameterOptimizer:
         stop_loss: float,
         take_profit: float,
         direction: str,
-        rr_target: float
+        rr_target: float,
+        max_trade_duration: int
     ) -> Optional[Dict]:
-        """Simulate a single trade, returning open if not resolved"""
+        """Simulate a single trade with expiry, returning open if not resolved"""
         entry_triggered = False
         entry_candle = None
         entry_time = None
 
-        for j in range(entry_idx + 1, len(df)):
+        # Limit search to max_trade_duration candles (matches production pattern expiry)
+        end_idx = min(entry_idx + 1 + max_trade_duration, len(df))
+
+        for j in range(entry_idx + 1, end_idx):
             candle = df.iloc[j]
 
             if not entry_triggered:
