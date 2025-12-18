@@ -230,11 +230,9 @@ class ParameterOptimizer:
                     df = data_override[timeframe]
                     verified_status = ""
                 else:
+                    # Use verified candles only - no fallback to unverified
                     df = get_candles_as_dataframe(symbol, timeframe, verified_only=True)
                     verified_status = ""
-                    if df is None or df.empty:
-                        df = get_candles_as_dataframe(symbol, timeframe, verified_only=False)
-                        verified_status = " [unverified!]"
                 tf_time = time.time() - tf_start
 
                 if df is not None and len(df) >= 20:
@@ -670,18 +668,13 @@ class ParameterOptimizer:
         Get candle data for a symbol/timeframe.
 
         Uses verified candles only to ensure backtest accuracy.
-        Falls back to all candles if no verified candles exist.
         No date filtering - uses ALL available candles.
         """
         try:
-            # Try verified candles first (recommended for accurate backtesting)
+            # Use verified candles only (required for accurate backtesting)
             df = get_candles_as_dataframe(symbol, timeframe, verified_only=True)
 
-            if df.empty:
-                # Fallback to all candles if no verified data exists
-                df = get_candles_as_dataframe(symbol, timeframe, verified_only=False)
-
-            if df.empty:
+            if df is None or df.empty:
                 return None
 
             # No date filtering - use ALL available candles
@@ -862,11 +855,8 @@ class ParameterOptimizer:
         for symbol in symbols:
             for timeframe in timeframes:
                 query_start = datetime.now(timezone.utc)
+                # Use verified candles only (required for accurate backtesting)
                 df = get_candles_as_dataframe(symbol, timeframe, verified_only=True)
-                verified_source = "verified"
-                if df is None or df.empty:
-                    df = get_candles_as_dataframe(symbol, timeframe, verified_only=False)
-                    verified_source = "unverified"
                 query_duration = (datetime.now(timezone.utc) - query_start).total_seconds()
 
                 if df is not None and len(df) >= 20:
@@ -875,8 +865,7 @@ class ParameterOptimizer:
                     last_candle_ts = int(df['timestamp'].max())
                     data_cache[(symbol, timeframe)] = (df, ohlcv_arrays, first_candle_ts, last_candle_ts)
                     total_candles += len(df)
-                    status = "" if verified_source == "verified" else " [unverified!]"
-                    print(f"  {symbol} {timeframe}: {len(df):,} candles ({query_duration:.2f}s){status}", flush=True)
+                    print(f"  {symbol} {timeframe}: {len(df):,} candles ({query_duration:.2f}s)", flush=True)
                 else:
                     data_cache[(symbol, timeframe)] = (None, None, None, None)
                     print(f"  {symbol} {timeframe}: No data ({query_duration:.2f}s)")
@@ -2275,11 +2264,8 @@ class ParameterOptimizer:
             symbol, timeframe, pattern_type, rr_target, sl_buffer_pct, expiry_multiplier
         )
 
-        # Get all available VERIFIED candles (for accurate incremental updates)
+        # Use verified candles only (required for accurate backtesting)
         df = get_candles_as_dataframe(symbol, timeframe, verified_only=True)
-        if df is None or df.empty:
-            # Fallback to all candles if no verified data
-            df = get_candles_as_dataframe(symbol, timeframe, verified_only=False)
         if df is None or df.empty or len(df) < 20:
             return 'skipped'
 
