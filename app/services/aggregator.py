@@ -408,7 +408,8 @@ def get_candles_as_dataframe(
         symbol: Trading pair (e.g., 'BTC/USDT')
         timeframe: Candle timeframe (e.g., '1h', '4h')
         limit: Maximum number of candles to return (None = all candles)
-        verified_only: If True, only return verified candles (recommended for backtesting)
+        verified_only: If True, return continuous verified candles from start
+                      (stops at first unverified candle for data integrity)
 
     Returns:
         DataFrame with columns: timestamp, open, high, low, close, volume
@@ -419,12 +420,19 @@ def get_candles_as_dataframe(
 
     # Build query based on whether limit is specified
     if verified_only:
+        # Get continuous verified candles: all candles up to the first unverified one
+        # This ensures we have a gapless verified series for accurate backtesting
         if limit:
             query = text("""
                 SELECT timestamp, open, high, low, close, volume
                 FROM candles
                 WHERE symbol_id = :symbol_id AND timeframe = :timeframe
-                  AND verified_at IS NOT NULL
+                  AND timestamp < COALESCE(
+                      (SELECT MIN(timestamp) FROM candles
+                       WHERE symbol_id = :symbol_id AND timeframe = :timeframe
+                         AND verified_at IS NULL),
+                      9999999999999
+                  )
                 ORDER BY timestamp DESC
                 LIMIT :limit
             """)
@@ -434,7 +442,12 @@ def get_candles_as_dataframe(
                 SELECT timestamp, open, high, low, close, volume
                 FROM candles
                 WHERE symbol_id = :symbol_id AND timeframe = :timeframe
-                  AND verified_at IS NOT NULL
+                  AND timestamp < COALESCE(
+                      (SELECT MIN(timestamp) FROM candles
+                       WHERE symbol_id = :symbol_id AND timeframe = :timeframe
+                         AND verified_at IS NULL),
+                      9999999999999
+                  )
                 ORDER BY timestamp ASC
             """)
             params = {'symbol_id': sym.id, 'timeframe': timeframe}

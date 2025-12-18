@@ -63,6 +63,23 @@ TIMEFRAME_MS = {
     '1d': 24 * 60 * 60 * 1000,
 }
 
+# Maximum candles to look ahead for trade resolution (shared with backtester.py)
+# Higher timeframes need shorter lookback (measured in candles)
+MAX_TRADE_DURATION_BY_TF = {
+    '1m': 2880,   # 48 hours (allows longer intraday trades)
+    '5m': 576,    # 48 hours
+    '15m': 192,   # 48 hours
+    '30m': 120,   # 60 hours
+    '1h': 100,    # ~4 days
+    '2h': 80,     # ~6 days
+    '4h': 60,     # ~10 days
+    '1d': 30,     # ~30 days
+}
+DEFAULT_MAX_TRADE_DURATION = 100  # Fallback for unknown timeframes
+
+# Minimum candles required after pattern detection to simulate a trade
+MIN_CANDLES_AFTER_PATTERN = 5
+
 # Detector instances (reuse to avoid re-initialization)
 _detectors = {
     'imbalance': FVGDetector(),
@@ -974,7 +991,7 @@ class ParameterOptimizer:
             sharpe_ratio=stats['sharpe_ratio'],
             profit_factor=stats['profit_factor'],
             avg_trade_duration=stats['avg_duration'],
-            results_json=json.dumps(trades[:100]),  # Store first 100 trades
+            results_json=json.dumps(trades),  # Store all trades
         )
         db.session.add(run)
 
@@ -1013,15 +1030,15 @@ class ParameterOptimizer:
         timestamps = ohlcv['timestamp']
         n_candles = len(highs)
 
-        # Max candles to look ahead for trade resolution (limit search window)
-        MAX_TRADE_DURATION = 1000  # Trades that take longer are likely invalid
+        # Max candles to look ahead for trade resolution (timeframe-aware)
+        max_trade_duration = MAX_TRADE_DURATION_BY_TF.get(timeframe, DEFAULT_MAX_TRADE_DURATION)
 
         trades = []
 
         # Process patterns in batch - vectorize the setup
         for pattern in patterns:
             entry_idx = pattern['detected_at']
-            if entry_idx + 10 >= n_candles:
+            if entry_idx + MIN_CANDLES_AFTER_PATTERN >= n_candles:
                 continue
 
             zone_high = pattern['zone_high']
@@ -1045,7 +1062,7 @@ class ParameterOptimizer:
 
             # Limit search window
             start_idx = entry_idx + 1
-            end_idx = min(entry_idx + MAX_TRADE_DURATION, n_candles)
+            end_idx = min(entry_idx + max_trade_duration, n_candles)
 
             if start_idx >= end_idx:
                 continue
@@ -1294,10 +1311,8 @@ class ParameterOptimizer:
         n_candles: int
     ) -> Optional[Dict]:
         """Simulate a single trade using vectorized numpy operations"""
-        MAX_TRADE_DURATION = 1000
-
         start_idx = entry_idx + 1
-        end_idx = min(entry_idx + MAX_TRADE_DURATION, n_candles)
+        end_idx = min(entry_idx + DEFAULT_MAX_TRADE_DURATION, n_candles)
 
         if start_idx >= end_idx:
             return None
@@ -1415,7 +1430,7 @@ class ParameterOptimizer:
             sharpe_ratio=stats['sharpe_ratio'],
             profit_factor=stats['profit_factor'],
             avg_trade_duration=stats['avg_duration'],
-            results_json=json.dumps(trades[:100]),  # Store first 100 trades
+            results_json=json.dumps(trades),  # Store all trades
         )
         db.session.add(run)
 
@@ -1542,7 +1557,7 @@ class ParameterOptimizer:
 
         for pattern in patterns:
             entry_idx = pattern['detected_at']
-            if entry_idx + 10 >= len(df):
+            if entry_idx + MIN_CANDLES_AFTER_PATTERN >= len(df):
                 continue
 
             zone_high = pattern['zone_high']
@@ -1703,11 +1718,29 @@ class ParameterOptimizer:
             dd = peak - cumulative
             max_dd = max(max_dd, dd)
 
-        # Sharpe ratio (simplified)
+        # Sharpe ratio (annualized)
+        # Per-trade Sharpe = avg_return / std_dev
+        # Annualized = per_trade * sqrt(trades_per_year)
         if len(profits) > 1:
             returns_std = np.std(profits)
             avg_return = np.mean(profits)
-            sharpe_ratio = (avg_return / returns_std) if returns_std > 0 else 0
+            per_trade_sharpe = (avg_return / returns_std) if returns_std > 0 else 0
+
+            # Estimate trades per year from actual data
+            try:
+                first_trade_time = min(t['entry_time'] for t in trades)
+                last_trade_time = max(t['exit_time'] for t in trades)
+                time_span_ms = last_trade_time - first_trade_time
+                time_span_years = time_span_ms / (365.25 * 24 * 60 * 60 * 1000)
+
+                if time_span_years > 0.01:  # At least ~4 days of data
+                    trades_per_year = len(trades) / time_span_years
+                else:
+                    trades_per_year = 252  # Default assumption: daily trading
+            except (KeyError, TypeError):
+                trades_per_year = 252  # Default if timestamps unavailable
+
+            sharpe_ratio = per_trade_sharpe * np.sqrt(min(trades_per_year, 252))
         else:
             sharpe_ratio = 0
 
@@ -2253,7 +2286,7 @@ class ParameterOptimizer:
             existing.sharpe_ratio = stats['sharpe_ratio']
             existing.profit_factor = stats['profit_factor']
             existing.avg_trade_duration = stats['avg_duration']
-            existing.results_json = json.dumps(all_closed_trades[-100:])
+            existing.results_json = json.dumps(all_closed_trades)
             existing.open_trades = all_open_trades
             existing.last_candle_timestamp = last_candle_ts
             existing.end_date = datetime.fromtimestamp(last_candle_ts / 1000).strftime('%Y-%m-%d')
@@ -2301,7 +2334,7 @@ class ParameterOptimizer:
                 sharpe_ratio=stats['sharpe_ratio'],
                 profit_factor=stats['profit_factor'],
                 avg_trade_duration=stats['avg_duration'],
-                results_json=json.dumps(trades[-100:]),
+                results_json=json.dumps(trades),
                 open_trades_json=json.dumps(open_trades),
                 last_candle_timestamp=last_candle_ts,
                 is_incremental=True,
@@ -2390,7 +2423,7 @@ class ParameterOptimizer:
             existing.sharpe_ratio = stats['sharpe_ratio']
             existing.profit_factor = stats['profit_factor']
             existing.avg_trade_duration = stats['avg_duration']
-            existing.results_json = json.dumps(all_closed_trades[-100:])
+            existing.results_json = json.dumps(all_closed_trades)
             existing.open_trades = all_open_trades
             existing.last_candle_timestamp = last_candle_ts
             existing.end_date = datetime.fromtimestamp(last_candle_ts / 1000).strftime('%Y-%m-%d')
@@ -2432,7 +2465,7 @@ class ParameterOptimizer:
                 sharpe_ratio=stats['sharpe_ratio'],
                 profit_factor=stats['profit_factor'],
                 avg_trade_duration=stats['avg_duration'],
-                results_json=json.dumps(trades[-100:]),
+                results_json=json.dumps(trades),
                 open_trades_json=json.dumps(open_trades),
                 last_candle_timestamp=last_candle_ts,
                 is_incremental=True,
@@ -2467,7 +2500,6 @@ class ParameterOptimizer:
         lows = ohlcv['low']
         timestamps = ohlcv['timestamp']
         n_candles = len(highs)
-        MAX_TRADE_DURATION = 1000
 
         for pattern in patterns:
             entry_idx = pattern['detected_at']
@@ -2476,7 +2508,7 @@ class ParameterOptimizer:
             if after_timestamp and entry_idx < n_candles and timestamps[entry_idx] <= after_timestamp:
                 continue
 
-            if entry_idx + 5 >= n_candles:
+            if entry_idx + MIN_CANDLES_AFTER_PATTERN >= n_candles:
                 continue
 
             zone_high = pattern['zone_high']
@@ -2499,7 +2531,7 @@ class ParameterOptimizer:
 
             # Vectorized trade simulation
             start_idx = entry_idx + 1
-            end_idx = min(entry_idx + MAX_TRADE_DURATION, n_candles)
+            end_idx = min(entry_idx + DEFAULT_MAX_TRADE_DURATION, n_candles)
 
             if start_idx >= end_idx:
                 continue
@@ -2603,10 +2635,8 @@ class ParameterOptimizer:
         n_candles: int
     ) -> Optional[Dict]:
         """Fast single trade simulation using vectorized numpy, returning open if not resolved"""
-        MAX_TRADE_DURATION = 1000
-
         start_idx = entry_idx + 1
-        end_idx = min(entry_idx + MAX_TRADE_DURATION, n_candles)
+        end_idx = min(entry_idx + DEFAULT_MAX_TRADE_DURATION, n_candles)
 
         if start_idx >= end_idx:
             return None
@@ -2814,7 +2844,7 @@ class ParameterOptimizer:
             if after_timestamp and df.iloc[entry_idx]['timestamp'] <= after_timestamp:
                 continue
 
-            if entry_idx + 5 >= len(df):
+            if entry_idx + MIN_CANDLES_AFTER_PATTERN >= len(df):
                 continue
 
             zone_high = pattern['zone_high']

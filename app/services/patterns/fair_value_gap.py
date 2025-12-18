@@ -89,7 +89,8 @@ class FVGDetector(PatternDetector):
         self,
         df: pd.DataFrame,
         min_zone_pct: float = None,
-        skip_overlap: bool = False
+        skip_overlap: bool = False,
+        verbose: int = 0
     ) -> List[Dict[str, Any]]:
         """
         Detect FVG patterns in historical data WITHOUT database interaction.
@@ -99,6 +100,7 @@ class FVGDetector(PatternDetector):
             df: DataFrame with OHLCV data (must have: timestamp, open, high, low, close, volume)
             min_zone_pct: Minimum zone size as % of price (None = use Config.MIN_ZONE_PERCENT)
             skip_overlap: If True, skip overlap detection (faster for backtesting)
+            verbose: 0=silent, 1=summary only, 2=detailed timing
 
         Returns:
             List of detected patterns (dicts with zone_high, zone_low, direction, detected_at, etc.)
@@ -244,12 +246,16 @@ class FVGDetector(PatternDetector):
                             })
 
         t2 = datetime.now(timezone.utc)
-        arr_ms = (t1 - t0).total_seconds() * 1000
-        loop_ms = (t2 - t1).total_seconds() * 1000
         total_ms = (t2 - t0).total_seconds() * 1000
-        if total_ms > 500:  # Log if >500ms
+
+        # Debug output based on verbose level
+        if verbose >= 2 and total_ms > 500:  # Detailed timing only if slow
+            arr_ms = (t1 - t0).total_seconds() * 1000
+            loop_ms = (t2 - t1).total_seconds() * 1000
             print(f"      [FVG] {n:,} candles: arr={arr_ms:.0f}ms, loop={loop_ms:.0f}ms, "
                   f"total={total_ms:.0f}ms, patterns={len(patterns)}", flush=True)
+        elif verbose >= 1 and len(patterns) > 0:
+            print(f"      [FVG] Found {len(patterns)} patterns in {n:,} candles", flush=True)
 
         return patterns
 
