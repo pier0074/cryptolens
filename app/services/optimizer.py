@@ -358,6 +358,8 @@ class ParameterOptimizer:
             param_combinations = list(itertools.product(*parameter_grid.values()))
             total_combos = len(param_combinations) * len(timeframes) * len(pattern_types)
             best_profit = float('-inf')
+            processed_combos = 0
+            progress_interval = max(500, total_combos // 10)  # Every 500 or 10%
 
             print(f"\n[Phase 3/3] [{symbol}] Running parameter sweep ({total_combos:,} combinations)...", flush=True)
 
@@ -431,6 +433,11 @@ class ParameterOptimizer:
                             if stats['total_profit_pct'] > best_profit:
                                 best_profit = stats['total_profit_pct']
                                 result['best_result'] = sweep_result
+
+                            processed_combos += 1
+                            if processed_combos % progress_interval == 0:
+                                pct = int(processed_combos / total_combos * 100)
+                                print(f"    [{symbol}] {processed_combos:,}/{total_combos:,} ({pct}%)", flush=True)
 
                         except Exception as e:
                             result['results'].append({
