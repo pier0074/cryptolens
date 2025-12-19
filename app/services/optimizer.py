@@ -1149,13 +1149,17 @@ class ParameterOptimizer:
                 risk = stop_loss - entry_price
                 take_profit = entry_price - (risk * rr_target)
 
-            # Search for SL/TP from entry to end
+            # Search for SL/TP from entry (with max window for performance)
             trade_start = entry_candle + 1
             if trade_start >= n_candles:
                 continue
 
-            h_trade = highs[trade_start:]
-            l_trade = lows[trade_start:]
+            # Limit search window for performance (50k candles = ~35 days for 1m)
+            max_trade_candles = 50000
+            trade_end = min(trade_start + max_trade_candles, n_candles)
+
+            h_trade = highs[trade_start:trade_end]
+            l_trade = lows[trade_start:trade_end]
 
             if direction == 'long':
                 sl_mask = l_trade <= stop_loss
