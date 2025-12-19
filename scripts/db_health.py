@@ -313,6 +313,101 @@ def save_fetched_candles(symbol_id, ohlcv, verbose=False):
     return new_count
 
 
+async def check_and_fix_data_start(symbol_id, symbol_name, fix=False, verbose=True):
+    """
+    Check if higher timeframe candles start before 1m data.
+    This makes them unverifiable. Fix by fetching missing 1m candles.
+
+    Returns dict with:
+        - issue_found: bool
+        - first_1m_ts: first 1m candle timestamp
+        - earliest_higher_tf_ts: earliest higher TF candle timestamp
+        - missing_minutes: how many 1m candles are missing
+        - action: 'none', 'fetched', 'error'
+        - fetched_count: number of candles fetched
+    """
+    # Get first 1m candle timestamp
+    first_1m = Candle.query.filter(
+        Candle.symbol_id == symbol_id,
+        Candle.timeframe == '1m'
+    ).order_by(Candle.timestamp).first()
+
+    if not first_1m:
+        return {'issue_found': False, 'action': 'none', 'reason': 'no_1m_data'}
+
+    first_1m_ts = first_1m.timestamp
+
+    # Get earliest timestamp across all higher TFs
+    earliest_higher_ts = None
+    for tf in AGGREGATED_TFS:
+        first_candle = Candle.query.filter(
+            Candle.symbol_id == symbol_id,
+            Candle.timeframe == tf
+        ).order_by(Candle.timestamp).first()
+
+        if first_candle and (earliest_higher_ts is None or first_candle.timestamp < earliest_higher_ts):
+            earliest_higher_ts = first_candle.timestamp
+
+    if earliest_higher_ts is None or earliest_higher_ts >= first_1m_ts:
+        # No issue - higher TFs don't start before 1m
+        return {'issue_found': False, 'action': 'none'}
+
+    # Issue found: higher TF candles exist before first 1m candle
+    missing_minutes = (first_1m_ts - earliest_higher_ts) // 60000
+
+    result = {
+        'issue_found': True,
+        'first_1m_ts': first_1m_ts,
+        'earliest_higher_tf_ts': earliest_higher_ts,
+        'missing_minutes': missing_minutes,
+        'action': 'none',
+        'fetched_count': 0
+    }
+
+    if verbose:
+        from datetime import datetime, timezone
+        first_1m_dt = datetime.fromtimestamp(first_1m_ts / 1000, tz=timezone.utc)
+        earliest_dt = datetime.fromtimestamp(earliest_higher_ts / 1000, tz=timezone.utc)
+        print(f"  ⚠ Data start misalignment detected:")
+        print(f"    First 1m candle: {first_1m_dt.strftime('%Y-%m-%d %H:%M')} UTC")
+        print(f"    Earliest higher TF: {earliest_dt.strftime('%Y-%m-%d %H:%M')} UTC")
+        print(f"    Missing: {missing_minutes} 1m candles ({missing_minutes/60:.1f} hours)")
+
+    if not fix:
+        return result
+
+    # Fix: fetch missing 1m candles from exchange
+    if verbose:
+        print(f"    Fetching missing 1m candles from exchange...")
+
+    try:
+        # Fetch from earliest_higher_ts to first_1m_ts - 60000
+        ohlcv = await fetch_missing_candles(
+            symbol_name,
+            earliest_higher_ts,
+            first_1m_ts - 60000,
+            verbose=verbose
+        )
+
+        if ohlcv:
+            fetched_count = save_fetched_candles(symbol_id, ohlcv, verbose=verbose)
+            result['action'] = 'fetched'
+            result['fetched_count'] = fetched_count
+            if verbose:
+                print(f"    ✓ Fetched {fetched_count} missing 1m candles")
+        else:
+            result['action'] = 'no_data_available'
+            if verbose:
+                print(f"    ✗ No data available from exchange for this period")
+    except Exception as e:
+        result['action'] = 'error'
+        result['error'] = str(e)
+        if verbose:
+            print(f"    ✗ Error fetching: {e}")
+
+    return result
+
+
 def record_known_gap(symbol_id, timeframe, gap_start, gap_end, missing_candles,
                      reason='no_exchange_data', verified_empty=True):
     """Record a gap as known/accepted."""
@@ -758,6 +853,22 @@ def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False,
 
             for symbol in symbols:
                 symbol_output = []
+
+                # STEP 0: Check and fix data start alignment
+                # (Higher TF candles starting before 1m data)
+                start_result = asyncio.run(
+                    check_and_fix_data_start(symbol.id, symbol.symbol, fix=fix, verbose=False)
+                )
+                if start_result['issue_found']:
+                    if start_result['action'] == 'fetched':
+                        symbol_output.append(
+                            f"  ⚠ Data start fix: fetched {start_result['fetched_count']} missing 1m candles"
+                        )
+                    elif start_result['action'] == 'none' and not fix:
+                        missing = start_result['missing_minutes']
+                        symbol_output.append(
+                            f"  ⚠ Data start issue: {missing} 1m candles missing at start (run --fix)"
+                        )
 
                 # STEP 1: Verify 1m candles first
                 stats_1m = get_verification_stats(symbol.id, '1m')
