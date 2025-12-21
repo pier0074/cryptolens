@@ -526,22 +526,25 @@ def verify_1m_candles(symbol_id, symbol, fix=False, batch_size=10080, verbose=Tr
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
     interval_ms = TF_MS['1m']
 
-    # Get the last verified 1m candle
-    last_verified = Candle.query.filter(
-        Candle.symbol_id == symbol_id,
-        Candle.timeframe == '1m',
-        Candle.verified_at.isnot(None)
-    ).order_by(Candle.timestamp.desc()).first()
-
-    start_ts = last_verified.timestamp if last_verified else 0
-
-    # Get unverified 1m candles
+    # Get unverified 1m candles (ordered by timestamp to verify sequentially)
+    # We need to verify ALL unverified candles, not just ones after last verified,
+    # because newly fetched candles may have earlier timestamps.
     unverified = Candle.query.filter(
         Candle.symbol_id == symbol_id,
         Candle.timeframe == '1m',
-        Candle.timestamp > start_ts,
         Candle.verified_at.is_(None)
     ).order_by(Candle.timestamp).limit(batch_size).all()
+
+    # Get the candle just before the first unverified (for gap checking)
+    if unverified:
+        prev_verified = Candle.query.filter(
+            Candle.symbol_id == symbol_id,
+            Candle.timeframe == '1m',
+            Candle.timestamp < unverified[0].timestamp,
+            Candle.verified_at.isnot(None)
+        ).order_by(Candle.timestamp.desc()).first()
+    else:
+        prev_verified = None
 
     if not unverified:
         # Check total remaining
@@ -557,7 +560,7 @@ def verify_1m_candles(symbol_id, symbol, fix=False, batch_size=10080, verbose=Tr
             'all_done': total_remaining == 0
         }
 
-    prev_candle = last_verified
+    prev_candle = prev_verified
     verified_count = 0
     error_found = None
     candles_to_verify = []
