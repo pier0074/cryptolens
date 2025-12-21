@@ -55,6 +55,7 @@ from app.models import Symbol, Candle, KnownGap
 
 # Import shared retry utilities
 from scripts.utils.retry import async_retry_call
+from scripts.compute_stats import compute_stats
 
 # Meaningful batch sizes
 BATCH_SIZES = {
@@ -983,6 +984,10 @@ def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False,
                 break
 
             print(f"\n  Continuing to next iteration...")
+
+        # Update stats cache after health check completes
+        print(f"\n  Updating stats cache...")
+        compute_stats()
 
         print()
         return {'verified': total_verified, 'iterations': iteration}
