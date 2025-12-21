@@ -56,6 +56,7 @@ from app.models import Symbol, Candle, KnownGap
 # Import shared retry utilities
 from scripts.utils.retry import async_retry_call
 from scripts.compute_stats import compute_stats
+from app.services.aggregator import aggregate_all_timeframes
 
 # Meaningful batch sizes
 BATCH_SIZES = {
@@ -396,6 +397,13 @@ async def check_and_fix_data_start(symbol_id, symbol_name, fix=False, verbose=Tr
             result['fetched_count'] = fetched_count
             if verbose:
                 print(f"    ✓ Fetched {fetched_count} missing 1m candles")
+            # Aggregate the new 1m candles into higher timeframes
+            if fetched_count > 0:
+                agg_results = aggregate_all_timeframes(symbol_name)
+                agg_total = sum(agg_results.values())
+                if agg_total > 0 and verbose:
+                    print(f"    ✓ Aggregated {agg_total} higher TF candles")
+                result['aggregated'] = agg_total
         else:
             result['action'] = 'no_data_available'
             if verbose:
@@ -501,6 +509,13 @@ async def check_and_fix_data_end(symbol_id, symbol_name, fix=False, verbose=True
             result['fetched_count'] = fetched_count
             if verbose:
                 print(f"    ✓ Fetched {fetched_count} missing 1m candles")
+            # Aggregate the new 1m candles into higher timeframes
+            if fetched_count > 0:
+                agg_results = aggregate_all_timeframes(symbol_name)
+                agg_total = sum(agg_results.values())
+                if agg_total > 0 and verbose:
+                    print(f"    ✓ Aggregated {agg_total} higher TF candles")
+                result['aggregated'] = agg_total
         else:
             result['action'] = 'no_data_available'
             if verbose:
@@ -590,10 +605,14 @@ async def fix_gap(symbol, gap_start, gap_end, missing_candles, verbose=False):
             saved = save_fetched_candles(symbol.id, ohlcv, verbose)
 
             if saved > 0:
+                # Aggregate the new 1m candles into higher timeframes
+                agg_results = aggregate_all_timeframes(symbol.symbol)
+                agg_total = sum(agg_results.values())
                 return {
                     'action': 'filled',
                     'candles_fetched': len(ohlcv),
-                    'candles_saved': saved
+                    'candles_saved': saved,
+                    'aggregated': agg_total
                 }
             else:
                 return {
