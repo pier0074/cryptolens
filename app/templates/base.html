@@ -57,23 +57,23 @@
                         <a href="/" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if request.endpoint == 'dashboard.index' %}bg-gray-800{% endif %}">
                             Dashboard
                         </a>
-                        <a href="/patterns" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'patterns' in request.endpoint or 'signals' in request.endpoint %}bg-gray-800{% endif %}">
+                        <a href="/patterns" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if request.endpoint and ('patterns' in request.endpoint or 'signals' in request.endpoint) %}bg-gray-800{% endif %}">
                             Patterns
                         </a>
-                        <a href="/portfolio" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'portfolio' in request.endpoint %}bg-gray-800{% endif %}">
+                        <a href="/portfolio" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if request.endpoint and 'portfolio' in request.endpoint %}bg-gray-800{% endif %}">
                             Portfolio
                         </a>
-                        <a href="/analytics" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'analytics' in request.endpoint %}bg-gray-800{% endif %}">
+                        <a href="/analytics" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if request.endpoint and 'analytics' in request.endpoint %}bg-gray-800{% endif %}">
                             Analytics
                         </a>
-                        <a href="/backtest" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if 'backtest' in request.endpoint %}bg-gray-800{% endif %}">
+                        <a href="/backtest" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if request.endpoint and 'backtest' in request.endpoint %}bg-gray-800{% endif %}">
                             Backtest
                         </a>
                         <a href="/api" class="px-3 py-2 rounded-md text-sm font-medium hover:bg-gray-800 {% if request.endpoint and 'docs' in request.endpoint %}bg-gray-800{% endif %}">
                             API
                         </a>
                         {% if g.user.is_admin %}
-                        <a href="/admin" class="px-3 py-2 rounded-md text-sm font-medium text-yellow-400 hover:bg-gray-800 {% if 'admin' in request.endpoint %}bg-gray-800{% endif %}">
+                        <a href="/admin" class="px-3 py-2 rounded-md text-sm font-medium text-yellow-400 hover:bg-gray-800 {% if request.endpoint and 'admin' in request.endpoint %}bg-gray-800{% endif %}">
                             Admin
                         </a>
                         {% endif %}
