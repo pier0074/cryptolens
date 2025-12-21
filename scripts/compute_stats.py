@@ -123,9 +123,17 @@ def compute_stats():
         if candle_24h:
             price_24h_map[sid] = candle_24h.close
 
-    # Skip verified_at query - it's expensive and rarely needed
-    # Can be computed separately on demand
+    # Query 7: Get last verified 1m candle timestamp per symbol
+    # Uses index on (symbol_id, timeframe, verified_at) for efficiency
     last_verified_map = {}
+    for sid in symbol_ids:
+        last_verified = Candle.query.filter(
+            Candle.symbol_id == sid,
+            Candle.timeframe == '1m',
+            Candle.verified_at.isnot(None)
+        ).order_by(Candle.timestamp.desc()).first()
+        if last_verified:
+            last_verified_map[sid] = last_verified.timestamp
 
     # Build per-symbol stats
     symbol_stats = []
