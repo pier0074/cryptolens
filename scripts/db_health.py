@@ -419,11 +419,12 @@ async def check_and_fix_data_start(symbol_id, symbol_name, fix=False, verbose=Tr
 
 async def check_and_fix_data_end(symbol_id, symbol_name, fix=False, verbose=True):
     """
-    Check if higher timeframe candles extend beyond 1m data.
-    This makes them unverifiable. Fix by fetching missing 1m candles.
+    Check if 1m data is up to date and if higher TF candles need more 1m data.
+    Fix by fetching missing 1m candles and aggregating.
 
-    For example, a 1d candle at timestamp T needs 1m candles from T to T+1439min.
-    If our last 1m candle is before T+1439min, we need to fetch more.
+    Checks two things:
+    1. If 1m data is outdated (more than 5 minutes behind current time)
+    2. If unverified higher TF candles need 1m data beyond what we have
     """
     now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
 
@@ -438,10 +439,19 @@ async def check_and_fix_data_end(symbol_id, symbol_name, fix=False, verbose=True
 
     last_1m_ts = last_1m.timestamp
 
-    # Find the latest higher TF candle that needs 1m data beyond what we have
+    # Check 1: Is 1m data outdated? (more than 5 minutes behind)
+    data_age_ms = now_ms - last_1m_ts
+    data_age_minutes = data_age_ms // 60000
+
     latest_needed_ts = None
     problem_tf = None
 
+    if data_age_minutes > 5:
+        # 1m data is outdated - need to fetch up to current time
+        latest_needed_ts = now_ms - 60000  # Up to 1 minute ago
+        problem_tf = '1m_outdated'
+
+    # Check 2: Do unverified higher TF candles need more 1m data?
     for tf in AGGREGATED_TFS:
         interval_ms = TF_MS[tf]
         # Get the latest unverified candle for this TF
@@ -484,10 +494,12 @@ async def check_and_fix_data_end(symbol_id, symbol_name, fix=False, verbose=True
     if verbose:
         last_1m_dt = datetime.fromtimestamp(last_1m_ts / 1000, tz=timezone.utc)
         needed_dt = datetime.fromtimestamp(latest_needed_ts / 1000, tz=timezone.utc)
-        print(f"  ⚠ Data end gap detected:")
-        print(f"    Last 1m candle: {last_1m_dt.strftime('%Y-%m-%d %H:%M')} UTC")
-        print(f"    Need until: {needed_dt.strftime('%Y-%m-%d %H:%M')} UTC ({problem_tf} pending)")
-        print(f"    Missing: {missing_minutes} 1m candles ({missing_minutes/60:.1f} hours)")
+        if problem_tf == '1m_outdated':
+            print(f"  ⚠ 1m data outdated ({missing_minutes} min / {missing_minutes/60:.1f} hours behind):")
+        else:
+            print(f"  ⚠ Data end gap detected ({problem_tf} pending):")
+        print(f"    Last 1m: {last_1m_dt.strftime('%Y-%m-%d %H:%M')} UTC")
+        print(f"    Need until: {needed_dt.strftime('%Y-%m-%d %H:%M')} UTC")
 
     if not fix:
         return result
@@ -1005,13 +1017,15 @@ def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False,
                 )
                 if end_result['issue_found']:
                     if end_result['action'] == 'fetched':
-                        symbol_output.append(
-                            f"  ⚠ Data end fix: fetched {end_result['fetched_count']} missing 1m candles"
-                        )
+                        msg = f"  ⚠ Data end fix: fetched {end_result['fetched_count']} 1m candles"
+                        if end_result.get('aggregated', 0) > 0:
+                            msg += f", aggregated {end_result['aggregated']} higher TF"
+                        symbol_output.append(msg)
                     elif end_result['action'] == 'none' and not fix:
                         missing = end_result['missing_minutes']
+                        hours = missing / 60
                         symbol_output.append(
-                            f"  ⚠ Data end issue: {missing} 1m candles missing at end (run --fix)"
+                            f"  ⚠ Data end issue: {missing} 1m candles missing ({hours:.1f}h behind)"
                         )
 
                 # STEP 1: Verify 1m candles first
