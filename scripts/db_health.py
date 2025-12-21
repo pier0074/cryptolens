@@ -409,6 +409,111 @@ async def check_and_fix_data_start(symbol_id, symbol_name, fix=False, verbose=Tr
     return result
 
 
+async def check_and_fix_data_end(symbol_id, symbol_name, fix=False, verbose=True):
+    """
+    Check if higher timeframe candles extend beyond 1m data.
+    This makes them unverifiable. Fix by fetching missing 1m candles.
+
+    For example, a 1d candle at timestamp T needs 1m candles from T to T+1439min.
+    If our last 1m candle is before T+1439min, we need to fetch more.
+    """
+    now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+
+    # Get last 1m candle timestamp
+    last_1m = Candle.query.filter(
+        Candle.symbol_id == symbol_id,
+        Candle.timeframe == '1m'
+    ).order_by(Candle.timestamp.desc()).first()
+
+    if not last_1m:
+        return {'issue_found': False, 'action': 'none', 'reason': 'no_1m_data'}
+
+    last_1m_ts = last_1m.timestamp
+
+    # Find the latest higher TF candle that needs 1m data beyond what we have
+    latest_needed_ts = None
+    problem_tf = None
+
+    for tf in AGGREGATED_TFS:
+        interval_ms = TF_MS[tf]
+        # Get the latest unverified candle for this TF
+        latest_candle = Candle.query.filter(
+            Candle.symbol_id == symbol_id,
+            Candle.timeframe == tf,
+            Candle.verified_at.is_(None)
+        ).order_by(Candle.timestamp.desc()).first()
+
+        if latest_candle:
+            # This candle needs 1m data up to: timestamp + interval - 60000
+            needs_until = latest_candle.timestamp + interval_ms - 60000
+            if needs_until > last_1m_ts and (latest_needed_ts is None or needs_until > latest_needed_ts):
+                latest_needed_ts = needs_until
+                problem_tf = tf
+
+    if latest_needed_ts is None or latest_needed_ts <= last_1m_ts:
+        return {'issue_found': False, 'action': 'none'}
+
+    # Don't try to fetch future data
+    if latest_needed_ts > now_ms:
+        latest_needed_ts = now_ms - 60000  # Up to 1 minute ago
+
+    # Check if there's actually a gap to fill
+    if latest_needed_ts <= last_1m_ts:
+        return {'issue_found': False, 'action': 'none', 'reason': 'up_to_date'}
+
+    missing_minutes = (latest_needed_ts - last_1m_ts) // 60000
+
+    result = {
+        'issue_found': True,
+        'last_1m_ts': last_1m_ts,
+        'needed_until_ts': latest_needed_ts,
+        'missing_minutes': missing_minutes,
+        'problem_tf': problem_tf,
+        'action': 'none',
+        'fetched_count': 0
+    }
+
+    if verbose:
+        last_1m_dt = datetime.fromtimestamp(last_1m_ts / 1000, tz=timezone.utc)
+        needed_dt = datetime.fromtimestamp(latest_needed_ts / 1000, tz=timezone.utc)
+        print(f"  ⚠ Data end gap detected:")
+        print(f"    Last 1m candle: {last_1m_dt.strftime('%Y-%m-%d %H:%M')} UTC")
+        print(f"    Need until: {needed_dt.strftime('%Y-%m-%d %H:%M')} UTC ({problem_tf} pending)")
+        print(f"    Missing: {missing_minutes} 1m candles ({missing_minutes/60:.1f} hours)")
+
+    if not fix:
+        return result
+
+    if verbose:
+        print(f"    Fetching missing 1m candles from exchange...")
+
+    try:
+        ohlcv = await fetch_missing_candles(
+            symbol_name,
+            last_1m_ts + 60000,  # Start after last existing
+            latest_needed_ts,
+            verbose=verbose
+        )
+
+        if ohlcv:
+            fetched_count = save_fetched_candles(symbol_id, ohlcv, verbose=verbose)
+            result['action'] = 'fetched'
+            result['fetched_count'] = fetched_count
+            if verbose:
+                print(f"    ✓ Fetched {fetched_count} missing 1m candles")
+        else:
+            result['action'] = 'no_data_available'
+            if verbose:
+                print(f"    ✗ No data available from exchange (may be too recent)")
+    except Exception as e:
+        result['action'] = 'error'
+        result['error'] = str(e)
+        if verbose:
+            print(f"    ✗ Error fetching: {e}")
+
+    return result
+
+
 def record_known_gap(symbol_id, timeframe, gap_start, gap_end, missing_candles,
                      reason='no_exchange_data', verified_empty=True):
     """Record a gap as known/accepted."""
@@ -858,7 +963,7 @@ def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False,
             for symbol in symbols:
                 symbol_output = []
 
-                # STEP 0: Check and fix data start alignment
+                # STEP 0a: Check and fix data start alignment
                 # (Higher TF candles starting before 1m data)
                 start_result = asyncio.run(
                     check_and_fix_data_start(symbol.id, symbol.symbol, fix=fix, verbose=False)
@@ -872,6 +977,22 @@ def run_health_check(symbol_filter=None, fix=False, verbose=True, reset=False,
                         missing = start_result['missing_minutes']
                         symbol_output.append(
                             f"  ⚠ Data start issue: {missing} 1m candles missing at start (run --fix)"
+                        )
+
+                # STEP 0b: Check and fix data end alignment
+                # (Higher TF candles needing 1m data beyond what we have)
+                end_result = asyncio.run(
+                    check_and_fix_data_end(symbol.id, symbol.symbol, fix=fix, verbose=False)
+                )
+                if end_result['issue_found']:
+                    if end_result['action'] == 'fetched':
+                        symbol_output.append(
+                            f"  ⚠ Data end fix: fetched {end_result['fetched_count']} missing 1m candles"
+                        )
+                    elif end_result['action'] == 'none' and not fix:
+                        missing = end_result['missing_minutes']
+                        symbol_output.append(
+                            f"  ⚠ Data end issue: {missing} 1m candles missing at end (run --fix)"
                         )
 
                 # STEP 1: Verify 1m candles first
